@@ -2,6 +2,7 @@ package com.example.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.db.AppDatabase
@@ -613,6 +614,98 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 _snackbarMessage.emit("Error processing sale: ${e.message}")
             }
         }
+    }
+
+    fun performQuickCustomSale(description: String, amount: Double, paymentMethod: String, isDirectCheckout: Boolean = true) {
+        if (amount <= 0) return
+        val itemName = description.trim().ifBlank { "Custom Quick Item" }
+        val customProduct = Product(
+            id = "custom_${System.currentTimeMillis()}",
+            name = itemName,
+            category = "Quick Sale",
+            costPrice = amount * 0.7, // estimated margin for uncataloged item
+            sellingPrice = amount,
+            quantityInStock = 999.0,
+            unit = "item"
+        )
+
+        if (!isDirectCheckout) {
+            addToCart(customProduct, 1.0)
+            viewModelScope.launch {
+                _snackbarMessage.emit("Added '$itemName' (${amount.toInt()} RWF) to POS Cart.")
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val sale = repository.processSale(
+                    items = listOf(CartItem(product = customProduct, quantity = 1.0, customPrice = amount)),
+                    customerId = null,
+                    customerName = "Quick Cash Customer",
+                    discountAmount = 0.0,
+                    paymentMethod = paymentMethod,
+                    amountPaid = amount,
+                    notes = "Quick POS Sale: $itemName"
+                )
+                val saleWithItems = repository.getSaleWithItems(sale.id)
+                _activeReceiptSale.value = saleWithItems
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
+                    "Igurisha ry'ako kanya (${amount.toInt()} FRw) ryakozwe neza!" 
+                    else "Quick sale (${amount.toInt()} RWF) completed! Receipt ready."
+                _snackbarMessage.emit(msg)
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Quick sale error: ${e.message}")
+            }
+        }
+    }
+
+    fun openLastReceipt() {
+        val last = allSales.value.firstOrNull()
+        if (last != null) {
+            openReceipt(last.id)
+        } else {
+            viewModelScope.launch {
+                _snackbarMessage.emit("No recent sales to display yet.")
+            }
+        }
+    }
+
+    fun shareDailyWhatsAppSummary(context: Context) {
+        val shop = shopProfile.value
+        val summary = todaySummary.value
+        val lowStock = lowStockProducts.value
+        val timeStr = java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+
+        val text = buildString {
+            append("📊 *${shop.shopName.ifBlank { "BeBoss Store" }} - Daily Business Report*\n")
+            append("📅 $timeStr\n")
+            append("━━━━━━━━━━━━━━━━━━━━\n")
+            append("💰 *Today's Revenue:* ${summary.totalRevenue.toInt()} ${shop.currencySymbol}\n")
+            append("📈 *Net Estimated Profit:* ${summary.netProfit.toInt()} ${shop.currencySymbol}\n")
+            append("🧾 *Transactions Completed:* ${summary.totalSalesCount}\n")
+            append("📦 *Items Sold:* ${summary.totalItemsSold.toInt()}\n")
+            append("🎯 *Average Basket Value:* ${summary.averageOrderValue.toInt()} ${shop.currencySymbol}\n")
+            append("━━━━━━━━━━━━━━━━━━━━\n")
+            if (lowStock.isNotEmpty()) {
+                append("⚠️ *Low Stock Alert (${lowStock.size} items):*\n")
+                lowStock.take(5).forEach { p ->
+                    append("• ${p.name}: ${p.quantityInStock.toInt()} ${p.unit} left\n")
+                }
+            } else {
+                append("✅ All product stocks are healthy!\n")
+            }
+            append("━━━━━━━━━━━━━━━━━━━━\n")
+            append("🚀 _Generated with BeBoss Offline Business POS_")
+        }
+
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        val chooser = Intent.createChooser(sendIntent, "Share Daily Report")
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
     }
 
     // ------------------------------------------------------------------------

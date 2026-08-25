@@ -4,6 +4,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -15,12 +20,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.BeBossBottomNav
 import com.example.ui.components.BeBossTopBar
+import com.example.ui.components.QuickCustomSaleDialog
+import com.example.ui.components.QuickSpeedDialSheet
 import com.example.ui.components.ReceiptDialog
+import com.example.ui.components.UniversalSearchDialog
 import com.example.ui.screens.AnalyticsScreen
 import com.example.ui.screens.AuthLockScreen
 import com.example.ui.screens.CustomersScreen
@@ -52,6 +63,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
+    val context = LocalContext.current
     val currentScreen by viewModel.currentScreen.collectAsState()
     val shopProfile by viewModel.shopProfile.collectAsState()
     val allProducts by viewModel.allProducts.collectAsState()
@@ -83,6 +95,11 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
+    var showQuickSpeedDialSheet by remember { mutableStateOf(false) }
+    var showQuickCustomSaleDialog by remember { mutableStateOf(false) }
+    var showUniversalSearchDialog by remember { mutableStateOf(false) }
+
+    val debtorsCount = remember(customers) { customers.count { it.debtBalance > 0 } }
 
     LaunchedEffect(Unit) {
         viewModel.snackbarMessage.collectLatest { msg ->
@@ -145,6 +162,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                     isDarkTheme = isDarkTheme,
                     onToggleLanguage = { viewModel.toggleLanguage() },
                     onToggleTheme = { viewModel.toggleDarkMode() },
+                    onSearchClick = { showUniversalSearchDialog = true },
+                    onQuickActionsClick = { showQuickSpeedDialSheet = true },
                     onSyncClick = { viewModel.performSync() },
                     onHistoryClick = { viewModel.navigateTo(AppScreen.SALES_HISTORY) },
                     onLockClick = { viewModel.lockApp() }
@@ -155,8 +174,10 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                     currentScreen = currentScreen,
                     cartItemCount = cartState.items.size,
                     lowStockCount = lowStockProducts.size,
+                    debtorCount = debtorsCount,
                     language = currentLanguage,
-                    onNavigate = { screen -> viewModel.navigateTo(screen) }
+                    onNavigate = { screen -> viewModel.navigateTo(screen) },
+                    onOpenQuickActions = { showQuickSpeedDialSheet = true }
                 )
             }
         ) { innerPadding ->
@@ -165,123 +186,178 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                when (currentScreen) {
-                    AppScreen.DASHBOARD -> {
-                        DashboardScreen(
-                            shopProfile = shopProfile,
-                            todaySummary = todaySummary,
-                            inventoryValuation = inventoryValuation,
-                            lowStockProducts = lowStockProducts,
-                            recentSales = allSales,
-                            currentUser = currentUser,
-                            language = currentLanguage,
-                            onNavigate = { screen -> viewModel.navigateTo(screen) },
-                            onOpenReceipt = { saleId -> viewModel.openReceipt(saleId) },
-                            onRestockClick = { product ->
-                                viewModel.navigateTo(AppScreen.INVENTORY)
-                            },
-                            onAddProductClick = {
-                                viewModel.navigateTo(AppScreen.INVENTORY)
-                            }
-                        )
-                    }
+                AnimatedContent(
+                    targetState = currentScreen,
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(140)) togetherWith fadeOut(animationSpec = tween(90))
+                    },
+                    label = "ScreenTransition"
+                ) { targetScreen ->
+                    when (targetScreen) {
+                        AppScreen.DASHBOARD -> {
+                            DashboardScreen(
+                                shopProfile = shopProfile,
+                                todaySummary = todaySummary,
+                                inventoryValuation = inventoryValuation,
+                                lowStockProducts = lowStockProducts,
+                                recentSales = allSales,
+                                currentUser = currentUser,
+                                language = currentLanguage,
+                                onNavigate = { screen -> viewModel.navigateTo(screen) },
+                                onOpenReceipt = { saleId -> viewModel.openReceipt(saleId) },
+                                onRestockClick = { product ->
+                                    viewModel.navigateTo(AppScreen.INVENTORY)
+                                },
+                                onAddProductClick = {
+                                    viewModel.navigateTo(AppScreen.INVENTORY)
+                                }
+                            )
+                        }
 
-                    AppScreen.SALES_POS -> {
-                        SalesPosScreen(
-                            products = allProducts,
-                            categories = categories,
-                            customers = customers,
-                            cartState = cartState,
-                            shopProfile = shopProfile,
-                            onAddToCart = { p -> viewModel.addToCart(p) },
-                            onUpdateQuantity = { pId, qty -> viewModel.updateCartItemQuantity(pId, qty) },
-                            onRemoveItem = { pId -> viewModel.removeCartItem(pId) },
-                            onClearCart = { viewModel.clearCart() },
-                            onSelectCustomer = { c -> viewModel.setCartCustomer(c) },
-                            onSetPaymentMethod = { m -> viewModel.setCartPaymentMethod(m) },
-                            onSetDiscount = { d -> viewModel.setCartDiscount(d) },
-                            onSetAmountPaid = { a -> viewModel.setCartAmountPaidInput(a) },
-                            onSetNotes = { n -> viewModel.setCartNotes(n) },
-                            onCheckout = { viewModel.checkoutSale() },
-                            onQuickAddProduct = { viewModel.navigateTo(AppScreen.INVENTORY) }
-                        )
-                    }
+                        AppScreen.SALES_POS -> {
+                            SalesPosScreen(
+                                products = allProducts,
+                                categories = categories,
+                                customers = customers,
+                                cartState = cartState,
+                                shopProfile = shopProfile,
+                                onAddToCart = { p -> viewModel.addToCart(p) },
+                                onUpdateQuantity = { pId, qty -> viewModel.updateCartItemQuantity(pId, qty) },
+                                onRemoveItem = { pId -> viewModel.removeCartItem(pId) },
+                                onClearCart = { viewModel.clearCart() },
+                                onSelectCustomer = { c -> viewModel.setCartCustomer(c) },
+                                onSetPaymentMethod = { m -> viewModel.setCartPaymentMethod(m) },
+                                onSetDiscount = { d -> viewModel.setCartDiscount(d) },
+                                onSetAmountPaid = { a -> viewModel.setCartAmountPaidInput(a) },
+                                onSetNotes = { n -> viewModel.setCartNotes(n) },
+                                onCheckout = { viewModel.checkoutSale() },
+                                onQuickAddProduct = { viewModel.navigateTo(AppScreen.INVENTORY) }
+                            )
+                        }
 
-                    AppScreen.INVENTORY -> {
-                        InventoryScreen(
-                            products = allProducts,
-                            categories = categories,
-                            inventoryValuation = inventoryValuation,
-                            shopProfile = shopProfile,
-                            onSaveProduct = { p -> viewModel.saveProduct(p) },
-                            onAdjustStock = { pId, delta, reason -> viewModel.adjustStock(pId, delta, reason) },
-                            onDeleteProduct = { pId -> viewModel.deleteProduct(pId) }
-                        )
-                    }
+                        AppScreen.INVENTORY -> {
+                            InventoryScreen(
+                                products = allProducts,
+                                categories = categories,
+                                inventoryValuation = inventoryValuation,
+                                shopProfile = shopProfile,
+                                onSaveProduct = { p -> viewModel.saveProduct(p) },
+                                onAdjustStock = { pId, delta, reason -> viewModel.adjustStock(pId, delta, reason) },
+                                onDeleteProduct = { pId -> viewModel.deleteProduct(pId) }
+                            )
+                        }
 
-                    AppScreen.ANALYTICS -> {
-                        AnalyticsScreen(
-                            selectedPeriod = selectedPeriod,
-                            summary = profitLossSummary,
-                            chartPoints = dailyChartPoints,
-                            topProducts = topProducts,
-                            categoryShares = categoryBreakdown,
-                            shopProfile = shopProfile,
-                            onPeriodSelected = { p -> viewModel.setAnalyticsPeriod(p) }
-                        )
-                    }
+                        AppScreen.ANALYTICS -> {
+                            AnalyticsScreen(
+                                selectedPeriod = selectedPeriod,
+                                summary = profitLossSummary,
+                                chartPoints = dailyChartPoints,
+                                topProducts = topProducts,
+                                categoryShares = categoryBreakdown,
+                                shopProfile = shopProfile,
+                                onPeriodSelected = { p -> viewModel.setAnalyticsPeriod(p) }
+                            )
+                        }
 
-                    AppScreen.CUSTOMERS -> {
-                        CustomersScreen(
-                            customers = customers,
-                            totalOutstandingDebt = totalOutstandingDebt,
-                            shopProfile = shopProfile,
-                            allSales = allSales,
-                            allPayments = allCustomerPayments,
-                            onSaveCustomer = { c -> viewModel.saveCustomer(c) },
-                            onRecordPayment = { cId, amt -> viewModel.recordDebtPayment(cId, amt) },
-                            onDeleteCustomer = { cId -> viewModel.deleteCustomer(cId) }
-                        )
-                    }
+                        AppScreen.CUSTOMERS -> {
+                            CustomersScreen(
+                                customers = customers,
+                                totalOutstandingDebt = totalOutstandingDebt,
+                                shopProfile = shopProfile,
+                                allSales = allSales,
+                                allPayments = allCustomerPayments,
+                                onSaveCustomer = { c -> viewModel.saveCustomer(c) },
+                                onRecordPayment = { cId, amt -> viewModel.recordDebtPayment(cId, amt) },
+                                onDeleteCustomer = { cId -> viewModel.deleteCustomer(cId) }
+                            )
+                        }
 
-                    AppScreen.SALES_HISTORY -> {
-                        SalesHistoryScreen(
-                            sales = allSales,
-                            shopProfile = shopProfile,
-                            onOpenReceipt = { saleId -> viewModel.openReceipt(saleId) }
-                        )
-                    }
+                        AppScreen.SALES_HISTORY -> {
+                            SalesHistoryScreen(
+                                sales = allSales,
+                                shopProfile = shopProfile,
+                                onOpenReceipt = { saleId -> viewModel.openReceipt(saleId) }
+                            )
+                        }
 
-                    AppScreen.SETTINGS -> {
-                        SettingsScreen(
-                            shopProfile = shopProfile,
-                            currentUser = currentUser,
-                            allUsers = allUsers,
-                            products = allProducts,
-                            customers = customers,
-                            sales = allSales,
-                            customerPayments = allCustomerPayments,
-                            pendingSyncCount = pendingSyncCount,
-                            isSyncing = isSyncing,
-                            language = currentLanguage,
-                            isDarkTheme = isDarkTheme,
-                            onToggleLanguage = { viewModel.toggleLanguage() },
-                            onToggleTheme = { viewModel.toggleDarkMode() },
-                            onSaveProfile = { prof -> viewModel.updateShopProfile(prof) },
-                            onSyncNow = { viewModel.performSync() },
-                            onSaveUser = { u -> viewModel.saveUser(u) },
-                            onDeleteUser = { uId -> viewModel.deleteUser(uId) },
-                            onImportPackage = { summary -> viewModel.importShopPackage(summary) },
-                            onLockApp = { viewModel.lockApp() },
-                            onLogout = { viewModel.logoutUser() },
-                            onSwitchUser = { u -> viewModel.switchUser(u) },
-                            onActivateVoucher = { code -> viewModel.activateSubscriptionVoucher(code) },
-                            onGrantEmergencyGrace = { viewModel.grantEmergencyGracePeriod() }
-                        )
+                        AppScreen.SETTINGS -> {
+                            SettingsScreen(
+                                shopProfile = shopProfile,
+                                currentUser = currentUser,
+                                allUsers = allUsers,
+                                products = allProducts,
+                                customers = customers,
+                                sales = allSales,
+                                customerPayments = allCustomerPayments,
+                                pendingSyncCount = pendingSyncCount,
+                                isSyncing = isSyncing,
+                                language = currentLanguage,
+                                isDarkTheme = isDarkTheme,
+                                onToggleLanguage = { viewModel.toggleLanguage() },
+                                onToggleTheme = { viewModel.toggleDarkMode() },
+                                onSaveProfile = { prof -> viewModel.updateShopProfile(prof) },
+                                onSyncNow = { viewModel.performSync() },
+                                onSaveUser = { u -> viewModel.saveUser(u) },
+                                onDeleteUser = { uId -> viewModel.deleteUser(uId) },
+                                onImportPackage = { summary -> viewModel.importShopPackage(summary) },
+                                onLockApp = { viewModel.lockApp() },
+                                onLogout = { viewModel.logoutUser() },
+                                onSwitchUser = { u -> viewModel.switchUser(u) },
+                                onActivateVoucher = { code -> viewModel.activateSubscriptionVoucher(code) },
+                                onGrantEmergencyGrace = { viewModel.grantEmergencyGracePeriod() }
+                            )
+                        }
                     }
                 }
             }
         }
+    }
+
+    // Quick Speed Dial Sheet (⚡ Fast Actions)
+    if (showQuickSpeedDialSheet) {
+        QuickSpeedDialSheet(
+            language = currentLanguage,
+            onDismiss = { showQuickSpeedDialSheet = false },
+            onQuickCustomSale = { showQuickCustomSaleDialog = true },
+            onQuickAddProduct = { viewModel.navigateTo(AppScreen.INVENTORY) },
+            onQuickNewCustomer = { viewModel.navigateTo(AppScreen.CUSTOMERS) },
+            onUniversalSearch = { showUniversalSearchDialog = true },
+            onShareDailySummary = { viewModel.shareDailyWhatsAppSummary(context) },
+            onViewLastReceipt = { viewModel.openLastReceipt() }
+        )
+    }
+
+    // Quick Custom Sale / Cashier Instant Checkout Modal
+    if (showQuickCustomSaleDialog) {
+        QuickCustomSaleDialog(
+            currency = shopProfile.currencySymbol,
+            language = currentLanguage,
+            onDismiss = { showQuickCustomSaleDialog = false },
+            onCompleteQuickSale = { desc, amt, method, isDirect ->
+                viewModel.performQuickCustomSale(desc, amt, method, isDirect)
+            }
+        )
+    }
+
+    // Instant Universal Search Modal
+    if (showUniversalSearchDialog) {
+        UniversalSearchDialog(
+            products = allProducts,
+            customers = customers,
+            sales = allSales,
+            shopProfile = shopProfile,
+            language = currentLanguage,
+            onDismiss = { showUniversalSearchDialog = false },
+            onAddToCart = { p ->
+                viewModel.addToCart(p)
+                viewModel.navigateTo(AppScreen.SALES_POS)
+            },
+            onOpenReceipt = { id -> viewModel.openReceipt(id) },
+            onSelectCustomer = { c ->
+                viewModel.setCartCustomer(c)
+                viewModel.navigateTo(AppScreen.SALES_POS)
+            }
+        )
     }
 
     // Active Subscription Paywall Lock (If 5,000 RWF monthly fee is expired)
