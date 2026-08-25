@@ -88,11 +88,13 @@ import com.example.data.model.UserRole
 import com.example.ui.theme.DarkNavy
 import com.example.ui.theme.InkDark
 import com.example.ui.theme.InkMedium
+import com.example.ui.theme.LossRed
 import com.example.ui.theme.OrangeLight
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
 import com.example.util.AppLanguage
 import com.example.util.Localization
+import com.example.util.OfflineSubscriptionManager
 import com.example.util.ReceiptGenerator
 import com.example.util.ShopDataTransferManager
 import com.example.util.ShopImportSummary
@@ -120,7 +122,10 @@ fun SettingsScreen(
     onDeleteUser: (String) -> Unit = {},
     onImportPackage: (ShopImportSummary) -> Unit = {},
     onLockApp: () -> Unit = {},
-    onSwitchUser: (User) -> Unit = {}
+    onLogout: () -> Unit = {},
+    onSwitchUser: (User) -> Unit = {},
+    onActivateVoucher: (String) -> Unit = {},
+    onGrantEmergencyGrace: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var shopName by remember(shopProfile.shopName) { mutableStateOf(shopProfile.shopName) }
@@ -134,6 +139,8 @@ fun SettingsScreen(
     var currencyExpanded by remember { mutableStateOf(false) }
     var showStaffDialog by remember { mutableStateOf(false) }
     var showDataTransferDialog by remember { mutableStateOf(false) }
+    var showSubscriptionDialog by remember { mutableStateOf(false) }
+    var showLogoutConfirm by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -348,11 +355,145 @@ fun SettingsScreen(
                             Text(Localization.get("data_backup", language), fontSize = 12.sp)
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                OfflineSubscriptionManager.shareAppApkOffline(context)
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp), tint = OrangePrimary)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Share APK (Offline)", fontSize = 12.sp, color = OrangePrimary, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = { showLogoutConfirm = true },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = LossRed)
+                        ) {
+                            Text(Localization.get("logout", language), fontSize = 12.sp, color = LossRed, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }
 
-        // 3. Shop Profile Form
+        // 3. Monthly Shop Subscription Card (5,000 RWF / month)
+        item {
+            val isActive = shopProfile.isSubscriptionActive
+            val daysRemaining = shopProfile.daysRemaining
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isActive) ProfitGreen.copy(alpha = 0.15f) else LossRed.copy(alpha = 0.15f),
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Security,
+                                        contentDescription = null,
+                                        tint = if (isActive) ProfitGreen else LossRed,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = Localization.get("subscription_title", language),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = Localization.get("monthly_fee_desc", language),
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isActive) ProfitGreen.copy(alpha = 0.15f) else LossRed.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = if (isActive) "$daysRemaining ${Localization.get("days_left", language)}" else "Expired",
+                                color = if (isActive) ProfitGreen else LossRed,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                OfflineSubscriptionManager.dialMtnMoMo(context, 5000)
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFCC00))
+                        ) {
+                            Text("MTN MoMo (5k)", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+
+                        Button(
+                            onClick = {
+                                OfflineSubscriptionManager.dialAirtelMoney(context, 5000)
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                        ) {
+                            Text("Airtel Money (5k)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedButton(
+                        onClick = { showSubscriptionDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(16.dp), tint = OrangePrimary)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(Localization.get("renew_subscription", language), color = OrangePrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                }
+            }
+        }
+
+        // 4. Shop Profile Form
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -505,16 +646,74 @@ fun SettingsScreen(
         }
     }
 
-    // Staff Dialog
+    // Staff Management Dialog
     if (showStaffDialog) {
         StaffManagementDialog(
             allUsers = allUsers,
             currentUser = currentUser,
-            language = language,
-            onDismiss = { showStaffDialog = false },
+            shopProfile = shopProfile,
             onSaveUser = onSaveUser,
             onDeleteUser = onDeleteUser,
-            onSwitchUser = onSwitchUser
+            onDismiss = { showStaffDialog = false }
+        )
+    }
+
+    // Subscription & Offline Paywall Dialog
+    if (showSubscriptionDialog) {
+        AlertDialog(
+            onDismissRequest = { showSubscriptionDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Security, contentDescription = null, tint = OrangePrimary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = Localization.get("subscription_title", language),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp
+                    )
+                }
+            },
+            text = {
+                SubscriptionScreen(
+                    shopProfile = shopProfile,
+                    language = language,
+                    onActivateVoucher = { code ->
+                        onActivateVoucher(code)
+                    },
+                    onGrantEmergencyGrace = onGrantEmergencyGrace,
+                    onClose = { showSubscriptionDialog = false }
+                )
+            },
+            confirmButton = {
+                OutlinedButton(onClick = { showSubscriptionDialog = false }) {
+                    Text(Localization.get("close", language))
+                }
+            }
+        )
+    }
+
+    // Logout Confirmation Dialog
+    if (showLogoutConfirm) {
+        AlertDialog(
+            onDismissRequest = { showLogoutConfirm = false },
+            title = { Text(Localization.get("logout", language), fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to log out of your BeBoss session on this device?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showLogoutConfirm = false
+                        onLogout()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = LossRed)
+                ) {
+                    Text(Localization.get("logout", language), color = Color.White)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showLogoutConfirm = false }) {
+                    Text(Localization.get("cancel", language))
+                }
+            }
         )
     }
 
@@ -532,201 +731,6 @@ fun SettingsScreen(
             onImportPackage = onImportPackage
         )
     }
-}
-
-@Composable
-private fun StaffManagementDialog(
-    allUsers: List<User>,
-    currentUser: User?,
-    language: AppLanguage,
-    onDismiss: () -> Unit,
-    onSaveUser: (User) -> Unit,
-    onDeleteUser: (String) -> Unit,
-    onSwitchUser: (User) -> Unit
-) {
-    var showAddUserForm by remember { mutableStateOf(false) }
-    var newName by remember { mutableStateOf("") }
-    var newUsername by remember { mutableStateOf("") }
-    var newPhone by remember { mutableStateOf("") }
-    var newPin by remember { mutableStateOf("") }
-    var newPassword by remember { mutableStateOf("") }
-    var newRole by remember { mutableStateOf(UserRole.CASHIER) }
-    var userError by remember { mutableStateOf<String?>(null) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.People, contentDescription = null, tint = OrangePrimary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(Localization.get("staff_management", language), fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                if (!showAddUserForm) {
-                    allUsers.forEach { user ->
-                        val isSelf = currentUser?.id == user.id
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .background(
-                                                when (user.role) {
-                                                    UserRole.OWNER -> OrangePrimary
-                                                    UserRole.MANAGER -> Color(0xFF2563EB)
-                                                    UserRole.CASHIER -> ProfitGreen
-                                                },
-                                                CircleShape
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(user.name.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Column {
-                                        Text(user.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                        Text("${user.role.displayName} • PIN: ${user.pinHash}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-
-                                if (!isSelf && user.role != UserRole.OWNER) {
-                                    IconButton(onClick = { onDeleteUser(user.id) }, modifier = Modifier.size(32.dp)) {
-                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFDC2626), modifier = Modifier.size(18.dp))
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Button(
-                        onClick = { showAddUserForm = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(Localization.get("add_staff", language))
-                    }
-                } else {
-                    Text(Localization.get("add_staff", language), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = OrangePrimary)
-
-                    if (userError != null) {
-                        Text(userError!!, color = Color(0xFFDC2626), fontSize = 12.sp)
-                    }
-
-                    OutlinedTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        label = { Text("Full Name *") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = newUsername,
-                        onValueChange = { newUsername = it },
-                        label = { Text("Username *") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = newPin,
-                            onValueChange = { if (it.length <= 4 && it.all { c -> c.isDigit() }) newPin = it },
-                            label = { Text("4-Digit PIN *") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = newPassword,
-                            onValueChange = { newPassword = it },
-                            label = { Text("Password *") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(UserRole.CASHIER, UserRole.MANAGER).forEach { role ->
-                            OutlinedButton(
-                                onClick = { newRole = role },
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = if (newRole == role) OrangePrimary.copy(alpha = 0.15f) else Color.Transparent
-                                ),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(role.displayName, fontSize = 11.sp, fontWeight = if (newRole == role) FontWeight.Bold else FontWeight.Normal)
-                            }
-                        }
-                    }
-
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = { showAddUserForm = false },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(Localization.get("cancel", language))
-                        }
-                        Button(
-                            onClick = {
-                                if (newName.isBlank() || newUsername.isBlank() || newPin.length != 4 || newPassword.isBlank()) {
-                                    userError = "Please fill all fields properly (PIN must be 4 digits)"
-                                } else {
-                                    val newUser = User(
-                                        id = UUID.randomUUID().toString(),
-                                        name = newName.trim(),
-                                        username = newUsername.trim().lowercase(),
-                                        phone = newPhone.trim(),
-                                        pinHash = newPin.trim(),
-                                        password = newPassword.trim(),
-                                        role = newRole,
-                                        profileColorHex = if (newRole == UserRole.MANAGER) "#2563EB" else "#10B981"
-                                    )
-                                    onSaveUser(newUser)
-                                    showAddUserForm = false
-                                    newName = ""
-                                    newUsername = ""
-                                    newPin = ""
-                                    newPassword = ""
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(Localization.get("save", language))
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            if (!showAddUserForm) {
-                OutlinedButton(onClick = onDismiss) {
-                    Text(Localization.get("close", language))
-                }
-            }
-        }
-    )
 }
 
 @Composable

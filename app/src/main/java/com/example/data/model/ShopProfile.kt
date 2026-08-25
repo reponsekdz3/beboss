@@ -18,9 +18,28 @@ data class ShopProfile(
     val isOnlineSyncEnabled: Boolean = true,
     val backendServerUrl: String = "https://api.beboss.app/v1",
     val lastSyncedAt: Long = 0L,
+    val subscriptionStatus: String = "ACTIVE", // ACTIVE, TRIAL, EXPIRED
+    val monthlyFeeRwf: Int = 5000,
+    val subscriptionExpiresAt: Long = System.currentTimeMillis() + (30L * 24 * 60 * 60 * 1000), // Default 30 days
+    val trialStartedAt: Long = System.currentTimeMillis(),
+    val lastPaymentRef: String = "INIT-TRIAL-30D",
+    val lastPaymentAmount: Int = 5000,
+    val lastPaymentDate: Long = System.currentTimeMillis(),
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 ) {
     val ownerName: String
         get() = name
+
+    val isSubscriptionActive: Boolean
+        get() = System.currentTimeMillis() <= subscriptionExpiresAt || subscriptionStatus == "ACTIVE"
+
+    val daysRemaining: Int
+        get() {
+            val diff = subscriptionExpiresAt - System.currentTimeMillis()
+            return if (diff > 0) ((diff / (24 * 60 * 60 * 1000)).toInt() + 1) else 0
+        }
+
+    val isGracePeriod: Boolean
+        get() = !isSubscriptionActive && (System.currentTimeMillis() - subscriptionExpiresAt < (3L * 24 * 60 * 60 * 1000))
 }

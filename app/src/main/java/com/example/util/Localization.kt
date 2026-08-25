@@ -144,7 +144,25 @@ object Localization {
         "save_changes" to mapOf(AppLanguage.ENGLISH to "Save Changes", AppLanguage.KINYARWANDA to "Bika Impinduka"),
         "cancel" to mapOf(AppLanguage.ENGLISH to "Cancel", AppLanguage.KINYARWANDA to "Reka"),
         "delete" to mapOf(AppLanguage.ENGLISH to "Delete", AppLanguage.KINYARWANDA to "Gusiba"),
-        "edit" to mapOf(AppLanguage.ENGLISH to "Edit", AppLanguage.KINYARWANDA to "Guhindura")
+        "edit" to mapOf(AppLanguage.ENGLISH to "Edit", AppLanguage.KINYARWANDA to "Guhindura"),
+        "logout" to mapOf(AppLanguage.ENGLISH to "Log Out Account", AppLanguage.KINYARWANDA to "Gusohoka"),
+
+        // Subscription & Offline Billing (5,000 RWF / month)
+        "subscription_title" to mapOf(AppLanguage.ENGLISH to "Monthly Shop Subscription", AppLanguage.KINYARWANDA to "Ifatabuguzi ry'Ukwezi"),
+        "monthly_fee_desc" to mapOf(AppLanguage.ENGLISH to "5,000 RWF / month • Full Offline POS & Stock", AppLanguage.KINYARWANDA to "5,000 FRw ku kwezi • Gucuruza offline bitasaba internet"),
+        "active_subscription" to mapOf(AppLanguage.ENGLISH to "Subscription Active", AppLanguage.KINYARWANDA to "Ifatabuguzi rirakora"),
+        "trial_active" to mapOf(AppLanguage.ENGLISH to "Free Trial Period", AppLanguage.KINYARWANDA to "Igihe cy'Igerageza"),
+        "subscription_expired" to mapOf(AppLanguage.ENGLISH to "Subscription Expired", AppLanguage.KINYARWANDA to "Ifatabuguzi Ryararangiye"),
+        "days_left" to mapOf(AppLanguage.ENGLISH to "days remaining", AppLanguage.KINYARWANDA to "iminsi isigaye"),
+        "renew_subscription" to mapOf(AppLanguage.ENGLISH to "Pay / Renew (5,000 RWF)", AppLanguage.KINYARWANDA to "Kwishyura Ukwezi (5,000 FRw)"),
+        "pay_with_momo" to mapOf(AppLanguage.ENGLISH to "Pay with MTN MoMo", AppLanguage.KINYARWANDA to "Ishyura na MTN MoMo"),
+        "pay_with_airtel" to mapOf(AppLanguage.ENGLISH to "Pay with Airtel Money", AppLanguage.KINYARWANDA to "Ishyura na Airtel Money"),
+        "enter_voucher_code" to mapOf(AppLanguage.ENGLISH to "Enter Voucher / Token Key", AppLanguage.KINYARWANDA to "Injiza Kode y'Ifatabuguzi"),
+        "activate_code" to mapOf(AppLanguage.ENGLISH to "Activate Code", AppLanguage.KINYARWANDA to "Kemeza Kode"),
+        "contact_support" to mapOf(AppLanguage.ENGLISH to "WhatsApp / SMS Support", AppLanguage.KINYARWANDA to "Vugana natwe kuri WhatsApp"),
+        "share_app_apk" to mapOf(AppLanguage.ENGLISH to "Share App to Staff (APK / Offline)", AppLanguage.KINYARWANDA to "Ohereza Porogaramu ku Mukozi (Offline)"),
+        "device_code" to mapOf(AppLanguage.ENGLISH to "Shop Device Code", AppLanguage.KINYARWANDA to "Kode y'Ububiko"),
+        "grant_grace_period" to mapOf(AppLanguage.ENGLISH to "Emergency 3-Day Grace", AppLanguage.KINYARWANDA to "Kongera Iminsi 3 y'Ingoboka")
     )
 
     fun get(key: String, language: AppLanguage): String {

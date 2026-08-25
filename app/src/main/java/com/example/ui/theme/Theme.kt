@@ -47,7 +47,7 @@ private val LightColorScheme =
 
 @Composable
 fun MyApplicationTheme(
-  darkTheme: Boolean = isSystemInDarkTheme(),
+  darkTheme: Boolean = false,
   // For BeBoss high-contrast brand, we prefer the vibrant orange identity by default
   dynamicColor: Boolean = false,
   content: @Composable () -> Unit,

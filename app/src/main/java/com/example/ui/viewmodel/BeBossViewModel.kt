@@ -235,20 +235,34 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun checkAuthenticationAndInit() {
         viewModelScope.launch {
-            val users = repository.allActiveUsers.stateIn(viewModelScope).value
-            if (users.isEmpty()) {
-                // If no user exists yet, check database
-                val count = db.userDao().getUserCount()
-                if (count == 0) {
-                    _isRegistrationNeeded.value = true
-                    _isLocked.value = true
+            val savedUserId = prefs.getString("active_user_id", null)
+            if (!savedUserId.isNullOrBlank()) {
+                val savedUser = db.userDao().getUserById(savedUserId)
+                if (savedUser != null && savedUser.isActive) {
+                    _currentUser.value = savedUser
+                    _isLocked.value = false
+                    _isRegistrationNeeded.value = false
+                    return@launch
+                }
+            }
+
+            // If no saved user, check total users
+            val count = db.userDao().getUserCount()
+            if (count == 0) {
+                _isRegistrationNeeded.value = true
+                _isLocked.value = true
+            } else {
+                val firstUser = db.userDao().getAllActiveUsers().stateIn(viewModelScope).value.firstOrNull()
+                if (firstUser != null) {
+                    _currentUser.value = firstUser
+                    // Auto keep logged in for best seamless experience
+                    prefs.edit().putString("active_user_id", firstUser.id).apply()
+                    _isLocked.value = false
+                    _isRegistrationNeeded.value = false
                 } else {
                     _isRegistrationNeeded.value = false
                     _isLocked.value = true
                 }
-            } else {
-                _isRegistrationNeeded.value = false
-                _isLocked.value = true
             }
         }
     }
@@ -294,7 +308,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     ) {
         viewModelScope.launch {
             try {
-                // Create Shop Profile
+                // Create Shop Profile with 30-day active trial
                 val profile = ShopProfile(
                     id = 1L,
                     name = ownerFullName.trim(),
@@ -304,6 +318,10 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                     address = address.trim().ifBlank { "Kigali, Rwanda" },
                     currencyCode = currencyCode.trim(),
                     currencySymbol = currencySymbol.trim(),
+                    subscriptionStatus = "ACTIVE",
+                    monthlyFeeRwf = 5000,
+                    subscriptionExpiresAt = System.currentTimeMillis() + (30L * 24 * 60 * 60 * 1000),
+                    trialStartedAt = System.currentTimeMillis(),
                     receiptFooter = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
                         "Murakoze cyane! Mwongere kugaruka!" 
                         else "Thank you for your business! Please visit again!"
@@ -335,6 +353,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 )
                 repository.saveUser(ownerUser)
 
+                prefs.edit().putString("active_user_id", ownerUser.id).apply()
                 _currentUser.value = ownerUser
                 _isRegistrationNeeded.value = false
                 _isLocked.value = false
@@ -353,6 +372,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 _currentUser.value = user
                 _isLocked.value = false
                 _authError.value = null
+                prefs.edit().putString("active_user_id", user.id).apply()
                 repository.updateLastLogin(user.id)
                 val welcome = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
                     "Murakaza neza, ${user.name}!" 
@@ -374,6 +394,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 _currentUser.value = user
                 _isLocked.value = false
                 _authError.value = null
+                prefs.edit().putString("active_user_id", user.id).apply()
                 repository.updateLastLogin(user.id)
                 val welcome = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
                     "Winjiye nka ${user.name} (${user.role.displayName})" 
@@ -393,6 +414,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         if (active != null && active.pinHash == pin.trim()) {
             _isLocked.value = false
             _authError.value = null
+            prefs.edit().putString("active_user_id", active.id).apply()
             return true
         }
         return loginWithPin(pin)
@@ -403,10 +425,21 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         _authError.value = null
     }
 
+    fun logoutUser() {
+        prefs.edit().remove("active_user_id").apply()
+        _currentUser.value = null
+        _isLocked.value = true
+        _authError.value = null
+        viewModelScope.launch {
+            _snackbarMessage.emit("Logged out successfully.")
+        }
+    }
+
     fun switchUser(user: User) {
         _currentUser.value = user
         _isLocked.value = false
         _authError.value = null
+        prefs.edit().putString("active_user_id", user.id).apply()
         viewModelScope.launch {
             repository.updateLastLogin(user.id)
             _snackbarMessage.emit("Active operator: ${user.name}")
@@ -440,6 +473,49 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
             }
             repository.deleteUser(userId)
             _snackbarMessage.emit("Staff account removed.")
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // SUBSCRIPTION & OFFLINE BILLING (5,000 RWF / MONTH)
+    // ------------------------------------------------------------------------
+    fun activateSubscriptionVoucher(code: String) {
+        viewModelScope.launch {
+            val currentProf = shopProfile.value
+            val result = com.example.util.OfflineSubscriptionManager.validateVoucherCode(code, currentProf)
+            if (result.isValid) {
+                val currentExpiry = if (currentProf.subscriptionExpiresAt > System.currentTimeMillis()) 
+                    currentProf.subscriptionExpiresAt 
+                    else System.currentTimeMillis()
+                val newExpiry = currentExpiry + (result.daysToAdd.toLong() * 24 * 60 * 60 * 1000)
+
+                val updatedProf = currentProf.copy(
+                    subscriptionStatus = "ACTIVE",
+                    subscriptionExpiresAt = newExpiry,
+                    lastPaymentRef = code.trim().uppercase(),
+                    lastPaymentDate = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis()
+                )
+                repository.updateShopProfile(updatedProf)
+                _snackbarMessage.emit(result.message)
+            } else {
+                _snackbarMessage.emit(result.message)
+            }
+        }
+    }
+
+    fun grantEmergencyGracePeriod() {
+        viewModelScope.launch {
+            val currentProf = shopProfile.value
+            val newExpiry = System.currentTimeMillis() + (3L * 24 * 60 * 60 * 1000)
+            val updatedProf = currentProf.copy(
+                subscriptionStatus = "ACTIVE",
+                subscriptionExpiresAt = newExpiry,
+                lastPaymentRef = "EMERGENCY-GRACE-3D",
+                updatedAt = System.currentTimeMillis()
+            )
+            repository.updateShopProfile(updatedProf)
+            _snackbarMessage.emit("3-Day Emergency Grace Period activated!")
         }
     }
 

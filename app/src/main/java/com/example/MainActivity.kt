@@ -273,12 +273,25 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                             onDeleteUser = { uId -> viewModel.deleteUser(uId) },
                             onImportPackage = { summary -> viewModel.importShopPackage(summary) },
                             onLockApp = { viewModel.lockApp() },
-                            onSwitchUser = { u -> viewModel.switchUser(u) }
+                            onLogout = { viewModel.logoutUser() },
+                            onSwitchUser = { u -> viewModel.switchUser(u) },
+                            onActivateVoucher = { code -> viewModel.activateSubscriptionVoucher(code) },
+                            onGrantEmergencyGrace = { viewModel.grantEmergencyGracePeriod() }
                         )
                     }
                 }
             }
         }
+    }
+
+    // Active Subscription Paywall Lock (If 5,000 RWF monthly fee is expired)
+    if (!shopProfile.isSubscriptionActive && !isLocked && !isRegistrationNeeded) {
+        com.example.ui.screens.SubscriptionPaywallDialog(
+            shopProfile = shopProfile,
+            language = currentLanguage,
+            onActivateVoucher = { code -> viewModel.activateSubscriptionVoucher(code) },
+            onGrantEmergencyGrace = { viewModel.grantEmergencyGracePeriod() }
+        )
     }
 
     // Active Interactive Receipt Dialog
