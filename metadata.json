@@ -1,0 +1,7 @@
+{
+  "name": "BeBoss",
+  "description": "Offline-first business management app for shop owners to manage products, record sales, track customer debts, and analyze profit/loss.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
