@@ -5,10 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
 import com.example.data.model.Customer
-import com.example.data.model.CustomerCategory
 import com.example.data.model.CustomerPayment
-import com.example.data.model.PaymentMethod
-import com.example.data.model.PaymentStatus
 import com.example.data.model.Product
 import com.example.data.model.Sale
 import com.example.data.model.SaleItem
@@ -83,6 +80,11 @@ object ShopDataTransferManager {
             put("currencySymbol", profile.currencySymbol)
             put("taxRate", profile.taxRate)
             put("receiptFooter", profile.receiptFooter)
+            put("isOnlineSyncEnabled", profile.isOnlineSyncEnabled)
+            put("backendServerUrl", profile.backendServerUrl)
+            put("lastSyncedAt", profile.lastSyncedAt)
+            put("createdAt", profile.createdAt)
+            put("updatedAt", profile.updatedAt)
         }
         root.put("shopProfile", shopObj)
 
@@ -112,6 +114,9 @@ object ShopDataTransferManager {
                 put("canManageCollaborators", u.canManageCollaborators)
                 put("canManageShopSettings", u.canManageShopSettings)
                 put("canExportImportData", u.canExportImportData)
+                put("lastLoginAt", u.lastLoginAt)
+                put("createdAt", u.createdAt)
+                put("updatedAt", u.updatedAt)
             }
             usersArr.put(uObj)
         }
@@ -130,8 +135,7 @@ object ShopDataTransferManager {
                 put("quantityInStock", p.quantityInStock)
                 put("lowStockThreshold", p.lowStockThreshold)
                 put("unit", p.unit)
-                put("supplier", p.supplier)
-                put("description", p.description)
+                put("isDeleted", p.isDeleted)
                 put("createdAt", p.createdAt)
                 put("updatedAt", p.updatedAt)
             }
@@ -148,10 +152,13 @@ object ShopDataTransferManager {
                 put("phone", c.phone)
                 put("email", c.email)
                 put("address", c.address)
-                put("totalDebt", c.totalDebt)
+                put("city", c.city)
+                put("taxIdOrNin", c.taxIdOrNin)
+                put("category", c.category)
                 put("creditLimit", c.creditLimit)
-                put("category", c.category.name)
+                put("debtBalance", c.debtBalance)
                 put("notes", c.notes)
+                put("isDeleted", c.isDeleted)
                 put("createdAt", c.createdAt)
                 put("updatedAt", c.updatedAt)
             }
@@ -166,18 +173,18 @@ object ShopDataTransferManager {
                 put("id", s.id)
                 put("receiptNumber", s.receiptNumber)
                 put("customerId", s.customerId ?: "")
-                put("customerName", s.customerName ?: "")
+                put("customerName", s.customerName)
                 put("totalAmount", s.totalAmount)
-                put("subtotalAmount", s.subtotalAmount)
+                put("totalCost", s.totalCost)
+                put("totalProfit", s.totalProfit)
                 put("discountAmount", s.discountAmount)
-                put("taxAmount", s.taxAmount)
                 put("amountPaid", s.amountPaid)
-                put("changeGiven", s.changeGiven)
-                put("paymentMethod", s.paymentMethod.name)
-                put("paymentStatus", s.paymentStatus.name)
-                put("cashierName", s.cashierName)
+                put("paymentMethod", s.paymentMethod)
+                put("paymentStatus", s.paymentStatus)
                 put("notes", s.notes)
-                put("timestamp", s.timestamp)
+                put("saleDate", s.saleDate)
+                put("synced", s.synced)
+                put("updatedAt", s.updatedAt)
             }
             salesArr.put(sObj)
         }
@@ -191,10 +198,13 @@ object ShopDataTransferManager {
                 put("saleId", i.saleId)
                 put("productId", i.productId)
                 put("productName", i.productName)
-                put("quantity", i.quantity)
-                put("unitCostPrice", i.unitCostPrice)
-                put("unitSellingPrice", i.unitSellingPrice)
-                put("totalPrice", i.totalPrice)
+                put("category", i.category)
+                put("unit", i.unit)
+                put("quantitySold", i.quantitySold)
+                put("costPriceAtSale", i.costPriceAtSale)
+                put("unitPriceAtSale", i.unitPriceAtSale)
+                put("subtotal", i.subtotal)
+                put("profit", i.profit)
             }
             itemsArr.put(iObj)
         }
@@ -206,11 +216,12 @@ object ShopDataTransferManager {
             val pyObj = JSONObject().apply {
                 put("id", py.id)
                 put("customerId", py.customerId)
-                put("amountPaid", py.amountPaid)
-                put("paymentMethod", py.paymentMethod.name)
+                put("customerName", py.customerName)
+                put("amount", py.amount)
+                put("paymentMethod", py.paymentMethod)
                 put("notes", py.notes)
-                put("recordedBy", py.recordedBy)
-                put("timestamp", py.timestamp)
+                put("receiptNumber", py.receiptNumber)
+                put("paymentDate", py.paymentDate)
             }
             paymentsArr.put(pyObj)
         }
@@ -255,7 +266,7 @@ object ShopDataTransferManager {
         if (root.has("shopProfile")) {
             val sObj = root.getJSONObject("shopProfile")
             shopProfile = ShopProfile(
-                id = sObj.optInt("id", 1),
+                id = sObj.optLong("id", 1L),
                 shopName = sObj.optString("shopName", "My Shop"),
                 name = sObj.optString("name", ""),
                 phone = sObj.optString("phone", ""),
@@ -264,7 +275,12 @@ object ShopDataTransferManager {
                 currencyCode = sObj.optString("currencyCode", "RWF"),
                 currencySymbol = sObj.optString("currencySymbol", "FRw"),
                 taxRate = sObj.optDouble("taxRate", 0.0),
-                receiptFooter = sObj.optString("receiptFooter", "Thank you for your business!")
+                receiptFooter = sObj.optString("receiptFooter", "Thank you for your business!"),
+                isOnlineSyncEnabled = sObj.optBoolean("isOnlineSyncEnabled", true),
+                backendServerUrl = sObj.optString("backendServerUrl", "https://api.beboss.app/v1"),
+                lastSyncedAt = sObj.optLong("lastSyncedAt", 0L),
+                createdAt = sObj.optLong("createdAt", System.currentTimeMillis()),
+                updatedAt = sObj.optLong("updatedAt", System.currentTimeMillis())
             )
         }
 
@@ -299,7 +315,10 @@ object ShopDataTransferManager {
                         canExportReports = u.optBoolean("canExportReports", role != UserRole.CASHIER),
                         canManageCollaborators = u.optBoolean("canManageCollaborators", role == UserRole.OWNER),
                         canManageShopSettings = u.optBoolean("canManageShopSettings", role == UserRole.OWNER),
-                        canExportImportData = u.optBoolean("canExportImportData", role == UserRole.OWNER)
+                        canExportImportData = u.optBoolean("canExportImportData", role == UserRole.OWNER),
+                        lastLoginAt = u.optLong("lastLoginAt", System.currentTimeMillis()),
+                        createdAt = u.optLong("createdAt", System.currentTimeMillis()),
+                        updatedAt = u.optLong("updatedAt", System.currentTimeMillis())
                     )
                 )
             }
@@ -322,8 +341,7 @@ object ShopDataTransferManager {
                         quantityInStock = p.optDouble("quantityInStock", 0.0),
                         lowStockThreshold = p.optDouble("lowStockThreshold", 5.0),
                         unit = p.optString("unit", "pcs"),
-                        supplier = p.optString("supplier", ""),
-                        description = p.optString("description", ""),
+                        isDeleted = p.optBoolean("isDeleted", false),
                         createdAt = p.optLong("createdAt", System.currentTimeMillis()),
                         updatedAt = p.optLong("updatedAt", System.currentTimeMillis())
                     )
@@ -337,8 +355,7 @@ object ShopDataTransferManager {
             val cArr = root.getJSONArray("customers")
             for (i in 0 until cArr.length()) {
                 val c = cArr.getJSONObject(i)
-                val catName = c.optString("category", "RETAIL")
-                val cat = try { CustomerCategory.valueOf(catName) } catch (e: Exception) { CustomerCategory.RETAIL }
+                val catName = c.optString("category", "Regular Customer")
                 customers.add(
                     Customer(
                         id = c.optString("id"),
@@ -346,10 +363,13 @@ object ShopDataTransferManager {
                         phone = c.optString("phone", ""),
                         email = c.optString("email", ""),
                         address = c.optString("address", ""),
-                        totalDebt = c.optDouble("totalDebt", 0.0),
-                        creditLimit = c.optDouble("creditLimit", 0.0),
-                        category = cat,
+                        city = c.optString("city", "Kigali"),
+                        taxIdOrNin = c.optString("taxIdOrNin", ""),
+                        category = catName,
+                        creditLimit = c.optDouble("creditLimit", 500000.0),
                         notes = c.optString("notes", ""),
+                        debtBalance = c.optDouble("debtBalance", 0.0),
+                        isDeleted = c.optBoolean("isDeleted", false),
                         createdAt = c.optLong("createdAt", System.currentTimeMillis()),
                         updatedAt = c.optLong("updatedAt", System.currentTimeMillis())
                     )
@@ -363,25 +383,23 @@ object ShopDataTransferManager {
             val sArr = root.getJSONArray("sales")
             for (i in 0 until sArr.length()) {
                 val s = sArr.getJSONObject(i)
-                val pMethod = try { PaymentMethod.valueOf(s.optString("paymentMethod", "CASH")) } catch (e: Exception) { PaymentMethod.CASH }
-                val pStatus = try { PaymentStatus.valueOf(s.optString("paymentStatus", "PAID")) } catch (e: Exception) { PaymentStatus.PAID }
                 sales.add(
                     Sale(
                         id = s.optString("id"),
                         receiptNumber = s.optString("receiptNumber"),
                         customerId = s.optString("customerId").ifBlank { null },
-                        customerName = s.optString("customerName").ifBlank { null },
+                        customerName = s.optString("customerName", "Walk-in Customer"),
+                        saleDate = s.optLong("saleDate", s.optLong("timestamp", System.currentTimeMillis())),
                         totalAmount = s.optDouble("totalAmount", 0.0),
-                        subtotalAmount = s.optDouble("subtotalAmount", 0.0),
+                        totalCost = s.optDouble("totalCost", 0.0),
+                        totalProfit = s.optDouble("totalProfit", 0.0),
                         discountAmount = s.optDouble("discountAmount", 0.0),
-                        taxAmount = s.optDouble("taxAmount", 0.0),
+                        paymentMethod = s.optString("paymentMethod", "CASH"),
+                        paymentStatus = s.optString("paymentStatus", "PAID"),
                         amountPaid = s.optDouble("amountPaid", 0.0),
-                        changeGiven = s.optDouble("changeGiven", 0.0),
-                        paymentMethod = pMethod,
-                        paymentStatus = pStatus,
-                        cashierName = s.optString("cashierName", "Staff"),
                         notes = s.optString("notes", ""),
-                        timestamp = s.optLong("timestamp", System.currentTimeMillis())
+                        synced = s.optBoolean("synced", false),
+                        updatedAt = s.optLong("updatedAt", System.currentTimeMillis())
                     )
                 )
             }
@@ -399,10 +417,13 @@ object ShopDataTransferManager {
                         saleId = item.optString("saleId"),
                         productId = item.optString("productId"),
                         productName = item.optString("productName"),
-                        quantity = item.optDouble("quantity", 1.0),
-                        unitCostPrice = item.optDouble("unitCostPrice", 0.0),
-                        unitSellingPrice = item.optDouble("unitSellingPrice", 0.0),
-                        totalPrice = item.optDouble("totalPrice", 0.0)
+                        category = item.optString("category", "General"),
+                        unit = item.optString("unit", "pcs"),
+                        quantitySold = item.optDouble("quantitySold", item.optDouble("quantity", 1.0)),
+                        costPriceAtSale = item.optDouble("costPriceAtSale", item.optDouble("unitCostPrice", 0.0)),
+                        unitPriceAtSale = item.optDouble("unitPriceAtSale", item.optDouble("unitSellingPrice", 0.0)),
+                        subtotal = item.optDouble("subtotal", item.optDouble("totalPrice", 0.0)),
+                        profit = item.optDouble("profit", 0.0)
                     )
                 )
             }
@@ -414,16 +435,16 @@ object ShopDataTransferManager {
             val pyArr = root.getJSONArray("customerPayments")
             for (i in 0 until pyArr.length()) {
                 val py = pyArr.getJSONObject(i)
-                val pMethod = try { PaymentMethod.valueOf(py.optString("paymentMethod", "CASH")) } catch (e: Exception) { PaymentMethod.CASH }
                 payments.add(
                     CustomerPayment(
                         id = py.optString("id"),
                         customerId = py.optString("customerId"),
-                        amountPaid = py.optDouble("amountPaid", 0.0),
-                        paymentMethod = pMethod,
+                        customerName = py.optString("customerName", "Customer"),
+                        amount = py.optDouble("amount", py.optDouble("amountPaid", 0.0)),
+                        paymentMethod = py.optString("paymentMethod", "Cash"),
                         notes = py.optString("notes", ""),
-                        recordedBy = py.optString("recordedBy", "Staff"),
-                        timestamp = py.optLong("timestamp", System.currentTimeMillis())
+                        receiptNumber = py.optString("receiptNumber", "PAY-${System.currentTimeMillis().toString().takeLast(6)}"),
+                        paymentDate = py.optLong("paymentDate", py.optLong("timestamp", System.currentTimeMillis()))
                     )
                 )
             }
@@ -477,6 +498,10 @@ object ShopDataTransferManager {
         }
 
         context.startActivity(Intent.createChooser(intent, "Share Shop Data Package via..."))
+    }
+
+    fun shareShopPackage(context: Context, file: File) {
+        shareBackupFile(context, file, "Shop")
     }
 
     /**

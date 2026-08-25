@@ -607,7 +607,7 @@ class BeBossRepository(private val database: AppDatabase) {
     }
 
     suspend fun importShopDataPackage(summary: ShopImportSummary) = withContext(Dispatchers.IO) {
-        summary.shopProfile?.let { shopProfileDao.insertProfile(it) }
+        summary.shopProfile?.let { shopProfileDao.insertOrUpdateProfile(it) }
         if (summary.users.isNotEmpty()) {
             userDao.insertAllUsers(summary.users)
         }

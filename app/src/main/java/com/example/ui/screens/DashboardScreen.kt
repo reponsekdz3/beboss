@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,20 +25,16 @@ import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.Inventory
-import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Receipt
-import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -59,17 +54,15 @@ import com.example.data.model.Product
 import com.example.data.model.ProfitLossSummary
 import com.example.data.model.Sale
 import com.example.data.model.ShopProfile
-import com.example.ui.theme.BackgroundLight
-import com.example.ui.theme.InkDark
-import com.example.ui.theme.InkMedium
-import com.example.ui.theme.OrangeHover
-import com.example.ui.theme.OrangeLight
+import com.example.data.model.User
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
 import com.example.ui.theme.ProfitGreenLight
 import com.example.ui.theme.WarningAmber
 import com.example.ui.theme.WarningAmberLight
 import com.example.ui.viewmodel.AppScreen
+import com.example.util.AppLanguage
+import com.example.util.Localization
 import com.example.util.ReceiptGenerator
 
 @Composable
@@ -79,6 +72,8 @@ fun DashboardScreen(
     inventoryValuation: InventoryValuation,
     lowStockProducts: List<Product>,
     recentSales: List<Sale>,
+    currentUser: User?,
+    language: AppLanguage,
     onNavigate: (AppScreen) -> Unit,
     onOpenReceipt: (String) -> Unit,
     onRestockClick: (Product) -> Unit,
@@ -87,7 +82,7 @@ fun DashboardScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(BackgroundLight),
+            .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -96,7 +91,7 @@ fun DashboardScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(3.dp)
             ) {
                 Box(
@@ -116,9 +111,9 @@ fun DashboardScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "TODAY'S OVERVIEW",
+                                text = Localization.get("today_overview", language),
                                 color = Color(0xFFFFD8BF),
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 1.sp
                             )
@@ -127,9 +122,9 @@ fun DashboardScreen(
                                 color = Color(0x33FFFFFF)
                             ) {
                                 Text(
-                                    text = "${todaySummary.totalSalesCount} Orders",
+                                    text = "${todaySummary.totalSalesCount} ${Localization.get("today_orders", language)}",
                                     color = Color.White,
-                                    fontSize = 12.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                 )
@@ -145,7 +140,7 @@ fun DashboardScreen(
                             fontWeight = FontWeight.Black
                         )
                         Text(
-                            text = "Total Sales Revenue",
+                            text = Localization.get("today_revenue", language),
                             color = Color(0xFFD1D5DB),
                             fontSize = 12.sp
                         )
@@ -172,7 +167,11 @@ fun DashboardScreen(
                                             modifier = Modifier.size(16.dp)
                                         )
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Net Profit", fontSize = 11.sp, color = Color(0xFFD1D5DB))
+                                        Text(
+                                            Localization.get("today_profit", language), 
+                                            fontSize = 11.sp, 
+                                            color = Color(0xFFD1D5DB)
+                                        )
                                     }
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
@@ -199,7 +198,11 @@ fun DashboardScreen(
                                             modifier = Modifier.size(16.dp)
                                         )
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Stock Value", fontSize = 11.sp, color = Color(0xFFD1D5DB))
+                                        Text(
+                                            Localization.get("total_stock_value", language), 
+                                            fontSize = 11.sp, 
+                                            color = Color(0xFFD1D5DB)
+                                        )
                                     }
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
@@ -223,7 +226,7 @@ fun DashboardScreen(
                     onClick = { onNavigate(AppScreen.SALES_POS) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(56.dp),
+                        .height(54.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
                     shape = RoundedCornerShape(16.dp),
                     elevation = ButtonDefaults.buttonElevation(4.dp)
@@ -231,8 +234,8 @@ fun DashboardScreen(
                     Icon(Icons.Default.AddShoppingCart, contentDescription = null, modifier = Modifier.size(24.dp))
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "NEW SALE (POS)",
-                        fontSize = 16.sp,
+                        text = Localization.get("new_sale_action", language).uppercase(),
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.5.sp
                     )
@@ -243,34 +246,28 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     QuickActionButton(
-                        title = "Add Product",
+                        title = Localization.get("add_product_action", language),
                         icon = Icons.Default.Add,
-                        backgroundColor = Color.White,
+                        backgroundColor = MaterialTheme.colorScheme.surface,
                         iconColor = OrangePrimary,
                         modifier = Modifier.weight(1f),
                         onClick = onAddProductClick
                     )
+
                     QuickActionButton(
-                        title = "Inventory",
-                        icon = Icons.Default.Inventory,
-                        backgroundColor = Color.White,
-                        iconColor = Color(0xFF2563EB),
-                        modifier = Modifier.weight(1f),
-                        onClick = { onNavigate(AppScreen.INVENTORY) }
-                    )
-                    QuickActionButton(
-                        title = "Customers",
-                        icon = Icons.Default.People,
-                        backgroundColor = Color.White,
-                        iconColor = Color(0xFF7C3AED),
+                        title = Localization.get("record_payment_action", language),
+                        icon = Icons.Default.AttachMoney,
+                        backgroundColor = MaterialTheme.colorScheme.surface,
+                        iconColor = ProfitGreen,
                         modifier = Modifier.weight(1f),
                         onClick = { onNavigate(AppScreen.CUSTOMERS) }
                     )
+
                     QuickActionButton(
-                        title = "Reports",
+                        title = Localization.get("financial_reports_action", language),
                         icon = Icons.Default.Assessment,
-                        backgroundColor = Color.White,
-                        iconColor = ProfitGreen,
+                        backgroundColor = MaterialTheme.colorScheme.surface,
+                        iconColor = Color(0xFF2563EB),
                         modifier = Modifier.weight(1f),
                         onClick = { onNavigate(AppScreen.ANALYTICS) }
                     )
@@ -278,80 +275,81 @@ fun DashboardScreen(
             }
         }
 
-        // Low Stock Warning Section (if any)
+        // Low Stock Alert Banner
         if (lowStockProducts.isNotEmpty()) {
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = WarningAmberLight),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCD34D))
+                    colors = CardDefaults.cardColors(containerColor = WarningAmberLight)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
-                                    Icons.Default.Warning,
-                                    contentDescription = "Alert",
+                                    Icons.Default.NotificationsActive,
+                                    contentDescription = null,
                                     tint = WarningAmber,
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Low Stock Alert (${lowStockProducts.size})",
+                                    text = "${Localization.get("low_stock_warning", language)} (${lowStockProducts.size})",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp,
-                                    color = Color(0xFF92400E)
+                                    color = WarningAmber,
+                                    fontSize = 14.sp
                                 )
                             }
                             Text(
-                                text = "View All",
+                                text = Localization.get("view_all", language),
+                                color = WarningAmber,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = OrangePrimary,
                                 modifier = Modifier.clickable { onNavigate(AppScreen.INVENTORY) }
                             )
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        lowStockProducts.take(3).forEach { p ->
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 3.dp),
-                                shape = RoundedCornerShape(10.dp),
-                                color = Color.White
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            lowStockProducts.take(3).forEach { product ->
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color.White,
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = p.name,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 13.sp,
-                                            color = InkDark
-                                        )
-                                        Text(
-                                            text = "Only ${p.quantityInStock} ${p.unit} remaining (Min ${p.lowStockThreshold})",
-                                            fontSize = 11.sp,
-                                            color = Color(0xFFDC2626)
-                                        )
-                                    }
-                                    Button(
-                                        onClick = { onRestockClick(p) },
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                        shape = RoundedCornerShape(8.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary)
+                                    Row(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Text("Restock", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = product.name,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 13.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "${Localization.get("quantity_in_stock", language)}: ${product.quantityInStock.toInt()} ${product.unit} (Min: ${product.lowStockThreshold.toInt()})",
+                                                fontSize = 11.sp,
+                                                color = Color(0xFFDC2626),
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                        OutlinedButton(
+                                            onClick = { onRestockClick(product) },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            modifier = Modifier.height(32.dp)
+                                        ) {
+                                            Text(Localization.get("restock", language), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
                             }
@@ -361,7 +359,7 @@ fun DashboardScreen(
             }
         }
 
-        // Recent Sales Section
+        // Recent Transactions Header & List
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -369,16 +367,16 @@ fun DashboardScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Recent Sales",
-                    fontSize = 16.sp,
+                    text = Localization.get("recent_sales_title", language),
                     fontWeight = FontWeight.Bold,
-                    color = InkDark
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
-                    text = "View History",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
+                    text = Localization.get("view_all", language),
                     color = OrangePrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.clickable { onNavigate(AppScreen.SALES_HISTORY) }
                 )
             }
@@ -389,7 +387,7 @@ fun DashboardScreen(
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Column(
                         modifier = Modifier
@@ -398,22 +396,17 @@ fun DashboardScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Icon(
-                            Icons.Default.Receipt,
+                            imageVector = Icons.Default.Receipt,
                             contentDescription = null,
-                            tint = InkMedium,
+                            tint = Color(0xFF9CA3AF),
                             modifier = Modifier.size(40.dp)
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "No sales recorded yet today",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = InkDark
-                        )
-                        Text(
-                            text = "Tap 'New Sale (POS)' to record your first sale.",
-                            fontSize = 12.sp,
-                            color = InkMedium
+                            text = Localization.get("no_sales_yet", language),
+                            color = Color(0xFF6B7280),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
@@ -425,45 +418,43 @@ fun DashboardScreen(
                         .fillMaxWidth()
                         .clickable { onOpenReceipt(sale.id) },
                     shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     elevation = CardDefaults.cardElevation(1.dp)
                 ) {
                     Row(
-                        modifier = Modifier.padding(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .background(OrangeLight, CircleShape),
-                                contentAlignment = Alignment.Center
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = CircleShape,
+                                color = if (sale.paymentMethod == "CREDIT_DEBT") Color(0xFFFEE2E2) else ProfitGreenLight,
+                                modifier = Modifier.size(40.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Receipt,
-                                    contentDescription = null,
-                                    tint = OrangePrimary,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = if (sale.paymentMethod == "CREDIT_DEBT") Icons.Default.Warning else Icons.Default.Receipt,
+                                        contentDescription = null,
+                                        tint = if (sale.paymentMethod == "CREDIT_DEBT") Color(0xFFDC2626) else ProfitGreen,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
                                     text = sale.customerName,
+                                    fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = InkDark,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "${ReceiptGenerator.formatDate(sale.saleDate)} • ${sale.paymentMethod}",
+                                    text = "${sale.receiptNumber} • ${ReceiptGenerator.formatDate(sale.saleDate)}",
                                     fontSize = 11.sp,
-                                    color = InkMedium
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -471,16 +462,22 @@ fun DashboardScreen(
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
                                 text = ReceiptGenerator.formatMoney(sale.totalAmount, shopProfile),
+                                fontWeight = FontWeight.Black,
                                 fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = InkDark
+                                color = MaterialTheme.colorScheme.onSurface
                             )
-                            Text(
-                                text = "+${ReceiptGenerator.formatMoney(sale.totalProfit, shopProfile)} profit",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = ProfitGreen
-                            )
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (sale.paymentMethod == "CREDIT_DEBT") Color(0xFFFEE2E2) else ProfitGreenLight
+                            ) {
+                                Text(
+                                    text = if (sale.paymentMethod == "CREDIT_DEBT") Localization.get("credit_debt", language) else sale.paymentMethod,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (sale.paymentMethod == "CREDIT_DEBT") Color(0xFFDC2626) else ProfitGreen,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -498,36 +495,33 @@ private fun QuickActionButton(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    Card(
+    Surface(
         modifier = modifier
-            .height(84.dp)
-            .clickable(onClick = onClick),
+            .height(72.dp)
+            .clickable { onClick() },
         shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = backgroundColor),
-        elevation = CardDefaults.cardElevation(2.dp)
+        color = backgroundColor,
+        shadowElevation = 2.dp
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp),
+            modifier = Modifier.padding(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .background(iconColor.copy(alpha = 0.12f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(icon, contentDescription = title, tint = iconColor, modifier = Modifier.size(18.dp))
-            }
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconColor,
+                modifier = Modifier.size(22.dp)
+            )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = title,
                 fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = InkDark,
-                maxLines = 1
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

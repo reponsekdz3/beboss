@@ -18,7 +18,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.data.model.Product
 import com.example.ui.components.BeBossBottomNav
 import com.example.ui.components.BeBossTopBar
 import com.example.ui.components.ReceiptDialog
@@ -30,6 +29,7 @@ import com.example.ui.screens.InventoryScreen
 import com.example.ui.screens.SalesHistoryScreen
 import com.example.ui.screens.SalesPosScreen
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.ShopRegistrationScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.AppScreen
 import com.example.ui.viewmodel.BeBossViewModel
@@ -40,8 +40,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MyApplicationTheme {
-                BeBossApp()
+            val viewModel: BeBossViewModel = viewModel()
+            val isDarkTheme by viewModel.isDarkTheme.collectAsState()
+
+            MyApplicationTheme(darkTheme = isDarkTheme) {
+                BeBossApp(viewModel = viewModel)
             }
         }
     }
@@ -70,11 +73,14 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     val isSyncing by viewModel.isSyncing.collectAsState()
     val activeReceipt by viewModel.activeReceiptSale.collectAsState()
 
-    // Auth & Security state
+    // Auth, Theme & Language state
     val currentUser by viewModel.currentUser.collectAsState()
     val allUsers by viewModel.allUsers.collectAsState()
     val isLocked by viewModel.isLocked.collectAsState()
+    val isRegistrationNeeded by viewModel.isRegistrationNeeded.collectAsState()
     val authError by viewModel.authError.collectAsState()
+    val currentLanguage by viewModel.currentLanguage.collectAsState()
+    val isDarkTheme by viewModel.isDarkTheme.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -87,16 +93,42 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
         }
     }
 
-    if (isLocked) {
+    if (isRegistrationNeeded) {
+        ShopRegistrationScreen(
+            language = currentLanguage,
+            isDarkTheme = isDarkTheme,
+            onRegister = { shopName, currencyCode, currencySymbol, address, phone, ownerName, username, pin, password ->
+                viewModel.registerNewShopAndOwner(
+                    shopName = shopName,
+                    currencyCode = currencyCode,
+                    currencySymbol = currencySymbol,
+                    address = address,
+                    phone = phone,
+                    ownerFullName = ownerName,
+                    username = username,
+                    pin = pin,
+                    password = password
+                )
+            },
+            onCancel = { viewModel.cancelRegistration() },
+            onToggleLanguage = { viewModel.toggleLanguage() },
+            onToggleTheme = { viewModel.toggleDarkMode() }
+        )
+    } else if (isLocked) {
         AuthLockScreen(
             currentUser = currentUser,
             allUsers = allUsers,
             shopProfile = shopProfile,
             authError = authError,
+            language = currentLanguage,
+            isDarkTheme = isDarkTheme,
             onUnlockWithPin = { pin -> viewModel.unlockAppWithPin(pin) },
             onLoginWithCredentials = { user, pass -> viewModel.loginWithCredentials(user, pass) },
             onSelectUser = { user -> viewModel.switchUser(user) },
-            onClearError = { viewModel.clearAuthError() }
+            onClearError = { viewModel.clearAuthError() },
+            onToggleLanguage = { viewModel.toggleLanguage() },
+            onToggleTheme = { viewModel.toggleDarkMode() },
+            onOpenRegister = { viewModel.showRegistrationScreen() }
         )
     } else {
         Scaffold(
@@ -106,9 +138,13 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                 BeBossTopBar(
                     currentScreen = currentScreen,
                     shopProfile = shopProfile,
+                    currentUser = currentUser,
                     pendingSyncCount = pendingSyncCount,
                     isSyncing = isSyncing,
-                    currentUser = currentUser,
+                    language = currentLanguage,
+                    isDarkTheme = isDarkTheme,
+                    onToggleLanguage = { viewModel.toggleLanguage() },
+                    onToggleTheme = { viewModel.toggleDarkMode() },
                     onSyncClick = { viewModel.performSync() },
                     onHistoryClick = { viewModel.navigateTo(AppScreen.SALES_HISTORY) },
                     onLockClick = { viewModel.lockApp() }
@@ -119,6 +155,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                     currentScreen = currentScreen,
                     cartItemCount = cartState.items.size,
                     lowStockCount = lowStockProducts.size,
+                    language = currentLanguage,
                     onNavigate = { screen -> viewModel.navigateTo(screen) }
                 )
             }
@@ -136,6 +173,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                             inventoryValuation = inventoryValuation,
                             lowStockProducts = lowStockProducts,
                             recentSales = allSales,
+                            currentUser = currentUser,
+                            language = currentLanguage,
                             onNavigate = { screen -> viewModel.navigateTo(screen) },
                             onOpenReceipt = { saleId -> viewModel.openReceipt(saleId) },
                             onRestockClick = { product ->
@@ -224,9 +263,12 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                             customerPayments = allCustomerPayments,
                             pendingSyncCount = pendingSyncCount,
                             isSyncing = isSyncing,
+                            language = currentLanguage,
+                            isDarkTheme = isDarkTheme,
+                            onToggleLanguage = { viewModel.toggleLanguage() },
+                            onToggleTheme = { viewModel.toggleDarkMode() },
                             onSaveProfile = { prof -> viewModel.updateShopProfile(prof) },
                             onSyncNow = { viewModel.performSync() },
-                            onResetSampleData = { viewModel.seedSampleData() },
                             onSaveUser = { u -> viewModel.saveUser(u) },
                             onDeleteUser = { uId -> viewModel.deleteUser(uId) },
                             onImportPackage = { summary -> viewModel.importShopPackage(summary) },
@@ -248,4 +290,3 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
         )
     }
 }
-

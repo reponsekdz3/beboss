@@ -2,6 +2,7 @@ package com.example.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -9,13 +10,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddShoppingCart
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Settings
@@ -25,6 +29,7 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -41,28 +46,36 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ShopProfile
+import com.example.data.model.User
+import com.example.ui.theme.DarkNavy
 import com.example.ui.theme.InkDark
 import com.example.ui.theme.InkMedium
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
 import com.example.ui.viewmodel.AppScreen
+import com.example.util.AppLanguage
+import com.example.util.Localization
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BeBossTopBar(
     currentScreen: AppScreen,
     shopProfile: ShopProfile,
-    currentUser: com.example.data.model.User? = null,
+    currentUser: User? = null,
     pendingSyncCount: Int,
     isSyncing: Boolean,
+    language: AppLanguage,
+    isDarkTheme: Boolean,
+    onToggleLanguage: () -> Unit,
+    onToggleTheme: () -> Unit,
     onSyncClick: () -> Unit,
     onHistoryClick: () -> Unit,
-    onLockClick: () -> Unit = {}
+    onLockClick: () -> Unit
 ) {
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = Color.White,
-            titleContentColor = InkDark
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface
         ),
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -79,26 +92,26 @@ fun BeBossTopBar(
                         fontSize = 18.sp
                     )
                 }
-                Spacer(modifier = Modifier.width(10.dp))
-                androidx.compose.foundation.layout.Column {
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
                     Text(
-                        text = currentScreen.title,
+                        text = Localization.get(currentScreen.stringKey, language),
                         fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp,
+                        fontSize = 16.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = shopProfile.shopName,
+                            text = shopProfile.shopName.ifBlank { "BeBoss Store" },
                             fontSize = 11.sp,
-                            color = InkMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         if (currentUser != null) {
                             Text(
-                                text = " • ${currentUser.name} (${currentUser.role.displayName})",
+                                text = " • ${currentUser.name.split(" ").first()}",
                                 fontSize = 10.sp,
                                 color = OrangePrimary,
                                 fontWeight = FontWeight.SemiBold,
@@ -111,48 +124,64 @@ fun BeBossTopBar(
             }
         },
         actions = {
-            // Offline sync indicator / button
+            // Language Switcher Toggle in Header
             Surface(
-                onClick = onSyncClick,
-                shape = CircleShape,
-                color = if (pendingSyncCount > 0) Color(0xFFFEF3C7) else Color(0xFFDCFCE7),
-                modifier = Modifier.padding(end = 2.dp)
+                onClick = onToggleLanguage,
+                shape = RoundedCornerShape(12.dp),
+                color = OrangePrimary.copy(alpha = 0.12f),
+                modifier = Modifier.padding(end = 4.dp)
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = if (isSyncing) Icons.Default.Sync else if (pendingSyncCount > 0) Icons.Default.Sync else Icons.Default.CloudDone,
-                        contentDescription = "Sync",
-                        modifier = Modifier.size(15.dp),
-                        tint = if (pendingSyncCount > 0) Color(0xFFB45309) else ProfitGreen
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(language.flag, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.width(3.dp))
                     Text(
-                        text = if (isSyncing) "Syncing" else if (pendingSyncCount > 0) "$pendingSyncCount Offline" else "Online",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (pendingSyncCount > 0) Color(0xFFB45309) else ProfitGreen
+                        text = if (language == AppLanguage.ENGLISH) "EN" else "RW",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = OrangePrimary
                     )
                 }
             }
 
-            // Lock Terminal Button
-            IconButton(onClick = onLockClick) {
+            // Dark/White Theme Switcher Toggle in Header
+            IconButton(
+                onClick = onToggleTheme,
+                modifier = Modifier.size(36.dp)
+            ) {
                 Icon(
-                    imageVector = androidx.compose.material.icons.Icons.Default.Lock,
-                    contentDescription = "Lock Terminal",
-                    tint = InkDark,
-                    modifier = Modifier.size(20.dp)
+                    imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
+                    contentDescription = "Toggle Theme",
+                    tint = if (isDarkTheme) Color(0xFFFFD166) else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(19.dp)
                 )
             }
 
-            IconButton(onClick = onHistoryClick) {
+            // Quick Lock Button
+            IconButton(
+                onClick = onLockClick,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = Localization.get("lock_terminal", language),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+
+            // Sales History Shortcut
+            IconButton(
+                onClick = onHistoryClick,
+                modifier = Modifier.size(36.dp)
+            ) {
                 Icon(
                     imageVector = Icons.Default.History,
-                    contentDescription = "Sales History",
-                    tint = InkDark
+                    contentDescription = Localization.get("sales_history", language),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(19.dp)
                 )
             }
         }
@@ -164,21 +193,22 @@ fun BeBossBottomNav(
     currentScreen: AppScreen,
     cartItemCount: Int,
     lowStockCount: Int,
+    language: AppLanguage,
     onNavigate: (AppScreen) -> Unit
 ) {
     NavigationBar(
-        containerColor = Color.White,
+        containerColor = MaterialTheme.colorScheme.surface,
         tonalElevation = 8.dp
     ) {
         NavigationBarItem(
             selected = currentScreen == AppScreen.DASHBOARD,
             onClick = { onNavigate(AppScreen.DASHBOARD) },
             icon = { Icon(Icons.Default.Dashboard, contentDescription = "Dashboard") },
-            label = { Text("Home", fontSize = 11.sp, fontWeight = FontWeight.Medium) },
+            label = { Text(Localization.get("dashboard", language), fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1) },
             colors = NavigationBarItemDefaults.colors(
                 selectedIconColor = OrangePrimary,
                 selectedTextColor = OrangePrimary,
-                indicatorColor = Color(0xFFFFF0E6)
+                indicatorColor = OrangePrimary.copy(alpha = 0.15f)
             )
         )
 
@@ -200,11 +230,11 @@ fun BeBossBottomNav(
                     Icon(Icons.Default.AddShoppingCart, contentDescription = "POS Sale")
                 }
             },
-            label = { Text("POS Sale", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+            label = { Text(Localization.get("sales_pos", language), fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1) },
             colors = NavigationBarItemDefaults.colors(
                 selectedIconColor = OrangePrimary,
                 selectedTextColor = OrangePrimary,
-                indicatorColor = Color(0xFFFFF0E6)
+                indicatorColor = OrangePrimary.copy(alpha = 0.15f)
             )
         )
 
@@ -226,11 +256,11 @@ fun BeBossBottomNav(
                     Icon(Icons.Default.Inventory2, contentDescription = "Inventory")
                 }
             },
-            label = { Text("Stock", fontSize = 11.sp, fontWeight = FontWeight.Medium) },
+            label = { Text(Localization.get("inventory", language), fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1) },
             colors = NavigationBarItemDefaults.colors(
                 selectedIconColor = OrangePrimary,
                 selectedTextColor = OrangePrimary,
-                indicatorColor = Color(0xFFFFF0E6)
+                indicatorColor = OrangePrimary.copy(alpha = 0.15f)
             )
         )
 
@@ -238,11 +268,11 @@ fun BeBossBottomNav(
             selected = currentScreen == AppScreen.ANALYTICS,
             onClick = { onNavigate(AppScreen.ANALYTICS) },
             icon = { Icon(Icons.Default.BarChart, contentDescription = "Analytics") },
-            label = { Text("Reports", fontSize = 11.sp, fontWeight = FontWeight.Medium) },
+            label = { Text(Localization.get("analytics", language), fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1) },
             colors = NavigationBarItemDefaults.colors(
                 selectedIconColor = OrangePrimary,
                 selectedTextColor = OrangePrimary,
-                indicatorColor = Color(0xFFFFF0E6)
+                indicatorColor = OrangePrimary.copy(alpha = 0.15f)
             )
         )
 
@@ -250,11 +280,11 @@ fun BeBossBottomNav(
             selected = currentScreen == AppScreen.CUSTOMERS,
             onClick = { onNavigate(AppScreen.CUSTOMERS) },
             icon = { Icon(Icons.Default.People, contentDescription = "Customers") },
-            label = { Text("Customers", fontSize = 11.sp, fontWeight = FontWeight.Medium) },
+            label = { Text(Localization.get("customers", language), fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1) },
             colors = NavigationBarItemDefaults.colors(
                 selectedIconColor = OrangePrimary,
                 selectedTextColor = OrangePrimary,
-                indicatorColor = Color(0xFFFFF0E6)
+                indicatorColor = OrangePrimary.copy(alpha = 0.15f)
             )
         )
 
@@ -262,11 +292,11 @@ fun BeBossBottomNav(
             selected = currentScreen == AppScreen.SETTINGS,
             onClick = { onNavigate(AppScreen.SETTINGS) },
             icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
-            label = { Text("Settings", fontSize = 11.sp, fontWeight = FontWeight.Medium) },
+            label = { Text(Localization.get("settings", language), fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1) },
             colors = NavigationBarItemDefaults.colors(
                 selectedIconColor = OrangePrimary,
                 selectedTextColor = OrangePrimary,
-                indicatorColor = Color(0xFFFFF0E6)
+                indicatorColor = OrangePrimary.copy(alpha = 0.15f)
             )
         )
     }

@@ -1,6 +1,7 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.db.AppDatabase
@@ -23,6 +24,8 @@ import com.example.data.model.UserRole
 import com.example.data.repository.BeBossRepository
 import com.example.data.repository.CartItem
 import com.example.data.repository.SyncResult
+import com.example.util.AppLanguage
+import com.example.util.Localization
 import com.example.util.ShopImportSummary
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,14 +40,14 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-enum class AppScreen(val title: String) {
-    DASHBOARD("Dashboard"),
-    SALES_POS("New Sale"),
-    INVENTORY("Inventory"),
-    ANALYTICS("Reports & P/L"),
-    CUSTOMERS("Customers & Debt"),
-    SALES_HISTORY("Sales History"),
-    SETTINGS("Settings & Sync")
+enum class AppScreen(val stringKey: String, val title: String) {
+    DASHBOARD("dashboard", "Dashboard"),
+    SALES_POS("sales_pos", "POS Sale"),
+    INVENTORY("inventory", "Inventory"),
+    ANALYTICS("analytics", "Reports & P/L"),
+    CUSTOMERS("customers", "Customers & Debt"),
+    SALES_HISTORY("sales_history", "Sales History"),
+    SETTINGS("settings", "Settings")
 }
 
 data class CartState(
@@ -52,12 +55,12 @@ data class CartState(
     val selectedCustomerId: String? = null,
     val selectedCustomerName: String = "Walk-in Customer",
     val discountAmount: Double = 0.0,
-    val paymentMethod: String = "CASH", // CASH, MOMO, CARD, CREDIT_DEBT
+    val paymentMethod: String = "CASH", // CASH, MOMO, AIRTEL, CARD, CREDIT_DEBT
     val amountPaidInput: String = "",
     val notes: String = ""
 ) {
     val rawTotal: Double
-        get() = items.sumOf { it.product.sellingPrice * it.quantity }
+        get() = items.sumOf { it.effectiveUnitPrice * it.quantity }
 
     val netTotal: Double
         get() = (rawTotal - discountAmount).coerceAtLeast(0.0)
@@ -84,23 +87,37 @@ data class CartState(
 
 class BeBossViewModel(application: Application) : AndroidViewModel(application) {
 
+    private val prefs = application.getSharedPreferences("beboss_prefs", Context.MODE_PRIVATE)
     private val db = AppDatabase.getDatabase(application)
     val repository = BeBossRepository(db)
 
-    // Authentication & Staff State
+    // Language & Theme State
+    private val _currentLanguage = MutableStateFlow(
+        if (prefs.getString("lang", "en") == "rw") AppLanguage.KINYARWANDA else AppLanguage.ENGLISH
+    )
+    val currentLanguage: StateFlow<AppLanguage> = _currentLanguage.asStateFlow()
+
+    private val _isDarkTheme = MutableStateFlow(prefs.getBoolean("dark_theme", false))
+    val isDarkTheme: StateFlow<Boolean> = _isDarkTheme.asStateFlow()
+
+    // Authentication & Security State
     val allUsers: StateFlow<List<User>> = repository.allActiveUsers.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
     )
     private val _currentUser = MutableStateFlow<User?>(null)
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
 
-    private val _isLocked = MutableStateFlow(false)
+    // Screen is locked by default until credentials entered
+    private val _isLocked = MutableStateFlow(true)
     val isLocked: StateFlow<Boolean> = _isLocked.asStateFlow()
+
+    private val _isRegistrationNeeded = MutableStateFlow(false)
+    val isRegistrationNeeded: StateFlow<Boolean> = _isRegistrationNeeded.asStateFlow()
 
     private val _authError = MutableStateFlow<String?>(null)
     val authError: StateFlow<String?> = _authError.asStateFlow()
 
-    // Current Screen
+    // Current Navigation Screen
     private val _currentScreen = MutableStateFlow(AppScreen.DASHBOARD)
     val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
 
@@ -201,9 +218,6 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     val pendingSyncCount: StateFlow<Int> = repository.pendingSyncCount.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), 0
     )
-    val pendingSyncItems: StateFlow<List<SyncQueueItem>> = repository.pendingSyncItems.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
-    )
 
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
@@ -216,53 +230,177 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     val snackbarMessage: SharedFlow<String> = _snackbarMessage.asSharedFlow()
 
     init {
-        // Automatically check if database is empty and seed helpful starter catalog and default admin user
-        viewModelScope.launch {
-            val user = repository.ensureDefaultAdminUser()
-            _currentUser.value = user
+        checkAuthenticationAndInit()
+    }
 
-            val count = repository.totalProductCount.stateIn(viewModelScope).value
-            if (count == 0) {
-                repository.seedSampleShopData()
+    private fun checkAuthenticationAndInit() {
+        viewModelScope.launch {
+            val users = repository.allActiveUsers.stateIn(viewModelScope).value
+            if (users.isEmpty()) {
+                // If no user exists yet, check database
+                val count = db.userDao().getUserCount()
+                if (count == 0) {
+                    _isRegistrationNeeded.value = true
+                    _isLocked.value = true
+                } else {
+                    _isRegistrationNeeded.value = false
+                    _isLocked.value = true
+                }
+            } else {
+                _isRegistrationNeeded.value = false
+                _isLocked.value = true
             }
         }
     }
 
     // ------------------------------------------------------------------------
-    // AUTHENTICATION & STAFF MANAGEMENT
+    // LANGUAGE & THEME TOGGLES
     // ------------------------------------------------------------------------
-    fun loginWithPin(pin: String): Boolean {
-        var success = false
+    fun toggleLanguage() {
+        val next = if (_currentLanguage.value == AppLanguage.ENGLISH) AppLanguage.KINYARWANDA else AppLanguage.ENGLISH
+        _currentLanguage.value = next
+        prefs.edit().putString("lang", next.code).apply()
+    }
+
+    fun setLanguage(lang: AppLanguage) {
+        _currentLanguage.value = lang
+        prefs.edit().putString("lang", lang.code).apply()
+    }
+
+    fun toggleDarkMode() {
+        val next = !_isDarkTheme.value
+        _isDarkTheme.value = next
+        prefs.edit().putBoolean("dark_theme", next).apply()
+    }
+
+    fun setDarkMode(enabled: Boolean) {
+        _isDarkTheme.value = enabled
+        prefs.edit().putBoolean("dark_theme", enabled).apply()
+    }
+
+    // ------------------------------------------------------------------------
+    // ACCOUNT SETUP & AUTHENTICATION
+    // ------------------------------------------------------------------------
+    fun registerNewShopAndOwner(
+        shopName: String,
+        currencyCode: String,
+        currencySymbol: String,
+        address: String,
+        phone: String,
+        ownerFullName: String,
+        username: String,
+        pin: String,
+        password: String
+    ) {
         viewModelScope.launch {
-            val user = repository.getUserByPin(pin)
+            try {
+                // Create Shop Profile
+                val profile = ShopProfile(
+                    id = 1L,
+                    name = ownerFullName.trim(),
+                    phone = phone.trim(),
+                    email = "$username@beboss.rw",
+                    shopName = shopName.trim(),
+                    address = address.trim().ifBlank { "Kigali, Rwanda" },
+                    currencyCode = currencyCode.trim(),
+                    currencySymbol = currencySymbol.trim(),
+                    receiptFooter = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
+                        "Murakoze cyane! Mwongere kugaruka!" 
+                        else "Thank you for your business! Please visit again!"
+                )
+                repository.updateShopProfile(profile)
+
+                // Create Master Owner User Account
+                val ownerUser = User(
+                    id = UUID.randomUUID().toString(),
+                    name = ownerFullName.trim(),
+                    username = username.trim().lowercase(),
+                    phone = phone.trim(),
+                    pinHash = pin.trim(),
+                    password = password.trim(),
+                    role = UserRole.OWNER,
+                    profileColorHex = "#FF6B1A",
+                    canSellPOS = true,
+                    canApplyDiscounts = true,
+                    canManageInventory = true,
+                    canViewCostAndProfit = true,
+                    canViewAnalytics = true,
+                    canManageCustomers = true,
+                    canCollectDebt = true,
+                    canDeleteRecords = true,
+                    canExportReports = true,
+                    canManageCollaborators = true,
+                    canManageShopSettings = true,
+                    canExportImportData = true
+                )
+                repository.saveUser(ownerUser)
+
+                _currentUser.value = ownerUser
+                _isRegistrationNeeded.value = false
+                _isLocked.value = false
+                _authError.value = null
+                _snackbarMessage.emit("Store '$shopName' & Owner account created successfully!")
+            } catch (e: Exception) {
+                _authError.value = "Registration failed: ${e.message}"
+            }
+        }
+    }
+
+    fun loginWithPin(pin: String): Boolean {
+        viewModelScope.launch {
+            val user = repository.getUserByPin(pin.trim())
             if (user != null) {
                 _currentUser.value = user
                 _isLocked.value = false
                 _authError.value = null
                 repository.updateLastLogin(user.id)
-                _snackbarMessage.emit("Welcome back, ${user.name}!")
-                success = true
+                val welcome = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
+                    "Murakaza neza, ${user.name}!" 
+                    else "Welcome back, ${user.name}!"
+                _snackbarMessage.emit(welcome)
             } else {
-                _authError.value = "Incorrect PIN code. Try again."
+                _authError.value = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
+                    "Umubare wa PIN si wo. Ongera ugerageze." 
+                    else "Incorrect PIN code. Please try again."
             }
         }
-        return success
+        return true
     }
 
     fun loginWithCredentials(username: String, pinOrPass: String): Boolean {
         viewModelScope.launch {
-            val user = repository.getUserByUsername(username)
-            if (user != null && (user.pinHash == pinOrPass || user.password == pinOrPass)) {
+            val user = repository.getUserByUsername(username.trim())
+            if (user != null && (user.pinHash == pinOrPass.trim() || user.password == pinOrPass.trim())) {
                 _currentUser.value = user
                 _isLocked.value = false
                 _authError.value = null
                 repository.updateLastLogin(user.id)
-                _snackbarMessage.emit("Logged in as ${user.name} (${user.role.displayName})")
+                val welcome = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
+                    "Winjiye nka ${user.name} (${user.role.displayName})" 
+                    else "Logged in as ${user.name} (${user.role.displayName})"
+                _snackbarMessage.emit(welcome)
             } else {
-                _authError.value = "Invalid username or credentials"
+                _authError.value = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
+                    "Izina cyangwa ijambobanga si byo" 
+                    else "Invalid username or password"
             }
         }
         return true
+    }
+
+    fun unlockAppWithPin(pin: String): Boolean {
+        val active = _currentUser.value
+        if (active != null && active.pinHash == pin.trim()) {
+            _isLocked.value = false
+            _authError.value = null
+            return true
+        }
+        return loginWithPin(pin)
+    }
+
+    fun lockApp() {
+        _isLocked.value = true
+        _authError.value = null
     }
 
     fun switchUser(user: User) {
@@ -271,34 +409,20 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         _authError.value = null
         viewModelScope.launch {
             repository.updateLastLogin(user.id)
-            _snackbarMessage.emit("Switched active user to: ${user.name}")
+            _snackbarMessage.emit("Active operator: ${user.name}")
         }
     }
 
-    fun lockApp() {
-        _isLocked.value = true
+    fun showRegistrationScreen() {
+        _isRegistrationNeeded.value = true
     }
 
-    fun unlockAppWithPin(pin: String): Boolean {
-        val active = _currentUser.value
-        if (active != null && active.pinHash == pin) {
-            _isLocked.value = false
-            _authError.value = null
-            return true
-        }
-        // Also check if any valid user PIN matches
-        viewModelScope.launch {
-            val matchedUser = repository.getUserByPin(pin)
-            if (matchedUser != null) {
-                _currentUser.value = matchedUser
-                _isLocked.value = false
-                _authError.value = null
-                _snackbarMessage.emit("Unlocked as ${matchedUser.name}")
-            } else {
-                _authError.value = "Incorrect PIN. Try again."
-            }
-        }
-        return false
+    fun cancelRegistration() {
+        _isRegistrationNeeded.value = false
+    }
+
+    fun clearAuthError() {
+        _authError.value = null
     }
 
     fun saveUser(user: User) {
@@ -311,7 +435,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun deleteUser(userId: String) {
         viewModelScope.launch {
             if (_currentUser.value?.id == userId) {
-                _snackbarMessage.emit("Cannot delete currently logged-in account.")
+                _snackbarMessage.emit("Cannot delete the currently active account.")
                 return@launch
             }
             repository.deleteUser(userId)
@@ -319,46 +443,22 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun clearAuthError() {
-        _authError.value = null
-    }
-
-    fun getPaymentsForCustomer(customerId: String) = repository.getPaymentsForCustomer(customerId)
-    fun getSalesForCustomer(customerId: String) = repository.getSalesForCustomer(customerId)
-
-    fun recordCustomerPaymentWithReceipt(
-        customerId: String,
-        customerName: String,
-        amount: Double,
-        paymentMethod: String = "Cash",
-        notes: String = ""
-    ) {
-        viewModelScope.launch {
-            val payment = CustomerPayment(
-                customerId = customerId,
-                customerName = customerName,
-                amount = amount,
-                paymentMethod = paymentMethod,
-                notes = notes
-            )
-            repository.recordCustomerPayment(payment)
-            _snackbarMessage.emit("Payment of ${amount.toInt()} FRw received and recorded!")
-        }
-    }
-
+    // ------------------------------------------------------------------------
+    // NAVIGATION
+    // ------------------------------------------------------------------------
     fun navigateTo(screen: AppScreen) {
         _currentScreen.value = screen
     }
 
     // ------------------------------------------------------------------------
-    // CART & POS ACTIONS
+    // POS & CART
     // ------------------------------------------------------------------------
     fun addToCart(product: Product, quantity: Double = 1.0) {
         val current = _cartState.value.items.toMutableList()
         val index = current.indexOfFirst { it.product.id == product.id }
         if (index >= 0) {
             val existing = current[index]
-            val newQty = (existing.quantity + quantity).coerceAtMost(product.quantityInStock.coerceAtLeast(1.0))
+            val newQty = existing.quantity + quantity
             current[index] = existing.copy(quantity = newQty)
         } else {
             current.add(CartItem(product = product, quantity = quantity))
@@ -429,7 +529,10 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 val saleWithItems = repository.getSaleWithItems(sale.id)
                 _activeReceiptSale.value = saleWithItems
                 clearCart()
-                _snackbarMessage.emit("Sale recorded! Stock updated.")
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
+                    "Igurisha ryakozwe neza! Inyemezabuguzi irasohotse." 
+                    else "Sale recorded successfully! Receipt ready."
+                _snackbarMessage.emit(msg)
             } catch (e: Exception) {
                 _snackbarMessage.emit("Error processing sale: ${e.message}")
             }
@@ -437,7 +540,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // ------------------------------------------------------------------------
-    // PRODUCT ACTIONS
+    // INVENTORY / PRODUCTS
     // ------------------------------------------------------------------------
     fun setProductSearchQuery(query: String) {
         _productSearchQuery.value = query
@@ -454,26 +557,35 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun saveProduct(product: Product) {
         viewModelScope.launch {
             repository.saveProduct(product)
-            _snackbarMessage.emit("Product '${product.name}' saved.")
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
+                "Igicuruzwa '${product.name}' cyabitswe neza." 
+                else "Product '${product.name}' saved."
+            _snackbarMessage.emit(msg)
         }
     }
 
     fun adjustStock(productId: String, delta: Double, reason: String) {
         viewModelScope.launch {
             repository.adjustStock(productId, delta, reason)
-            _snackbarMessage.emit("Stock adjusted (${if (delta > 0) "+$delta" else "$delta"}).")
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
+                "Ingano y'ububiko yahinduwe (${if (delta > 0) "+$delta" else "$delta"})." 
+                else "Stock adjusted (${if (delta > 0) "+$delta" else "$delta"})."
+            _snackbarMessage.emit(msg)
         }
     }
 
     fun deleteProduct(productId: String) {
         viewModelScope.launch {
             repository.deleteProduct(productId)
-            _snackbarMessage.emit("Product deleted.")
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
+                "Igicuruzwa cyasibwe." 
+                else "Product deleted."
+            _snackbarMessage.emit(msg)
         }
     }
 
     // ------------------------------------------------------------------------
-    // CUSTOMER ACTIONS
+    // CUSTOMERS & DEBTS
     // ------------------------------------------------------------------------
     fun setCustomerSearchQuery(query: String) {
         _customerSearchQuery.value = query
@@ -482,26 +594,36 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun saveCustomer(customer: Customer) {
         viewModelScope.launch {
             repository.saveCustomer(customer)
-            _snackbarMessage.emit("Customer '${customer.name}' saved.")
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
+                "Umukiriya '${customer.name}' yanditswe neza." 
+                else "Customer '${customer.name}' saved."
+            _snackbarMessage.emit(msg)
         }
     }
 
     fun recordDebtPayment(customerId: String, amount: Double) {
         viewModelScope.launch {
             repository.recordDebtPayment(customerId, amount)
-            _snackbarMessage.emit("Recorded payment of $amount FRw.")
+            val symbol = shopProfile.value.currencySymbol
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
+                "Kwishyura ${amount.toInt()} $symbol byakiriwe neza!" 
+                else "Recorded payment of ${amount.toInt()} $symbol."
+            _snackbarMessage.emit(msg)
         }
     }
 
     fun deleteCustomer(customerId: String) {
         viewModelScope.launch {
             repository.deleteCustomer(customerId)
-            _snackbarMessage.emit("Customer removed.")
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
+                "Umukiriya yasibwe." 
+                else "Customer removed."
+            _snackbarMessage.emit(msg)
         }
     }
 
     // ------------------------------------------------------------------------
-    // ANALYTICS & SYNC ACTIONS
+    // ANALYTICS & REPORTS
     // ------------------------------------------------------------------------
     fun setAnalyticsPeriod(period: AnalyticsPeriod) {
         _selectedAnalyticsPeriod.value = period
@@ -519,14 +641,10 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun updateShopProfile(profile: ShopProfile) {
         viewModelScope.launch {
             repository.updateShopProfile(profile)
-            _snackbarMessage.emit("Shop profile updated.")
-        }
-    }
-
-    fun seedSampleData() {
-        viewModelScope.launch {
-            repository.seedSampleShopData()
-            _snackbarMessage.emit("Sample inventory and sales loaded.")
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
+                "Amakuru y'ububiko yavuguruwe." 
+                else "Shop profile updated."
+            _snackbarMessage.emit(msg)
         }
     }
 
@@ -548,6 +666,17 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 _snackbarMessage.emit("Shop data package successfully restored!")
             } catch (e: Exception) {
                 _snackbarMessage.emit("Error restoring shop data: ${e.message}")
+            }
+        }
+    }
+
+    fun seedSampleData() {
+        viewModelScope.launch {
+            try {
+                repository.seedSampleShopData()
+                _snackbarMessage.emit("Sample demo data loaded successfully!")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Failed to load sample data: ${e.message}")
             }
         }
     }

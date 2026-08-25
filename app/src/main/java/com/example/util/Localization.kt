@@ -1,0 +1,153 @@
+package com.example.util
+
+enum class AppLanguage(val code: String, val displayName: String, val flag: String) {
+    ENGLISH("en", "English", "🇬🇧"),
+    KINYARWANDA("rw", "Ikinyarwanda", "🇷🇼")
+}
+
+object Localization {
+
+    private val translations = mapOf(
+        // App / Navigation
+        "app_title" to mapOf(AppLanguage.ENGLISH to "BeBoss", AppLanguage.KINYARWANDA to "BeBoss"),
+        "dashboard" to mapOf(AppLanguage.ENGLISH to "Dashboard", AppLanguage.KINYARWANDA to "Ahabanza"),
+        "sales_pos" to mapOf(AppLanguage.ENGLISH to "POS Sale", AppLanguage.KINYARWANDA to "Gucuruza"),
+        "inventory" to mapOf(AppLanguage.ENGLISH to "Inventory", AppLanguage.KINYARWANDA to "Ububiko"),
+        "analytics" to mapOf(AppLanguage.ENGLISH to "Reports & P/L", AppLanguage.KINYARWANDA to "Raporo & Inyungu"),
+        "customers" to mapOf(AppLanguage.ENGLISH to "Customers & Debt", AppLanguage.KINYARWANDA to "Abakiriya & Amadeni"),
+        "sales_history" to mapOf(AppLanguage.ENGLISH to "Sales History", AppLanguage.KINYARWANDA to "Ibyagurishijwe"),
+        "settings" to mapOf(AppLanguage.ENGLISH to "Settings", AppLanguage.KINYARWANDA to "Ibyimiterere"),
+        "lock_terminal" to mapOf(AppLanguage.ENGLISH to "Lock Terminal", AppLanguage.KINYARWANDA to "Funga"),
+        "unlock" to mapOf(AppLanguage.ENGLISH to "Unlock", AppLanguage.KINYARWANDA to "Fungura"),
+        "switch_user" to mapOf(AppLanguage.ENGLISH to "Switch User", AppLanguage.KINYARWANDA to "Guhindura Umucuruzi"),
+        "theme" to mapOf(AppLanguage.ENGLISH to "Theme", AppLanguage.KINYARWANDA to "Insanganyamatsiko"),
+        "language" to mapOf(AppLanguage.ENGLISH to "Language", AppLanguage.KINYARWANDA to "Ururimi"),
+        "dark_mode" to mapOf(AppLanguage.ENGLISH to "Dark Mode", AppLanguage.KINYARWANDA to "Umwijima"),
+        "light_mode" to mapOf(AppLanguage.ENGLISH to "Light Mode", AppLanguage.KINYARWANDA to "Umucyo"),
+
+        // Dashboard
+        "today_overview" to mapOf(AppLanguage.ENGLISH to "TODAY'S PERFORMANCE", AppLanguage.KINYARWANDA to "IBYAGURISHIJWE UYU MUNSI"),
+        "today_revenue" to mapOf(AppLanguage.ENGLISH to "Today's Sales", AppLanguage.KINYARWANDA to "Amafaranga Yinjiye"),
+        "today_profit" to mapOf(AppLanguage.ENGLISH to "Est. Profit", AppLanguage.KINYARWANDA to "Inyungu Yuyu Munsi"),
+        "today_orders" to mapOf(AppLanguage.ENGLISH to "Orders", AppLanguage.KINYARWANDA to "Inyemezabuguzi"),
+        "total_stock_value" to mapOf(AppLanguage.ENGLISH to "Total Stock Value", AppLanguage.KINYARWANDA to "Agaciro k'Ububiko"),
+        "potential_profit" to mapOf(AppLanguage.ENGLISH to "Potential Profit", AppLanguage.KINYARWANDA to "Inyungu Itegerejwe"),
+        "outstanding_debts" to mapOf(AppLanguage.ENGLISH to "Uncollected Debts", AppLanguage.KINYARWANDA to "Amadeni Asigaye Hanze"),
+        "low_stock_warning" to mapOf(AppLanguage.ENGLISH to "Low Stock Items", AppLanguage.KINYARWANDA to "Ibicuruzwa Bishize"),
+        "quick_actions" to mapOf(AppLanguage.ENGLISH to "Quick Actions", AppLanguage.KINYARWANDA to "Ibikorwa Byihuse"),
+        "new_sale_action" to mapOf(AppLanguage.ENGLISH to "New Sale (POS)", AppLanguage.KINYARWANDA to "Kugurisha"),
+        "add_product_action" to mapOf(AppLanguage.ENGLISH to "Add Stock", AppLanguage.KINYARWANDA to "Kongera Ibicuruzwa"),
+        "record_payment_action" to mapOf(AppLanguage.ENGLISH to "Collect Debt", AppLanguage.KINYARWANDA to "Kwakira Umwenda"),
+        "financial_reports_action" to mapOf(AppLanguage.ENGLISH to "View Reports", AppLanguage.KINYARWANDA to "Kureba Raporo"),
+        "recent_sales_title" to mapOf(AppLanguage.ENGLISH to "Recent Transactions", AppLanguage.KINYARWANDA to "Ibiheruka Kugurishwa"),
+        "view_all" to mapOf(AppLanguage.ENGLISH to "View All", AppLanguage.KINYARWANDA to "Reba Byose"),
+        "no_sales_yet" to mapOf(AppLanguage.ENGLISH to "No sales recorded yet. Tap 'POS Sale' to make your first sale!", AppLanguage.KINYARWANDA to "Nta bicuruzwa biragurishwa. Kanda 'Gucuruza' utangire!"),
+
+        // POS
+        "pos_title" to mapOf(AppLanguage.ENGLISH to "Point of Sale", AppLanguage.KINYARWANDA to "Aho Gucururiza"),
+        "search_product_hint" to mapOf(AppLanguage.ENGLISH to "Search product name or barcode...", AppLanguage.KINYARWANDA to "Shakisha izina cyangwa barcode..."),
+        "scan_barcode" to mapOf(AppLanguage.ENGLISH to "Scan / SKU", AppLanguage.KINYARWANDA to "Gusoma Barcode"),
+        "all_categories" to mapOf(AppLanguage.ENGLISH to "All", AppLanguage.KINYARWANDA to "Byose"),
+        "cart" to mapOf(AppLanguage.ENGLISH to "Cart", AppLanguage.KINYARWANDA to "Ikarita"),
+        "empty_cart" to mapOf(AppLanguage.ENGLISH to "Cart is empty. Tap items to add.", AppLanguage.KINYARWANDA to "Nta kintu kiri mu gitebo. Kanda ku gicuruzwa ushyiremo."),
+        "clear_cart" to mapOf(AppLanguage.ENGLISH to "Clear Cart", AppLanguage.KINYARWANDA to "Kumenagura Igitebo"),
+        "customer" to mapOf(AppLanguage.ENGLISH to "Customer", AppLanguage.KINYARWANDA to "Umukiriya"),
+        "walk_in_customer" to mapOf(AppLanguage.ENGLISH to "Walk-in Customer", AppLanguage.KINYARWANDA to "Umuguzi Ushize"),
+        "payment_method" to mapOf(AppLanguage.ENGLISH to "Payment Method", AppLanguage.KINYARWANDA to "Uburyo bwo Kwishyura"),
+        "cash" to mapOf(AppLanguage.ENGLISH to "Cash", AppLanguage.KINYARWANDA to "Amafaranga (Cash)"),
+        "momo" to mapOf(AppLanguage.ENGLISH to "MTN Mobile Money", AppLanguage.KINYARWANDA to "MTN MoMo"),
+        "airtel" to mapOf(AppLanguage.ENGLISH to "Airtel Money", AppLanguage.KINYARWANDA to "Airtel Money"),
+        "card" to mapOf(AppLanguage.ENGLISH to "Debit / Credit Card", AppLanguage.KINYARWANDA to "Ikarita ya Banki"),
+        "credit_debt" to mapOf(AppLanguage.ENGLISH to "Credit / Debt (Ikirarane)", AppLanguage.KINYARWANDA to "Umwenda / Ikirarane"),
+        "subtotal" to mapOf(AppLanguage.ENGLISH to "Subtotal", AppLanguage.KINYARWANDA to "Yose Hamwe"),
+        "discount" to mapOf(AppLanguage.ENGLISH to "Discount", AppLanguage.KINYARWANDA to "Kugabanyirizwa"),
+        "net_total" to mapOf(AppLanguage.ENGLISH to "Net Total", AppLanguage.KINYARWANDA to "Ayishyurwa"),
+        "amount_received" to mapOf(AppLanguage.ENGLISH to "Amount Received", AppLanguage.KINYARWANDA to "Amafaranga Yatanzwe"),
+        "change_return" to mapOf(AppLanguage.ENGLISH to "Change to Return", AppLanguage.KINYARWANDA to "Ibiceri Byo Gusubiza"),
+        "remaining_debt" to mapOf(AppLanguage.ENGLISH to "Remaining Debt Balance", AppLanguage.KINYARWANDA to "Umwenda Asigaranye"),
+        "complete_sale" to mapOf(AppLanguage.ENGLISH to "Complete Sale & Print Receipt", AppLanguage.KINYARWANDA to "Kwakira & Gusohora Inyemezabuguzi"),
+        "insufficient_stock" to mapOf(AppLanguage.ENGLISH to "Insufficient stock available", AppLanguage.KINYARWANDA to "Ibicuruzwa ntibihagije mu bubiko"),
+        "select_customer_for_credit" to mapOf(AppLanguage.ENGLISH to "Please select a registered customer to sell on credit!", AppLanguage.KINYARWANDA to "Hitamo umukiriya wanditse kugira ngo umuhe ku mwenda!"),
+
+        // Inventory
+        "inventory_title" to mapOf(AppLanguage.ENGLISH to "Inventory & Products", AppLanguage.KINYARWANDA to "Ububiko n'Ibicuruzwa"),
+        "add_product" to mapOf(AppLanguage.ENGLISH to "Add New Product", AppLanguage.KINYARWANDA to "Kongeramo Igicuruzwa Gishya"),
+        "product_name" to mapOf(AppLanguage.ENGLISH to "Product Name", AppLanguage.KINYARWANDA to "Izina ry'Igicuruzwa"),
+        "barcode" to mapOf(AppLanguage.ENGLISH to "Barcode / SKU", AppLanguage.KINYARWANDA to "Kode / Barcode"),
+        "category" to mapOf(AppLanguage.ENGLISH to "Category", AppLanguage.KINYARWANDA to "Icyiciro"),
+        "cost_price" to mapOf(AppLanguage.ENGLISH to "Cost Price (Buying)", AppLanguage.KINYARWANDA to "Igiciro Waguriyeho"),
+        "selling_price" to mapOf(AppLanguage.ENGLISH to "Selling Price", AppLanguage.KINYARWANDA to "Igiciro Ugurishirizaho"),
+        "wholesale_price" to mapOf(AppLanguage.ENGLISH to "Wholesale Price", AppLanguage.KINYARWANDA to "Igiciro cya 'En Gros'"),
+        "quantity_in_stock" to mapOf(AppLanguage.ENGLISH to "Quantity in Stock", AppLanguage.KINYARWANDA to "Ingano Iri mu Bubiko"),
+        "min_stock_alert" to mapOf(AppLanguage.ENGLISH to "Min Alert Threshold", AppLanguage.KINYARWANDA to "Ingano y'Iburira"),
+        "unit" to mapOf(AppLanguage.ENGLISH to "Unit (pcs, kg, etc.)", AppLanguage.KINYARWANDA to "Ibipimo (pcs, kg, etc.)"),
+        "adjust_stock" to mapOf(AppLanguage.ENGLISH to "Adjust Stock", AppLanguage.KINYARWANDA to "Guhindura Ingano"),
+        "restock" to mapOf(AppLanguage.ENGLISH to "Restock (New Delivery)", AppLanguage.KINYARWANDA to "Kongeramo Ibyageze"),
+        "damage_loss" to mapOf(AppLanguage.ENGLISH to "Damage / Expired / Loss", AppLanguage.KINYARWANDA to "Ibyangiritse / Ibyataye Igihe"),
+        "inventory_count" to mapOf(AppLanguage.ENGLISH to "Stock Count Correction", AppLanguage.KINYARWANDA to "Gukosora Ibarura"),
+        "stock_valuation" to mapOf(AppLanguage.ENGLISH to "Stock Valuation", AppLanguage.KINYARWANDA to "Agaciro k'Ibicuruzwa"),
+        "cost_valuation" to mapOf(AppLanguage.ENGLISH to "Total Cost Value", AppLanguage.KINYARWANDA to "Ayishyuwe Yose"),
+        "retail_valuation" to mapOf(AppLanguage.ENGLISH to "Retail Value", AppLanguage.KINYARWANDA to "Agaciro k'Ugurishije"),
+        "profit_margin" to mapOf(AppLanguage.ENGLISH to "Est. Gross Profit", AppLanguage.KINYARWANDA to "Inyungu Yitezwe"),
+        "low_stock" to mapOf(AppLanguage.ENGLISH to "Low Stock", AppLanguage.KINYARWANDA to "Bishize"),
+        "in_stock" to mapOf(AppLanguage.ENGLISH to "In Stock", AppLanguage.KINYARWANDA to "Bihari"),
+
+        // Customers & Debt
+        "customers_title" to mapOf(AppLanguage.ENGLISH to "Customers & Debt Ledger", AppLanguage.KINYARWANDA to "Abakiriya & Igitabo cy'Amadeni"),
+        "add_customer" to mapOf(AppLanguage.ENGLISH to "Add Customer", AppLanguage.KINYARWANDA to "Kwandika Umukiriya"),
+        "customer_name" to mapOf(AppLanguage.ENGLISH to "Customer Full Name", AppLanguage.KINYARWANDA to "Amazina y'Umukiriya"),
+        "phone_number" to mapOf(AppLanguage.ENGLISH to "Phone Number", AppLanguage.KINYARWANDA to "Nimero ya Terefone"),
+        "address" to mapOf(AppLanguage.ENGLISH to "Address / Location", AppLanguage.KINYARWANDA to "Aho Aherereye"),
+        "credit_limit" to mapOf(AppLanguage.ENGLISH to "Credit Limit", AppLanguage.KINYARWANDA to "Umupaka w'Umwenda"),
+        "total_debt" to mapOf(AppLanguage.ENGLISH to "Current Debt", AppLanguage.KINYARWANDA to "Umwenda Afite"),
+        "record_payment" to mapOf(AppLanguage.ENGLISH to "Record Debt Payment", AppLanguage.KINYARWANDA to "Kwandika Kwishyura"),
+        "send_reminder" to mapOf(AppLanguage.ENGLISH to "Send WhatsApp Reminder", AppLanguage.KINYARWANDA to "Kohereza Ubutumwa bwo Kwishyuza"),
+        "debt_statement" to mapOf(AppLanguage.ENGLISH to "Customer Statement", AppLanguage.KINYARWANDA to "Ibyangombwa by'Umukiriya"),
+        "no_debt" to mapOf(AppLanguage.ENGLISH to "No Debt (Cleared)", AppLanguage.KINYARWANDA to "Nta mwenda afite"),
+
+        // Analytics & Reports
+        "reports_title" to mapOf(AppLanguage.ENGLISH to "Business Analytics & P/L", AppLanguage.KINYARWANDA to "Raporo z'Ubucuruzi & Inyungu"),
+        "period_today" to mapOf(AppLanguage.ENGLISH to "Today", AppLanguage.KINYARWANDA to "Uyu munsi"),
+        "period_yesterday" to mapOf(AppLanguage.ENGLISH to "Yesterday", AppLanguage.KINYARWANDA to "Ejo hashize"),
+        "period_this_week" to mapOf(AppLanguage.ENGLISH to "This Week", AppLanguage.KINYARWANDA to "Iki Cyumweru"),
+        "period_this_month" to mapOf(AppLanguage.ENGLISH to "This Month", AppLanguage.KINYARWANDA to "Uku Kwezi"),
+        "period_this_year" to mapOf(AppLanguage.ENGLISH to "This Year", AppLanguage.KINYARWANDA to "Uyu Mwaka"),
+        "period_all_time" to mapOf(AppLanguage.ENGLISH to "All Time", AppLanguage.KINYARWANDA to "Igihe Cyose"),
+        "gross_revenue" to mapOf(AppLanguage.ENGLISH to "Gross Revenue", AppLanguage.KINYARWANDA to "Amafaranga Yinjiye"),
+        "cost_of_goods" to mapOf(AppLanguage.ENGLISH to "Cost of Goods (COGS)", AppLanguage.KINYARWANDA to "Igiciro cy'Ibyagurishijwe"),
+        "gross_profit" to mapOf(AppLanguage.ENGLISH to "Net Gross Profit", AppLanguage.KINYARWANDA to "Inyungu Nyayo"),
+        "profit_margin_pct" to mapOf(AppLanguage.ENGLISH to "Profit Margin %", AppLanguage.KINYARWANDA to "Ijanisha ry'Inyungu"),
+        "top_selling_products" to mapOf(AppLanguage.ENGLISH to "Top Selling Products", AppLanguage.KINYARWANDA to "Ibicuruzwa Byagurishijwe Cyane"),
+        "category_sales_share" to mapOf(AppLanguage.ENGLISH to "Sales by Category", AppLanguage.KINYARWANDA to "Ibyaguzwe ku Byiciro"),
+        "export_pdf_report" to mapOf(AppLanguage.ENGLISH to "Export PDF Financial Report", AppLanguage.KINYARWANDA to "Gusohora Raporo ya PDF"),
+
+        // Auth & Security
+        "auth_lock_title" to mapOf(AppLanguage.ENGLISH to "Terminal Locked", AppLanguage.KINYARWANDA to "Urubuga Rufunze"),
+        "enter_pin" to mapOf(AppLanguage.ENGLISH to "Enter 4-Digit Security PIN", AppLanguage.KINYARWANDA to "Injiza Umubare w'Ibanga (PIN)"),
+        "enter_credentials" to mapOf(AppLanguage.ENGLISH to "Sign In with Credentials", AppLanguage.KINYARWANDA to "Injira Ukoresheje Umwirondoro"),
+        "username_or_phone" to mapOf(AppLanguage.ENGLISH to "Username or Phone", AppLanguage.KINYARWANDA to "Izina cyangwa Terefone"),
+        "password" to mapOf(AppLanguage.ENGLISH to "Password", AppLanguage.KINYARWANDA to "Ijambobanga"),
+        "create_store_account" to mapOf(AppLanguage.ENGLISH to "Setup Shop & Owner Account", AppLanguage.KINYARWANDA to "Gushinga Ububiko & Konti"),
+        "owner_role" to mapOf(AppLanguage.ENGLISH to "Shop Owner", AppLanguage.KINYARWANDA to "Nyir'Ububiko"),
+        "manager_role" to mapOf(AppLanguage.ENGLISH to "Store Manager", AppLanguage.KINYARWANDA to "Umuyobozi w'Ububiko"),
+        "cashier_role" to mapOf(AppLanguage.ENGLISH to "Cashier / Operator", AppLanguage.KINYARWANDA to "Umucuruzi"),
+        "security_warning" to mapOf(AppLanguage.ENGLISH to "Offline Protected Register — No internet required", AppLanguage.KINYARWANDA to "Birinzwe kurubuga rwose ruri offline — Nta internet ikenewe"),
+
+        // Settings
+        "settings_title" to mapOf(AppLanguage.ENGLISH to "Shop & System Settings", AppLanguage.KINYARWANDA to "Ibyimiterere by'Ububiko"),
+        "shop_profile" to mapOf(AppLanguage.ENGLISH to "Shop Profile & Info", AppLanguage.KINYARWANDA to "Amakuru y'Ububiko"),
+        "staff_management" to mapOf(AppLanguage.ENGLISH to "Staff & Cashier Accounts", AppLanguage.KINYARWANDA to "Abakozi & Abacuruzi"),
+        "data_backup" to mapOf(AppLanguage.ENGLISH to "Offline Backup & Export", AppLanguage.KINYARWANDA to "Kubika Kopi (Backup)"),
+        "restore_data" to mapOf(AppLanguage.ENGLISH to "Restore Shop Data", AppLanguage.KINYARWANDA to "Kugarura Kopi"),
+        "currency" to mapOf(AppLanguage.ENGLISH to "Currency", AppLanguage.KINYARWANDA to "Ifaranga ry'Igihugu"),
+        "receipt_footer_text" to mapOf(AppLanguage.ENGLISH to "Receipt Footer Note", AppLanguage.KINYARWANDA to "Ubutumwa bwo ku Nyemezabuguzi"),
+        "save_changes" to mapOf(AppLanguage.ENGLISH to "Save Changes", AppLanguage.KINYARWANDA to "Bika Impinduka"),
+        "cancel" to mapOf(AppLanguage.ENGLISH to "Cancel", AppLanguage.KINYARWANDA to "Reka"),
+        "delete" to mapOf(AppLanguage.ENGLISH to "Delete", AppLanguage.KINYARWANDA to "Gusiba"),
+        "edit" to mapOf(AppLanguage.ENGLISH to "Edit", AppLanguage.KINYARWANDA to "Guhindura")
+    )
+
+    fun get(key: String, language: AppLanguage): String {
+        return translations[key]?.get(language) ?: translations[key]?.get(AppLanguage.ENGLISH) ?: key
+    }
+}
