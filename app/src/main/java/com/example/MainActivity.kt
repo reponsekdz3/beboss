@@ -90,6 +90,10 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     // Auth, Theme & Language state
     val currentUser by viewModel.currentUser.collectAsState()
     val allUsers by viewModel.allUsers.collectAsState()
+    val branches by viewModel.branches.collectAsState()
+    val selectedBranchId by viewModel.selectedBranchId.collectAsState()
+    val connectivityStatus by viewModel.connectivityStatus.collectAsState()
+    val cloudSyncReport by viewModel.cloudSyncReport.collectAsState()
     val isLocked by viewModel.isLocked.collectAsState()
     val isRegistrationNeeded by viewModel.isRegistrationNeeded.collectAsState()
     val authError by viewModel.authError.collectAsState()
@@ -303,18 +307,24 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 shopProfile = shopProfile,
                                 currentUser = currentUser,
                                 allUsers = allUsers,
+                                branches = branches,
                                 products = allProducts,
                                 customers = customers,
                                 sales = allSales,
                                 customerPayments = allCustomerPayments,
                                 pendingSyncCount = pendingSyncCount,
                                 isSyncing = isSyncing,
+                                connectivityStatus = connectivityStatus,
+                                cloudSyncReport = cloudSyncReport,
                                 language = currentLanguage,
                                 isDarkTheme = isDarkTheme,
                                 onToggleLanguage = { viewModel.toggleLanguage() },
                                 onToggleTheme = { viewModel.toggleDarkMode() },
                                 onSaveProfile = { prof -> viewModel.updateShopProfile(prof) },
                                 onSyncNow = { viewModel.performSync() },
+                                onSyncToCloudNow = { viewModel.syncToCloudNow() },
+                                onSaveBranch = { b -> viewModel.saveBranch(b) },
+                                onDeleteBranch = { bId -> viewModel.deleteBranch(bId) },
                                 onSaveUser = { u -> viewModel.saveUser(u) },
                                 onDeleteUser = { uId -> viewModel.deleteUser(uId) },
                                 onImportPackage = { summary -> viewModel.importShopPackage(summary) },

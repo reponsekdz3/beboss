@@ -33,6 +33,7 @@ import java.util.UUID
 
 class BeBossRepository(private val database: AppDatabase) {
 
+    private val branchDao = database.branchDao()
     private val productDao = database.productDao()
     private val customerDao = database.customerDao()
     private val customerPaymentDao = database.customerPaymentDao()
@@ -40,6 +41,66 @@ class BeBossRepository(private val database: AppDatabase) {
     private val shopProfileDao = database.shopProfileDao()
     private val syncQueueDao = database.syncQueueDao()
     private val userDao = database.userDao()
+
+    val cloudSyncManager = com.example.util.CloudSyncManager(database)
+
+    // -------------------------------------------------------------
+    // BRANCHES & MULTI-STORE MANAGEMENT
+    // -------------------------------------------------------------
+    val allBranches: Flow<List<com.example.data.model.Branch>> = branchDao.getAllActiveBranches()
+
+    suspend fun getAllBranchesList(): List<com.example.data.model.Branch> = withContext(Dispatchers.IO) {
+        branchDao.getAllActiveBranchesList()
+    }
+
+    suspend fun saveBranch(branch: com.example.data.model.Branch) = withContext(Dispatchers.IO) {
+        val toSave = branch.copy(updatedAt = System.currentTimeMillis())
+        branchDao.insertBranch(toSave)
+        enqueueSync("branches", toSave.id, "UPDATE", """{"name":"${toSave.name}","code":"${toSave.code}"}""")
+    }
+
+    suspend fun deleteBranch(branchId: String) = withContext(Dispatchers.IO) {
+        branchDao.softDeleteBranch(branchId)
+        enqueueSync("branches", branchId, "DELETE", """{"id":"$branchId"}""")
+    }
+
+    suspend fun ensureDefaultBranches(): List<com.example.data.model.Branch> = withContext(Dispatchers.IO) {
+        val count = branchDao.getBranchCount()
+        if (count == 0) {
+            val mainBranch = com.example.data.model.Branch(
+                id = "main_branch",
+                name = "Main Store (Nyarugenge)",
+                code = "HQ-01",
+                address = "Nyarugenge Market, Shop #42, Kigali",
+                phone = "+250 788 123 456",
+                isMainBranch = true,
+                colorHex = "#FF6B1A"
+            )
+            val kimironkoBranch = com.example.data.model.Branch(
+                id = "branch_kimironko",
+                name = "Kimironko Branch",
+                code = "KMR-02",
+                address = "Kimironko Market Sector 4, Kigali",
+                phone = "+250 788 654 321",
+                isMainBranch = false,
+                colorHex = "#2563EB"
+            )
+            val nyabugogoBranch = com.example.data.model.Branch(
+                id = "branch_nyabugogo",
+                name = "Nyabugogo Depot",
+                code = "NYB-03",
+                address = "Nyabugogo Commercial Center",
+                phone = "+250 789 111 222",
+                isMainBranch = false,
+                colorHex = "#10B981"
+            )
+            val initialList = listOf(mainBranch, kimironkoBranch, nyabugogoBranch)
+            branchDao.insertAllBranches(initialList)
+            initialList
+        } else {
+            branchDao.getAllActiveBranchesList()
+        }
+    }
 
     // -------------------------------------------------------------
     // USERS & AUTHENTICATION
@@ -149,10 +210,21 @@ class BeBossRepository(private val database: AppDatabase) {
         return saleDao.getSalesForCustomer(customerId)
     }
 
-    suspend fun recordCustomerPayment(payment: CustomerPayment) = withContext(Dispatchers.IO) {
-        customerPaymentDao.insertPayment(payment)
+    suspend fun recordCustomerPayment(payment: CustomerPayment): CustomerPayment = withContext(Dispatchers.IO) {
+        val customer = customerDao.getCustomerById(payment.customerId)
+        val currentDebt = customer?.debtBalance ?: 0.0
+        val remaining = (currentDebt - payment.amount).coerceAtLeast(0.0)
+
+        val updatedPayment = payment.copy(
+            previousDebt = currentDebt,
+            remainingDebt = remaining
+        )
+
+        customerPaymentDao.insertPayment(updatedPayment)
         customerDao.recordDebtPayment(payment.customerId, payment.amount)
-        enqueueSync("customer_payments", payment.id, "CREATE", """{"customerId":"${payment.customerId}","amount":${payment.amount},"method":"${payment.paymentMethod}"}""")
+        enqueueSync("customer_payments", updatedPayment.id, "CREATE", """{"customerId":"${updatedPayment.customerId}","amount":${updatedPayment.amount},"prevDebt":$currentDebt,"remDebt":$remaining,"method":"${updatedPayment.paymentMethod}"}""")
+        
+        updatedPayment
     }
 
     // -------------------------------------------------------------
@@ -271,7 +343,11 @@ class BeBossRepository(private val database: AppDatabase) {
         discountAmount: Double,
         paymentMethod: String,
         amountPaid: Double,
-        notes: String
+        notes: String,
+        branchId: String = "main_branch",
+        branchName: String = "Main Store",
+        cashierId: String = "",
+        cashierName: String = "Shop Operator"
     ): Sale = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         val saleId = UUID.randomUUID().toString()
@@ -305,6 +381,10 @@ class BeBossRepository(private val database: AppDatabase) {
             amountPaid = amountPaid,
             notes = notes,
             receiptNumber = receiptNum,
+            branchId = branchId,
+            branchName = branchName,
+            cashierId = cashierId,
+            cashierName = cashierName,
             synced = false,
             updatedAt = now
         )
@@ -323,7 +403,8 @@ class BeBossRepository(private val database: AppDatabase) {
                 costPriceAtSale = cart.product.costPrice,
                 unitPriceAtSale = cart.product.sellingPrice,
                 subtotal = sub,
-                profit = sub - itemCost
+                profit = sub - itemCost,
+                branchId = branchId
             )
         }
 
@@ -490,28 +571,16 @@ class BeBossRepository(private val database: AppDatabase) {
     }
 
     /**
-     * Pushes pending queue to cloud / resolves conflicts with Last-Write-Wins
+     * Pushes pending queue and full store records to cloud / Firebase backend
      */
     suspend fun performSync(): SyncResult = withContext(Dispatchers.IO) {
         try {
-            val pending = syncQueueDao.getPendingQueueDirect()
-            val now = System.currentTimeMillis()
-
-            if (pending.isNotEmpty()) {
-                val ids = pending.map { it.id }
-                // In production, HTTP POST to /sync/push occurs here.
-                // Upon success, mark items as synced:
-                syncQueueDao.markAllSynced(ids, now)
-            }
-
-            // Mark unsynced sales as synced
-            val unsyncedSales = saleDao.getUnsyncedSales()
-            for (s in unsyncedSales) {
-                saleDao.markSaleSynced(s.id, now)
-            }
-
-            shopProfileDao.updateLastSyncedAt(now)
-            SyncResult(success = true, syncedCount = pending.size, message = "Synced ${pending.size} pending items successfully.")
+            val report = cloudSyncManager.syncAllDataToCloud()
+            SyncResult(
+                success = report.state == com.example.util.CloudSyncState.SYNCED,
+                syncedCount = report.itemsPushed,
+                message = report.message
+            )
         } catch (e: Exception) {
             SyncResult(success = false, syncedCount = 0, message = "Sync failed: ${e.localizedMessage ?: "Unknown error"}")
         }

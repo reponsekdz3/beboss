@@ -202,7 +202,36 @@ object Localization {
         "enter_amount_rwf" to mapOf(AppLanguage.ENGLISH to "Amount (RWF)", AppLanguage.KINYARWANDA to "Amafaranga (FRw)"),
         "item_description_optional" to mapOf(AppLanguage.ENGLISH to "Item description (optional)", AppLanguage.KINYARWANDA to "Ibisobanuro (niba bihari)"),
         "add_and_checkout" to mapOf(AppLanguage.ENGLISH to "Checkout Now", AppLanguage.KINYARWANDA to "Kwishyura Ako Kanya"),
-        "add_to_cart_action" to mapOf(AppLanguage.ENGLISH to "Add to Cart", AppLanguage.KINYARWANDA to "Shyira mu Gikapu")
+        "add_to_cart_action" to mapOf(AppLanguage.ENGLISH to "Add to Cart", AppLanguage.KINYARWANDA to "Shyira mu Gikapu"),
+
+        // Branches & Multi-Store Management
+        "branches_title" to mapOf(AppLanguage.ENGLISH to "Branches & Stores", AppLanguage.KINYARWANDA to "Amashami n'Ububiko"),
+        "manage_branches" to mapOf(AppLanguage.ENGLISH to "Manage Branches", AppLanguage.KINYARWANDA to "Gucunga Amashami"),
+        "add_branch" to mapOf(AppLanguage.ENGLISH to "Add New Branch", AppLanguage.KINYARWANDA to "Ongeraho Ishami Rishya"),
+        "branch_name" to mapOf(AppLanguage.ENGLISH to "Branch Name", AppLanguage.KINYARWANDA to "Izina ry'Ishami"),
+        "branch_code" to mapOf(AppLanguage.ENGLISH to "Branch Code", AppLanguage.KINYARWANDA to "Kode y'Ishami"),
+        "select_branch" to mapOf(AppLanguage.ENGLISH to "Filter by Branch", AppLanguage.KINYARWANDA to "Guhitamo Ishami"),
+        "all_branches" to mapOf(AppLanguage.ENGLISH to "All Branches (Consolidated)", AppLanguage.KINYARWANDA to "Amashami Yose Hamwe"),
+        "main_branch_badge" to mapOf(AppLanguage.ENGLISH to "Main HQ Branch", AppLanguage.KINYARWANDA to "Ishami Rikuru"),
+        "assigned_branch" to mapOf(AppLanguage.ENGLISH to "Assigned Branch", AppLanguage.KINYARWANDA to "Ishami Akoreramo"),
+        "branch_earnings" to mapOf(AppLanguage.ENGLISH to "Branch Earnings", AppLanguage.KINYARWANDA to "Inyungu z'Ishami"),
+
+        // Advanced Debt Tracking & Installments
+        "previous_debt" to mapOf(AppLanguage.ENGLISH to "Previous Debt", AppLanguage.KINYARWANDA to "Umwenda wari usanzwe"),
+        "amount_paid" to mapOf(AppLanguage.ENGLISH to "Amount Paid", AppLanguage.KINYARWANDA to "Ayishyuwe"),
+        "remaining_debt" to mapOf(AppLanguage.ENGLISH to "Remaining Debt", AppLanguage.KINYARWANDA to "Asigaye"),
+        "debt_cleared" to mapOf(AppLanguage.ENGLISH to "DEBT CLEARED", AppLanguage.KINYARWANDA to "YARANGIYE NEZA"),
+        "installment_history" to mapOf(AppLanguage.ENGLISH to "Payment & Installment History", AppLanguage.KINYARWANDA to "Uko Yagiye Yishyura"),
+        "auto_debt_saved" to mapOf(AppLanguage.ENGLISH to "Debt automatically recorded to ledger", AppLanguage.KINYARWANDA to "Umwenda wahise ubikwa mu gitabo"),
+
+        // Cloud & Internet Auto Sync
+        "cloud_sync_title" to mapOf(AppLanguage.ENGLISH to "Cloud Sync & Firebase", AppLanguage.KINYARWANDA to "Guhuza n'Ububiko bwo mu Kirere (Cloud)"),
+        "cloud_live_sync" to mapOf(AppLanguage.ENGLISH to "Live Internet Auto-Sync", AppLanguage.KINYARWANDA to "Guhuza amakuru ako kanya iyo internet ihari"),
+        "cloud_online" to mapOf(AppLanguage.ENGLISH to "Cloud Online (Live)", AppLanguage.KINYARWANDA to "Biri kuri Internet (Online)"),
+        "cloud_offline" to mapOf(AppLanguage.ENGLISH to "Offline Safe (Queued)", AppLanguage.KINYARWANDA to "Bikora Offline"),
+        "push_to_cloud" to mapOf(AppLanguage.ENGLISH to "Push All Data to Cloud", AppLanguage.KINYARWANDA to "Ohereza Byose kuri Cloud"),
+        "sync_completed" to mapOf(AppLanguage.ENGLISH to "Cloud Sync Complete", AppLanguage.KINYARWANDA to "Byamaze guhuzwa byose"),
+        "firebase_cloud_connected" to mapOf(AppLanguage.ENGLISH to "Firebase Cloud Storage Active", AppLanguage.KINYARWANDA to "Firebase Cloud Irakora")
     )
 
     fun get(key: String, language: AppLanguage): String {

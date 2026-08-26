@@ -19,6 +19,10 @@ data class Sale(
     val amountPaid: Double = 0.0,
     val notes: String = "",
     val receiptNumber: String = "",
+    val branchId: String = "main_branch",
+    val branchName: String = "Main Store",
+    val cashierId: String = "",
+    val cashierName: String = "Shop Operator",
     val synced: Boolean = false,
     val updatedAt: Long = System.currentTimeMillis()
 )
@@ -35,7 +39,8 @@ data class SaleItem(
     val costPriceAtSale: Double = 0.0,
     val unitPriceAtSale: Double = 0.0,
     val subtotal: Double = 0.0,
-    val profit: Double = 0.0
+    val profit: Double = 0.0,
+    val branchId: String = "main_branch"
 )
 
 data class SaleWithItems(

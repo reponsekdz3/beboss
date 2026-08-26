@@ -13,6 +13,9 @@ interface ProductDao {
     @Query("SELECT * FROM products WHERE isDeleted = 0 ORDER BY name ASC")
     fun getAllProducts(): Flow<List<Product>>
 
+    @Query("SELECT * FROM products WHERE isDeleted = 0 ORDER BY name ASC")
+    suspend fun getAllProductsList(): List<Product>
+
     @Query("SELECT * FROM products WHERE isDeleted = 0 AND (name LIKE '%' || :query || '%' OR category LIKE '%' || :query || '%' OR barcode LIKE '%' || :query || '%') ORDER BY name ASC")
     fun searchProducts(query: String): Flow<List<Product>>
 

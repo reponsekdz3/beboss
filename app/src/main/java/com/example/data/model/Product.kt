@@ -15,6 +15,7 @@ data class Product(
     val lowStockThreshold: Double = 5.0,
     val unit: String = "pcs", // pcs, kg, litre, pack, box, bottle
     val barcode: String = "",
+    val branchId: String = "main_branch",
     val isDeleted: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()

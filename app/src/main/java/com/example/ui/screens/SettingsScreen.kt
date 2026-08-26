@@ -106,18 +106,24 @@ fun SettingsScreen(
     shopProfile: ShopProfile,
     currentUser: User? = null,
     allUsers: List<User> = emptyList(),
+    branches: List<com.example.data.model.Branch> = emptyList(),
     products: List<Product> = emptyList(),
     customers: List<Customer> = emptyList(),
     sales: List<Sale> = emptyList(),
     customerPayments: List<CustomerPayment> = emptyList(),
     pendingSyncCount: Int = 0,
     isSyncing: Boolean = false,
+    connectivityStatus: com.example.util.ConnectivityStatus = com.example.util.ConnectivityStatus.AVAILABLE,
+    cloudSyncReport: com.example.util.CloudSyncReport? = null,
     language: AppLanguage,
     isDarkTheme: Boolean,
     onToggleLanguage: () -> Unit,
     onToggleTheme: () -> Unit,
     onSaveProfile: (ShopProfile) -> Unit,
     onSyncNow: () -> Unit = {},
+    onSyncToCloudNow: () -> Unit = {},
+    onSaveBranch: (com.example.data.model.Branch) -> Unit = {},
+    onDeleteBranch: (String) -> Unit = {},
     onSaveUser: (User) -> Unit = {},
     onDeleteUser: (String) -> Unit = {},
     onImportPackage: (ShopImportSummary) -> Unit = {},
@@ -138,6 +144,7 @@ fun SettingsScreen(
 
     var currencyExpanded by remember { mutableStateOf(false) }
     var showStaffDialog by remember { mutableStateOf(false) }
+    var showBranchDialog by remember { mutableStateOf(false) }
     var showDataTransferDialog by remember { mutableStateOf(false) }
     var showSubscriptionDialog by remember { mutableStateOf(false) }
     var showLogoutConfirm by remember { mutableStateOf(false) }
@@ -346,13 +353,13 @@ fun SettingsScreen(
                         }
 
                         OutlinedButton(
-                            onClick = { showDataTransferDialog = true },
+                            onClick = { showBranchDialog = true },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(Icons.Default.DataObject, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Storefront, contentDescription = null, modifier = Modifier.size(16.dp), tint = OrangePrimary)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text(Localization.get("data_backup", language), fontSize = 12.sp)
+                            Text(if (language == AppLanguage.KINYARWANDA) "Amashami" else "Branches (${branches.size})", fontSize = 12.sp, color = OrangePrimary, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -363,6 +370,16 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedButton(
+                            onClick = { showDataTransferDialog = true },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.DataObject, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(Localization.get("data_backup", language), fontSize = 12.sp)
+                        }
+
+                        OutlinedButton(
                             onClick = {
                                 OfflineSubscriptionManager.shareAppApkOffline(context)
                             },
@@ -371,17 +388,135 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp), tint = OrangePrimary)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Share APK (Offline)", fontSize = 12.sp, color = OrangePrimary, fontWeight = FontWeight.Bold)
+                            Text("Share APK", fontSize = 12.sp, color = OrangePrimary, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedButton(
+                        onClick = { showLogoutConfirm = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = LossRed)
+                    ) {
+                        Text(Localization.get("logout", language), fontSize = 12.sp, color = LossRed, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // 2.5 Real-Time Firebase Cloud Auto-Sync Card
+        item {
+            val isOnline = connectivityStatus == com.example.util.ConnectivityStatus.AVAILABLE
+            val isSyncingNow = isSyncing
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isOnline) ProfitGreen.copy(alpha = 0.15f) else Color(0xFF64748B).copy(alpha = 0.15f),
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = if (isOnline) Icons.Default.CloudDone else Icons.Default.Sync,
+                                        contentDescription = null,
+                                        tint = if (isOnline) ProfitGreen else Color(0xFF64748B),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = if (language == AppLanguage.KINYARWANDA) "Guhuza n'Ububiko bwo hejuru (Cloud)" else "Cloud & Multi-Device Sync",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (isOnline) {
+                                        if (language == AppLanguage.KINYARWANDA) "Interineti irahari • Guhuza byikora" else "Online • Auto-syncing on changes"
+                                    } else {
+                                        if (language == AppLanguage.KINYARWANDA) "Nta interineti • Ibintu byose bibitswe muri telefoni" else "Offline • Safe local storage active"
+                                    },
+                                    fontSize = 11.sp,
+                                    color = if (isOnline) ProfitGreen else Color(0xFF64748B),
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
 
-                        OutlinedButton(
-                            onClick = { showLogoutConfirm = true },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = LossRed)
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isOnline) ProfitGreen.copy(alpha = 0.15f) else Color(0xFF64748B).copy(alpha = 0.15f)
                         ) {
-                            Text(Localization.get("logout", language), fontSize = 12.sp, color = LossRed, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = if (isOnline) "LIVE" else "OFFLINE",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black,
+                                color = if (isOnline) ProfitGreen else Color(0xFF64748B),
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                            )
                         }
+                    }
+
+                    if (cloudSyncReport != null) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = if (language == AppLanguage.KINYARWANDA) "Ibiherutse guhuzwa na Cloud:" else "Last Cloud Sync Payload:",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = DarkNavy
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = "• ${cloudSyncReport.productsCount} Products  • ${cloudSyncReport.debtsCount} Debts/Customers  • ${cloudSyncReport.salesCount} Sales  • ${cloudSyncReport.branchesCount} Branches",
+                                    fontSize = 11.sp,
+                                    color = InkMedium
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Button(
+                        onClick = onSyncToCloudNow,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = if (isOnline) OrangePrimary else Color(0xFF475569)),
+                        shape = RoundedCornerShape(10.dp),
+                        enabled = !isSyncingNow
+                    ) {
+                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isSyncingNow) {
+                                if (language == AppLanguage.KINYARWANDA) "Kugenzura no Guhuza..." else "Pushing to Cloud..."
+                            } else {
+                                if (language == AppLanguage.KINYARWANDA) "Ohereza Amakuru kuri Cloud Nonaha" else "Push All Data to Cloud Now"
+                            },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
                     }
                 }
             }
@@ -644,6 +779,18 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    // Branch Management Dialog
+    if (showBranchDialog) {
+        BranchManagementDialog(
+            branches = branches,
+            allUsers = allUsers,
+            language = language,
+            onSaveBranch = onSaveBranch,
+            onDeleteBranch = onDeleteBranch,
+            onDismiss = { showBranchDialog = false }
+        )
     }
 
     // Staff Management Dialog

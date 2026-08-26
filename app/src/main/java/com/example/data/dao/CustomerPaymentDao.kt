@@ -12,6 +12,9 @@ interface CustomerPaymentDao {
     @Query("SELECT * FROM customer_payments ORDER BY paymentDate DESC")
     fun getAllPayments(): Flow<List<CustomerPayment>>
 
+    @Query("SELECT * FROM customer_payments ORDER BY paymentDate DESC")
+    suspend fun getAllPaymentsList(): List<CustomerPayment>
+
     @Query("SELECT * FROM customer_payments WHERE customerId = :customerId ORDER BY paymentDate DESC")
     fun getPaymentsForCustomer(customerId: String): Flow<List<CustomerPayment>>
 

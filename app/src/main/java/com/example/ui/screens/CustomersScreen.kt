@@ -979,6 +979,9 @@ fun RecordDebtPaymentDialog(
     onDismiss: () -> Unit
 ) {
     var amountStr by remember { mutableStateOf("${customer.debtBalance.toInt()}") }
+    var paymentMethod by remember { mutableStateOf("Cash") }
+    val parsedAmount = amountStr.toDoubleOrNull() ?: 0.0
+    val remainingDebt = (customer.debtBalance - parsedAmount).coerceAtLeast(0.0)
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -986,16 +989,20 @@ fun RecordDebtPaymentDialog(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White)
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 Text(
-                    text = "Record Debt Payment",
-                    fontSize = 17.sp,
+                    text = "Kwishyura Umwenda (Debt Payment)",
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = InkDark
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(3.dp))
                 Text(
-                    text = "Customer: ${customer.name}",
+                    text = "Umukiriya (Customer): ${customer.name}",
                     fontSize = 13.sp,
                     color = OrangePrimary,
                     fontWeight = FontWeight.SemiBold
@@ -1003,6 +1010,7 @@ fun RecordDebtPaymentDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // Current Debt Box
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = Color(0xFFFEE2E2),
@@ -1010,9 +1018,10 @@ fun RecordDebtPaymentDialog(
                 ) {
                     Row(
                         modifier = Modifier.padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Current Outstanding Debt:", fontSize = 13.sp, color = LossRed)
+                        Text("Umwenda wose (Total Debt):", fontSize = 12.sp, color = LossRed, fontWeight = FontWeight.Medium)
                         Text(
                             ReceiptGenerator.formatMoney(customer.debtBalance, shopProfile),
                             fontSize = 14.sp,
@@ -1022,19 +1031,19 @@ fun RecordDebtPaymentDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedTextField(
                     value = amountStr,
                     onValueChange = { amountStr = it },
-                    label = { Text("Payment Received (${shopProfile.currencySymbol})") },
+                    label = { Text("Amafaranga Yishyuwe (Amount Paid in ${shopProfile.currencySymbol})") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
                     singleLine = true
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Quick buttons: Full, Half
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1043,7 +1052,13 @@ fun RecordDebtPaymentDialog(
                         shape = RoundedCornerShape(8.dp),
                         color = Color(0xFFDCFCE7)
                     ) {
-                        Text("Full (${customer.debtBalance.toInt()})", fontSize = 12.sp, color = ProfitGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                        Text(
+                            "Kwishyura Yose Full (${customer.debtBalance.toInt()})",
+                            fontSize = 11.sp,
+                            color = ProfitGreen,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                        )
                     }
 
                     if (customer.debtBalance > 1) {
@@ -1052,12 +1067,81 @@ fun RecordDebtPaymentDialog(
                             shape = RoundedCornerShape(8.dp),
                             color = Color(0xFFF3F4F6)
                         ) {
-                            Text("Half (${(customer.debtBalance / 2).toInt()})", fontSize = 12.sp, color = InkDark, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                            Text(
+                                "Kimwe cya Kabiri Half (${(customer.debtBalance / 2).toInt()})",
+                                fontSize = 11.sp,
+                                color = InkDark,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                            )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Live Auto-Calculation Remaining Debt Box
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (remainingDebt == 0.0) Color(0xFFECFDF5) else Color(0xFFFFFBEB),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (remainingDebt == 0.0) ProfitGreen.copy(alpha = 0.5f) else Color(0xFFFDE68A)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = if (remainingDebt == 0.0) "Umwenda Uzashira Wose!" else "Ayasigaye (Remaining Debt):",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (remainingDebt == 0.0) ProfitGreen else Color(0xFFB45309)
+                            )
+                            Text(
+                                text = ReceiptGenerator.formatMoney(remainingDebt, shopProfile),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Black,
+                                color = if (remainingDebt == 0.0) ProfitGreen else Color(0xFFB45309)
+                            )
+                        }
+                        if (remainingDebt == 0.0) {
+                            Text(
+                                text = "Debt will be fully settled to 0 ${shopProfile.currencySymbol}",
+                                fontSize = 11.sp,
+                                color = ProfitGreen
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Payment Method Chips
+                Text("Uburyo Bwishyuwe (Method):", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = InkDark)
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf("Cash", "MTN MoMo", "Airtel", "Bank").forEach { method ->
+                        val isSelected = paymentMethod == method
+                        Surface(
+                            onClick = { paymentMethod = method },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) OrangePrimary else Color(0xFFF1F5F9)
+                        ) {
+                            Text(
+                                text = method,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) Color.White else InkDark,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1068,21 +1152,21 @@ fun RecordDebtPaymentDialog(
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("Cancel")
+                        Text("Kureka (Cancel)", fontSize = 12.sp)
                     }
 
                     Button(
                         onClick = {
-                            val parsed = amountStr.toDoubleOrNull() ?: 0.0
-                            if (parsed > 0) {
-                                onConfirm(parsed)
+                            if (parsedAmount > 0) {
+                                onConfirm(parsedAmount)
                             }
                         },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = ProfitGreen),
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        enabled = parsedAmount > 0
                     ) {
-                        Text("Save Payment", fontWeight = FontWeight.Bold)
+                        Text("Bika Kwishyura", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
             }

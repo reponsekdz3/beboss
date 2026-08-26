@@ -20,6 +20,8 @@ data class User(
     val pinHash: String = "1234", // 4-digit fast PIN
     val password: String = "admin123",
     val role: UserRole = UserRole.OWNER,
+    val assignedBranchId: String = "", // Empty means all branches (Boss / Owner)
+    val assignedBranchName: String = "All Branches",
     val profileColorHex: String = "#FF6B1A",
     val isActive: Boolean = true,
     // Granular Collaborator Permissions

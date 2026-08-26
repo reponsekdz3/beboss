@@ -91,6 +91,46 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     private val prefs = application.getSharedPreferences("beboss_prefs", Context.MODE_PRIVATE)
     private val db = AppDatabase.getDatabase(application)
     val repository = BeBossRepository(db)
+    private val connectivityObserver = com.example.util.NetworkConnectivityObserver(application)
+
+    // Network Connectivity & Cloud Sync State
+    val connectivityStatus: StateFlow<com.example.util.ConnectivityStatus> = connectivityObserver.networkStatus
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.example.util.ConnectivityStatus.AVAILABLE)
+
+    private val _cloudSyncReport = MutableStateFlow<com.example.util.CloudSyncReport?>(null)
+    val cloudSyncReport: StateFlow<com.example.util.CloudSyncReport?> = _cloudSyncReport.asStateFlow()
+
+    // Multi-Branch Management
+    val branches: StateFlow<List<com.example.data.model.Branch>> = repository.allBranches.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
+
+    private val _selectedBranchId = MutableStateFlow("ALL")
+    val selectedBranchId: StateFlow<String> = _selectedBranchId.asStateFlow()
+
+    fun selectBranch(branchId: String) {
+        _selectedBranchId.value = branchId
+    }
+
+    fun saveBranch(branch: com.example.data.model.Branch) {
+        viewModelScope.launch {
+            repository.saveBranch(branch)
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
+                "Ishami '${branch.name}' ryabitswe neza." 
+                else "Branch '${branch.name}' saved."
+            _snackbarMessage.emit(msg)
+        }
+    }
+
+    fun deleteBranch(branchId: String) {
+        viewModelScope.launch {
+            repository.deleteBranch(branchId)
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
+                "Ishami ryasibwe." 
+                else "Branch removed."
+            _snackbarMessage.emit(msg)
+        }
+    }
 
     // Language & Theme State
     private val _currentLanguage = MutableStateFlow(
@@ -232,6 +272,29 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         checkAuthenticationAndInit()
+        setupAutoCloudSyncOnInternet()
+    }
+
+    private fun setupAutoCloudSyncOnInternet() {
+        viewModelScope.launch {
+            repository.ensureDefaultBranches()
+            connectivityStatus.collect { status ->
+                if (status == com.example.util.ConnectivityStatus.AVAILABLE) {
+                    val report = repository.cloudSyncManager.syncAllDataToCloud()
+                    _cloudSyncReport.value = report
+                }
+            }
+        }
+    }
+
+    fun syncToCloudNow() {
+        viewModelScope.launch {
+            _isSyncing.value = true
+            val report = repository.cloudSyncManager.syncAllDataToCloud()
+            _cloudSyncReport.value = report
+            _isSyncing.value = false
+            _snackbarMessage.emit(report.message)
+        }
     }
 
     private fun checkAuthenticationAndInit() {
@@ -623,6 +686,11 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
 
         viewModelScope.launch {
             try {
+                val user = _currentUser.value
+                val branch = branches.value.firstOrNull { it.id == _selectedBranchId.value }
+                    ?: branches.value.firstOrNull { it.isMainBranch }
+                    ?: com.example.data.model.Branch()
+
                 val sale = repository.processSale(
                     items = state.items,
                     customerId = state.selectedCustomerId,
@@ -630,7 +698,11 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                     discountAmount = state.discountAmount,
                     paymentMethod = state.paymentMethod,
                     amountPaid = state.effectiveAmountPaid,
-                    notes = state.notes
+                    notes = state.notes,
+                    branchId = branch.id,
+                    branchName = branch.name,
+                    cashierId = user?.id ?: "",
+                    cashierName = user?.name ?: "Shop Operator"
                 )
                 val saleWithItems = repository.getSaleWithItems(sale.id)
                 _activeReceiptSale.value = saleWithItems
@@ -648,6 +720,11 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun performQuickCustomSale(description: String, amount: Double, paymentMethod: String, isDirectCheckout: Boolean = true) {
         if (amount <= 0) return
         val itemName = description.trim().ifBlank { "Custom Quick Item" }
+        val branch = branches.value.firstOrNull { it.id == _selectedBranchId.value }
+            ?: branches.value.firstOrNull { it.isMainBranch }
+            ?: com.example.data.model.Branch()
+        val user = _currentUser.value
+
         val customProduct = Product(
             id = "custom_${System.currentTimeMillis()}",
             name = itemName,
@@ -655,7 +732,8 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
             costPrice = amount * 0.7, // estimated margin for uncataloged item
             sellingPrice = amount,
             quantityInStock = 999.0,
-            unit = "item"
+            unit = "item",
+            branchId = branch.id
         )
 
         if (!isDirectCheckout) {
@@ -675,7 +753,11 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                     discountAmount = 0.0,
                     paymentMethod = paymentMethod,
                     amountPaid = amount,
-                    notes = "Quick POS Sale: $itemName"
+                    notes = "Quick POS Sale: $itemName",
+                    branchId = branch.id,
+                    branchName = branch.name,
+                    cashierId = user?.id ?: "",
+                    cashierName = user?.name ?: "Shop Operator"
                 )
                 val saleWithItems = repository.getSaleWithItems(sale.id)
                 _activeReceiptSale.value = saleWithItems
@@ -799,13 +881,44 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun recordDebtPayment(customerId: String, amount: Double) {
+    fun recordDebtPayment(
+        customerId: String,
+        amount: Double,
+        paymentMethod: String = "Cash",
+        notes: String = ""
+    ) {
         viewModelScope.launch {
-            repository.recordDebtPayment(customerId, amount)
+            val user = _currentUser.value
+            val branch = branches.value.firstOrNull { it.id == _selectedBranchId.value } 
+                ?: branches.value.firstOrNull { it.isMainBranch }
+                ?: com.example.data.model.Branch()
+
+            val payment = CustomerPayment(
+                customerId = customerId,
+                customerName = customers.value.firstOrNull { it.id == customerId }?.name ?: "Customer",
+                amount = amount,
+                paymentMethod = paymentMethod,
+                notes = notes,
+                recordedBy = user?.name ?: "Shop Operator",
+                branchId = branch.id,
+                branchName = branch.name
+            )
+
+            val updatedPayment = repository.recordCustomerPayment(payment)
             val symbol = shopProfile.value.currencySymbol
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                "Kwishyura ${amount.toInt()} $symbol byakiriwe neza!" 
-                else "Recorded payment of ${amount.toInt()} $symbol."
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) {
+                if (updatedPayment.remainingDebt <= 0) {
+                    "Kwishyura ${amount.toInt()} $symbol byakiriwe! UMWENDA WARANGIYE NEZA (0 $symbol)!"
+                } else {
+                    "Kwishyura ${amount.toInt()} $symbol byakiriwe. Hasigaye ${updatedPayment.remainingDebt.toInt()} $symbol."
+                }
+            } else {
+                if (updatedPayment.remainingDebt <= 0) {
+                    "Payment of ${amount.toInt()} $symbol received! DEBT FULLY CLEARED (0 $symbol)!"
+                } else {
+                    "Payment of ${amount.toInt()} $symbol received. Remaining debt: ${updatedPayment.remainingDebt.toInt()} $symbol."
+                }
+            }
             _snackbarMessage.emit(msg)
         }
     }

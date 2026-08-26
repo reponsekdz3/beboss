@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.example.data.dao.BranchDao
 import com.example.data.dao.CustomerDao
 import com.example.data.dao.CustomerPaymentDao
 import com.example.data.dao.ProductDao
@@ -11,6 +12,7 @@ import com.example.data.dao.SaleDao
 import com.example.data.dao.ShopProfileDao
 import com.example.data.dao.SyncQueueDao
 import com.example.data.dao.UserDao
+import com.example.data.model.Branch
 import com.example.data.model.Customer
 import com.example.data.model.CustomerPayment
 import com.example.data.model.Product
@@ -29,9 +31,10 @@ import com.example.data.model.User
         SaleItem::class,
         SyncQueueItem::class,
         User::class,
-        CustomerPayment::class
+        CustomerPayment::class,
+        Branch::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -42,6 +45,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun shopProfileDao(): ShopProfileDao
     abstract fun syncQueueDao(): SyncQueueDao
     abstract fun userDao(): UserDao
+    abstract fun branchDao(): BranchDao
 
     companion object {
         @Volatile

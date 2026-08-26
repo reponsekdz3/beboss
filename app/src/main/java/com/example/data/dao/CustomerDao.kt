@@ -13,6 +13,9 @@ interface CustomerDao {
     @Query("SELECT * FROM customers WHERE isDeleted = 0 ORDER BY name ASC")
     fun getAllCustomers(): Flow<List<Customer>>
 
+    @Query("SELECT * FROM customers WHERE isDeleted = 0 ORDER BY name ASC")
+    suspend fun getAllCustomersList(): List<Customer>
+
     @Query("SELECT * FROM customers WHERE isDeleted = 0 AND (name LIKE '%' || :query || '%' OR phone LIKE '%' || :query || '%') ORDER BY name ASC")
     fun searchCustomers(query: String): Flow<List<Customer>>
 
