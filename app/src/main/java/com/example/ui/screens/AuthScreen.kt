@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,6 +23,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddBusiness
 import androidx.compose.material.icons.filled.ArrowForward
@@ -174,19 +179,20 @@ fun AuthLockScreen(
                 modifier = Modifier.padding(vertical = 8.dp)
             ) {
                 Surface(
-                    shape = CircleShape,
-                    color = OrangePrimary,
-                    modifier = Modifier.size(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFF1E293B),
+                    border = BorderStroke(2.dp, OrangePrimary.copy(alpha = 0.6f)),
+                    modifier = Modifier.size(68.dp),
                     shadowElevation = 8.dp
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Store,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(30.dp)
-                        )
-                    }
+                    Image(
+                        painter = painterResource(id = R.drawable.img_app_logo_1787747059788),
+                        contentDescription = "BeBoss Logo",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(16.dp)),
+                        contentScale = ContentScale.Crop
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -564,15 +570,22 @@ fun ShopRegistrationScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Title
+            // Title & Official App Logo
             Surface(
-                shape = CircleShape,
-                color = OrangePrimary,
-                modifier = Modifier.size(52.dp)
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF1E293B),
+                border = BorderStroke(2.dp, OrangePrimary.copy(alpha = 0.6f)),
+                modifier = Modifier.size(64.dp),
+                shadowElevation = 8.dp
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.AddBusiness, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
-                }
+                Image(
+                    painter = painterResource(id = R.drawable.img_app_logo_1787747059788),
+                    contentDescription = "BeBoss Logo",
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(16.dp)),
+                    contentScale = ContentScale.Crop
+                )
             }
 
             Spacer(modifier = Modifier.height(8.dp))
