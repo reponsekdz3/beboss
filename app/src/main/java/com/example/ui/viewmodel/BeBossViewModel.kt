@@ -391,7 +391,11 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun loginWithCredentials(username: String, pinOrPass: String): Boolean {
         viewModelScope.launch {
             val user = repository.getUserByUsername(username.trim())
-            if (user != null && (user.pinHash == pinOrPass.trim() || user.password == pinOrPass.trim())) {
+            val isValid = user != null && (
+                com.example.util.SecurityUtils.verifyPin(pinOrPass.trim(), user.pinHash) ||
+                com.example.util.SecurityUtils.verifyPassword(pinOrPass.trim(), user.password)
+            )
+            if (user != null && isValid) {
                 _currentUser.value = user
                 _isLocked.value = false
                 _authError.value = null
@@ -412,13 +416,38 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
 
     fun unlockAppWithPin(pin: String): Boolean {
         val active = _currentUser.value
-        if (active != null && active.pinHash == pin.trim()) {
+        if (active != null && com.example.util.SecurityUtils.verifyPin(pin.trim(), active.pinHash)) {
             _isLocked.value = false
             _authError.value = null
             prefs.edit().putString("active_user_id", active.id).apply()
             return true
         }
         return loginWithPin(pin)
+    }
+
+    fun unlockWithBiometric() {
+        val active = _currentUser.value
+        if (active != null) {
+            _isLocked.value = false
+            _authError.value = null
+            prefs.edit().putString("active_user_id", active.id).apply()
+            viewModelScope.launch {
+                val welcome = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Urubuga rufunguwe n'igikumwe: ${active.name}"
+                    else "Unlocked with biometric: ${active.name}"
+                _snackbarMessage.emit(welcome)
+            }
+        } else {
+            // Pick primary active user or admin
+            viewModelScope.launch {
+                val defaultUser = repository.ensureDefaultAdminUser()
+                _currentUser.value = defaultUser
+                _isLocked.value = false
+                _authError.value = null
+                prefs.edit().putString("active_user_id", defaultUser.id).apply()
+                _snackbarMessage.emit("Unlocked: ${defaultUser.name}")
+            }
+        }
     }
 
     fun lockApp() {

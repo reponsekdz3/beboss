@@ -47,7 +47,20 @@ class BeBossRepository(private val database: AppDatabase) {
     val allActiveUsers: Flow<List<User>> = userDao.getAllActiveUsers()
 
     suspend fun getUserByPin(pin: String): User? = withContext(Dispatchers.IO) {
-        userDao.getUserByPin(pin.trim())
+        val trimmed = pin.trim()
+        val allUsers = userDao.getAllActiveUsersList()
+        for (user in allUsers) {
+            if (com.example.util.SecurityUtils.verifyPin(trimmed, user.pinHash)) {
+                // If stored PIN was plain text, upgrade to secure hashed PIN
+                if (user.pinHash == trimmed) {
+                    val secureUser = user.copy(pinHash = com.example.util.SecurityUtils.hashPin(trimmed))
+                    userDao.updateUser(secureUser)
+                    return@withContext secureUser
+                }
+                return@withContext user
+            }
+        }
+        null
     }
 
     suspend fun getUserByUsername(username: String): User? = withContext(Dispatchers.IO) {
@@ -55,7 +68,17 @@ class BeBossRepository(private val database: AppDatabase) {
     }
 
     suspend fun saveUser(user: User) = withContext(Dispatchers.IO) {
-        userDao.insertUser(user)
+        val securedPin = if (user.pinHash.length <= 6 && !user.pinHash.contains(":")) {
+            com.example.util.SecurityUtils.hashPin(user.pinHash)
+        } else {
+            user.pinHash
+        }
+        val securedPassword = if (user.password.length <= 16 && !user.password.contains(":")) {
+            com.example.util.SecurityUtils.hashPassword(user.password)
+        } else {
+            user.password
+        }
+        userDao.insertUser(user.copy(pinHash = securedPin, password = securedPassword))
     }
 
     suspend fun deleteUser(userId: String) = withContext(Dispatchers.IO) {
@@ -75,8 +98,8 @@ class BeBossRepository(private val database: AppDatabase) {
                 username = "owner",
                 email = "reponsekdz01@gmail.com",
                 phone = "+250 788 123 456",
-                pinHash = "1234",
-                password = "admin",
+                pinHash = com.example.util.SecurityUtils.hashPin("1234"),
+                password = com.example.util.SecurityUtils.hashPassword("admin"),
                 role = UserRole.OWNER,
                 profileColorHex = "#FF6B1A"
             )
@@ -86,8 +109,8 @@ class BeBossRepository(private val database: AppDatabase) {
                 username = "manager",
                 email = "aline@beboss.rw",
                 phone = "+250 788 654 321",
-                pinHash = "5678",
-                password = "manager123",
+                pinHash = com.example.util.SecurityUtils.hashPin("5678"),
+                password = com.example.util.SecurityUtils.hashPassword("manager123"),
                 role = UserRole.MANAGER,
                 profileColorHex = "#2563EB"
             )
@@ -97,8 +120,8 @@ class BeBossRepository(private val database: AppDatabase) {
                 username = "cashier",
                 email = "eric@beboss.rw",
                 phone = "+250 789 111 222",
-                pinHash = "0000",
-                password = "cashier123",
+                pinHash = com.example.util.SecurityUtils.hashPin("0000"),
+                password = com.example.util.SecurityUtils.hashPassword("cashier123"),
                 role = UserRole.CASHIER,
                 profileColorHex = "#10B981"
             )
@@ -108,7 +131,7 @@ class BeBossRepository(private val database: AppDatabase) {
             userDao.getAllActiveUsers().first().firstOrNull() ?: User(
                 name = "Shop Owner",
                 username = "owner",
-                pinHash = "1234"
+                pinHash = com.example.util.SecurityUtils.hashPin("1234")
             )
         }
     }

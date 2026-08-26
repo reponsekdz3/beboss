@@ -87,6 +87,7 @@ fun AuthLockScreen(
     isDarkTheme: Boolean,
     onUnlockWithPin: (String) -> Unit,
     onLoginWithCredentials: (String, String) -> Unit,
+    onBiometricUnlock: () -> Unit = {},
     onSelectUser: (User) -> Unit,
     onClearError: () -> Unit,
     onToggleLanguage: () -> Unit,
@@ -389,9 +390,7 @@ fun AuthLockScreen(
                                 }
                             },
                             onInstantUnlock = {
-                                if (activeUser != null) {
-                                    onUnlockWithPin(activeUser.pinHash)
-                                }
+                                onBiometricUnlock()
                             }
                         )
                     } else {

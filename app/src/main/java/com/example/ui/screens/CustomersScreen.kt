@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +31,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
@@ -36,7 +40,9 @@ import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.MoneyOff
 import androidx.compose.material.icons.filled.Payment
 import androidx.compose.material.icons.filled.People
@@ -45,6 +51,7 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -76,6 +83,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -93,9 +102,16 @@ import com.example.ui.theme.OrangeLight
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
 import com.example.util.ContactsHelper
+import com.example.util.ExcelCsvExporter
 import com.example.util.PdfReportGenerator
+import com.example.util.PickedContactInfo
 import com.example.util.ReceiptGenerator
+import com.example.util.SmsHelper
 import java.util.UUID
+
+enum class CustomerSortField {
+    NAME, DEBT, CREDIT_LIMIT, CATEGORY
+}
 
 @Composable
 fun CustomersScreen(
@@ -111,11 +127,14 @@ fun CustomersScreen(
     val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
     var filterOnlyDebt by remember { mutableStateOf(false) }
+    var sortField by remember { mutableStateOf(CustomerSortField.DEBT) }
+    var sortAscending by remember { mutableStateOf(false) }
 
     var customerToEdit by remember { mutableStateOf<Customer?>(null) }
     var customerForPayment by remember { mutableStateOf<Customer?>(null) }
     var customerToDelete by remember { mutableStateOf<Customer?>(null) }
     var isAddingNew by remember { mutableStateOf(false) }
+    var showBulkContactsDialog by remember { mutableStateOf(false) }
 
     val filtered = customers.filter { c ->
         val matchesDebt = !filterOnlyDebt || c.debtBalance > 0
@@ -125,57 +144,103 @@ fun CustomersScreen(
                 c.category.contains(searchQuery, ignoreCase = true) ||
                 c.city.contains(searchQuery, ignoreCase = true)
         matchesDebt && matchesSearch
+    }.let { list ->
+        when (sortField) {
+            CustomerSortField.NAME -> if (sortAscending) list.sortedBy { it.name.lowercase() } else list.sortedByDescending { it.name.lowercase() }
+            CustomerSortField.DEBT -> if (sortAscending) list.sortedBy { it.debtBalance } else list.sortedByDescending { it.debtBalance }
+            CustomerSortField.CREDIT_LIMIT -> if (sortAscending) list.sortedBy { it.creditLimit } else list.sortedByDescending { it.creditLimit }
+            CustomerSortField.CATEGORY -> if (sortAscending) list.sortedBy { it.category } else list.sortedByDescending { it.category }
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(BackgroundLight)) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            contentPadding = PaddingValues(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // Outstanding Debt KPI Card
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(containerColor = if (totalOutstandingDebt > 0) Color(0xFFFEE2E2) else Color.White),
                     border = if (totalOutstandingDebt > 0) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCA5A5)) else null,
                     elevation = CardDefaults.cardElevation(2.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = "TOTAL OUTSTANDING CUSTOMER DEBT",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (totalOutstandingDebt > 0) LossRed else InkMedium,
-                                letterSpacing = 0.5.sp
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = ReceiptGenerator.formatMoney(totalOutstandingDebt, shopProfile),
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Black,
-                                color = if (totalOutstandingDebt > 0) LossRed else ProfitGreen
-                            )
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "TOTAL UNCOLLECTED CUSTOMER DEBT",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (totalOutstandingDebt > 0) LossRed else InkMedium,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = ReceiptGenerator.formatMoney(totalOutstandingDebt, shopProfile),
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = if (totalOutstandingDebt > 0) LossRed else ProfitGreen
+                                )
+                            }
+
+                            Surface(
+                                shape = CircleShape,
+                                color = if (totalOutstandingDebt > 0) LossRed else ProfitGreen,
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = if (totalOutstandingDebt > 0) Icons.Default.MoneyOff else Icons.Default.People,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
                         }
 
-                        Surface(
-                            shape = CircleShape,
-                            color = if (totalOutstandingDebt > 0) LossRed else ProfitGreen,
-                            modifier = Modifier.size(44.dp)
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Action button row: Excel Export, Bulk Contacts Import
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = if (totalOutstandingDebt > 0) Icons.Default.MoneyOff else Icons.Default.People,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
-                                )
+                            OutlinedButton(
+                                onClick = {
+                                    try {
+                                        val file = ExcelCsvExporter.exportCustomersCsv(context, customers, shopProfile)
+                                        ExcelCsvExporter.shareCsvFile(context, file, "Share Customers & Debts CSV")
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Export error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(15.dp), tint = OrangePrimary)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Excel/CSV Sheet", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OrangePrimary)
+                            }
+
+                            OutlinedButton(
+                                onClick = { showBulkContactsDialog = true },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Icon(Icons.Default.Contacts, contentDescription = null, modifier = Modifier.size(15.dp), tint = DarkNavy)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Import Contacts", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = DarkNavy)
                             }
                         }
                     }
@@ -189,11 +254,11 @@ fun CustomersScreen(
                     shape = RoundedCornerShape(14.dp),
                     shadowElevation = 1.dp
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
+                    Column(modifier = Modifier.padding(10.dp)) {
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
-                            placeholder = { Text("Search customer, phone, category...", fontSize = 13.sp) },
+                            placeholder = { Text("Search customer name, phone, city...", fontSize = 13.sp) },
                             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = InkMedium) },
                             trailingIcon = {
                                 if (searchQuery.isNotBlank()) {
@@ -203,7 +268,7 @@ fun CustomersScreen(
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(10.dp),
                             singleLine = true,
                             colors = TextFieldDefaults.colors(
                                 focusedContainerColor = Color(0xFFF9FAFB),
@@ -213,70 +278,91 @@ fun CustomersScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             FilterChip(
                                 selected = !filterOnlyDebt,
                                 onClick = { filterOnlyDebt = false },
-                                label = { Text("All (${customers.size})", fontSize = 12.sp) },
-                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = OrangePrimary, selectedLabelColor = Color.White)
+                                label = { Text("All (${customers.size})", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = OrangePrimary, selectedLabelColor = Color.White),
+                                shape = RoundedCornerShape(8.dp)
                             )
 
                             val debtCount = customers.count { it.debtBalance > 0 }
                             FilterChip(
                                 selected = filterOnlyDebt,
                                 onClick = { filterOnlyDebt = true },
-                                label = { Text("Owes Debt ($debtCount)", fontSize = 12.sp) },
-                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = LossRed, selectedLabelColor = Color.White)
+                                label = { Text("Owes Debt ($debtCount)", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = LossRed, selectedLabelColor = Color.White),
+                                shape = RoundedCornerShape(8.dp)
                             )
                         }
                     }
                 }
             }
 
-            // Customers List
+            // Excel Customers Table Header
+            item {
+                ExcelCustomerTableHeaderRow(
+                    sortField = sortField,
+                    sortAscending = sortAscending,
+                    currencySymbol = shopProfile.currencySymbol,
+                    onSort = { field ->
+                        if (sortField == field) {
+                            sortAscending = !sortAscending
+                        } else {
+                            sortField = field
+                            sortAscending = true
+                        }
+                    }
+                )
+            }
+
+            // Excel Customers List
             if (filtered.isEmpty()) {
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = Color.White)
                     ) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(32.dp),
+                                .padding(28.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(Icons.Default.People, contentDescription = null, tint = InkMedium, modifier = Modifier.size(48.dp))
+                            Icon(Icons.Default.People, contentDescription = null, tint = InkMedium, modifier = Modifier.size(44.dp))
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("No customers found", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = InkDark)
-                            Spacer(modifier = Modifier.height(12.dp))
+                            Text("No customers found in ledger", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = InkDark)
+                            Spacer(modifier = Modifier.height(10.dp))
                             Button(
                                 onClick = { isAddingNew = true },
                                 colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                                shape = RoundedCornerShape(10.dp)
+                                shape = RoundedCornerShape(8.dp)
                             ) {
-                                Text("Add First Customer")
+                                Text("+ Add Customer to Ledger")
                             }
                         }
                     }
                 }
             } else {
-                items(filtered, key = { it.id }) { customer ->
-                    CustomerCard(
+                itemsIndexed(filtered, key = { _, c -> c.id }) { index, customer ->
+                    ExcelCustomerRow(
+                        index = index + 1,
                         customer = customer,
                         shopProfile = shopProfile,
-                        onEdit = { customerToEdit = customer },
+                        isEven = index % 2 == 0,
                         onRecordPayment = { customerForPayment = customer },
+                        onEdit = { customerToEdit = customer },
                         onDelete = { customerToDelete = customer },
-                        onSendWhatsApp = {
+                        onSendReminder = {
                             if (customer.phone.isNotBlank()) {
-                                sendWhatsAppReminder(context, customer, shopProfile)
+                                sendDebtReminder(context, customer, shopProfile)
                             } else {
-                                Toast.makeText(context, "No phone number saved for ${customer.name}", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "No phone number for ${customer.name}", Toast.LENGTH_SHORT).show()
                             }
                         },
-                        onGeneratePdfStatement = {
+                        onGeneratePdf = {
                             try {
                                 val customerSales = allSales.filter { it.customerId == customer.id }
                                 val customerPaymentsList = allPayments.filter { it.customerId == customer.id }
@@ -302,7 +388,7 @@ fun CustomersScreen(
                 }
             }
 
-            item { Spacer(modifier = Modifier.height(72.dp)) }
+            item { Spacer(modifier = Modifier.height(76.dp)) }
         }
 
         // FAB to Add Customer
@@ -353,19 +439,42 @@ fun CustomersScreen(
         )
     }
 
+    // Bulk Phone Contacts Import Dialog
+    if (showBulkContactsDialog) {
+        BulkContactsImportDialog(
+            onImport = { selectedContacts ->
+                selectedContacts.forEach { contact ->
+                    val newCustomer = Customer(
+                        id = UUID.randomUUID().toString(),
+                        name = contact.name,
+                        phone = contact.phone,
+                        email = contact.email,
+                        category = CustomerCategory.REGULAR.displayName,
+                        creditLimit = 500000.0,
+                        city = "Kigali"
+                    )
+                    onSaveCustomer(newCustomer)
+                }
+                showBulkContactsDialog = false
+                Toast.makeText(context, "Imported ${selectedContacts.size} contacts successfully!", Toast.LENGTH_LONG).show()
+            },
+            onDismiss = { showBulkContactsDialog = false }
+        )
+    }
+
     // Delete Confirmation Dialog
     if (customerToDelete != null) {
         AlertDialog(
             onDismissRequest = { customerToDelete = null },
             title = { Text("Delete Customer", fontWeight = FontWeight.Bold) },
-            text = { Text("Are you sure you want to delete '${customerToDelete!!.name}'?") },
+            text = { Text("Are you sure you want to delete '${customerToDelete!!.name}'? Outstanding debt history will be removed.") },
             confirmButton = {
                 Button(
                     onClick = {
                         onDeleteCustomer(customerToDelete!!.id)
                         customerToDelete = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                    colors = ButtonDefaults.buttonColors(containerColor = LossRed)
                 ) {
                     Text("Delete")
                 }
@@ -379,235 +488,263 @@ fun CustomersScreen(
     }
 }
 
-private fun sendWhatsAppReminder(context: Context, customer: Customer, shopProfile: ShopProfile) {
-    val message = buildString {
-        append("Mwiriwe/Hello ${customer.name},\n\n")
-        append("This is a reminder from *${shopProfile.shopName}*.\n")
-        if (customer.debtBalance > 0) {
-            append("Outstanding Debt Balance: *${ReceiptGenerator.formatMoney(customer.debtBalance, shopProfile)}*\n\n")
-            append("Please settle via MoMo / Cash when convenient. Murakoze cyane!")
-        } else {
-            append("Thank you for your valued partnership and regular patronage! Murakoze cyane.")
-        }
-    }
+@Composable
+private fun ExcelCustomerTableHeaderRow(
+    sortField: CustomerSortField,
+    sortAscending: Boolean,
+    currencySymbol: String,
+    onSort: (CustomerSortField) -> Unit
+) {
+    Surface(
+        color = DarkNavy,
+        shape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp),
+        shadowElevation = 2.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "#",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.width(24.dp),
+                textAlign = TextAlign.Center
+            )
 
-    try {
-        val cleanPhone = customer.phone.replace(" ", "").replace("-", "")
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            data = Uri.parse("https://api.whatsapp.com/send?phone=$cleanPhone&text=${Uri.encode(message)}")
+            Row(
+                modifier = Modifier
+                    .weight(2.2f)
+                    .clickable { onSort(CustomerSortField.NAME) },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Customer Name & Phone",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1
+                )
+                if (sortField == CustomerSortField.NAME) {
+                    Icon(
+                        if (sortAscending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
+                        contentDescription = null,
+                        tint = OrangePrimary,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .weight(1.3f)
+                    .clickable { onSort(CustomerSortField.DEBT) },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.End
+            ) {
+                Text(
+                    text = "Debt ($currencySymbol)",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1
+                )
+                if (sortField == CustomerSortField.DEBT) {
+                    Icon(
+                        if (sortAscending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
+                        contentDescription = null,
+                        tint = OrangePrimary,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
+
+            Text(
+                text = "Actions",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.width(96.dp),
+                textAlign = TextAlign.Center
+            )
         }
-        context.startActivity(intent)
-    } catch (e: Exception) {
-        // Fallback to standard SMS
-        val smsIntent = Intent(Intent.ACTION_VIEW).apply {
-            data = Uri.parse("sms:${customer.phone}?body=${Uri.encode(message)}")
-        }
-        context.startActivity(smsIntent)
     }
 }
 
 @Composable
-private fun CustomerCard(
+private fun ExcelCustomerRow(
+    index: Int,
     customer: Customer,
     shopProfile: ShopProfile,
-    onEdit: () -> Unit,
+    isEven: Boolean,
     onRecordPayment: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
-    onSendWhatsApp: () -> Unit,
-    onGeneratePdfStatement: () -> Unit,
+    onSendReminder: () -> Unit,
+    onGeneratePdf: () -> Unit,
     onCallPhone: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(2.dp)
+    Surface(
+        color = if (isEven) Color(0xFFF9FAFB) else Color.White,
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(0.5.dp, Color(0xFFE5E7EB)),
+        shadowElevation = 0.5.dp
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // # Index
+            Text(
+                text = "$index",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = InkMedium,
+                modifier = Modifier.width(24.dp),
+                textAlign = TextAlign.Center
+            )
+
+            // Name + Phone + Category
+            Column(
+                modifier = Modifier
+                    .weight(2.2f)
+                    .clickable { onEdit() }
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .background(if (customer.debtBalance > 0) Color(0xFFFEE2E2) else OrangeLight, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = null,
-                            tint = if (customer.debtBalance > 0) LossRed else OrangePrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = customer.name,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = InkDark
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = customer.category,
-                                fontSize = 11.sp,
-                                color = OrangePrimary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            if (customer.city.isNotBlank()) {
-                                Text(
-                                    text = " • ${customer.city}",
-                                    fontSize = 11.sp,
-                                    color = InkMedium
-                                )
-                            }
-                        }
-                        if (customer.phone.isNotBlank()) {
-                            Text(
-                                text = customer.phone,
-                                fontSize = 12.sp,
-                                color = InkMedium
-                            )
-                        }
-                    }
-                }
-
-                // Debt Badge
-                if (customer.debtBalance > 0) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFFFEE2E2)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            horizontalAlignment = Alignment.End
-                        ) {
-                            Text("Owes Debt", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = LossRed)
-                            Text(
-                                text = ReceiptGenerator.formatMoney(customer.debtBalance, shopProfile),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Black,
-                                color = LossRed
-                            )
-                        }
-                    }
-                } else {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFFDCFCE7)
-                    ) {
-                        Text(
-                            text = "No Debt",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = ProfitGreen,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-            }
-
-            if (customer.notes.isNotBlank()) {
-                Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Note: ${customer.notes}",
-                    fontSize = 11.sp,
-                    color = InkMedium,
-                    maxLines = 2
+                    text = customer.name,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = InkDark,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = customer.category,
+                        fontSize = 10.sp,
+                        color = OrangePrimary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    if (customer.phone.isNotBlank()) {
+                        Text(
+                            text = " • ${customer.phone}",
+                            fontSize = 10.sp,
+                            color = InkMedium,
+                            maxLines = 1
+                        )
+                    }
+                }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
-            HorizontalDivider(color = Color(0xFFF3F4F6))
-            Spacer(modifier = Modifier.height(8.dp))
+            // Debt Column
+            Column(
+                modifier = Modifier.weight(1.3f),
+                horizontalAlignment = Alignment.End
+            ) {
+                if (customer.debtBalance > 0) {
+                    Text(
+                        text = ReceiptGenerator.formatMoney(customer.debtBalance, shopProfile),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Black,
+                        color = LossRed,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = "Unpaid Debt",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = LossRed
+                    )
+                } else {
+                    Text(
+                        text = "Cleared (0)",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = ProfitGreen
+                    )
+                }
+            }
 
-            // Action row: Call, WhatsApp, PDF Statement, Record Payment, Edit, Delete
+            // Action Icons: Pay (if debt), Reminder, Call, Edit
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.width(96.dp),
+                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (customer.debtBalance > 0) {
-                    Button(
+                    Surface(
                         onClick = onRecordPayment,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = ProfitGreen),
-                        contentPadding = PaddingValues(vertical = 6.dp)
+                        shape = RoundedCornerShape(6.dp),
+                        color = ProfitGreen,
+                        modifier = Modifier.size(26.dp)
                     ) {
-                        Icon(Icons.Default.Payment, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Pay", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Payment, contentDescription = "Pay", tint = Color.White, modifier = Modifier.size(15.dp))
+                        }
                     }
+                    Spacer(modifier = Modifier.width(3.dp))
                 }
 
-                // WhatsApp
                 Surface(
-                    onClick = onSendWhatsApp,
-                    shape = RoundedCornerShape(8.dp),
+                    onClick = onSendReminder,
+                    shape = RoundedCornerShape(6.dp),
                     color = Color(0xFFDCFCE7),
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(26.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Send, contentDescription = "WhatsApp", tint = ProfitGreen, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Send, contentDescription = "Reminder", tint = ProfitGreen, modifier = Modifier.size(14.dp))
                     }
                 }
+                Spacer(modifier = Modifier.width(3.dp))
 
-                // PDF Statement
-                Surface(
-                    onClick = onGeneratePdfStatement,
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFFF3F4F6),
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(androidx.compose.material.icons.Icons.Default.Share, contentDescription = "PDF Statement", tint = DarkNavy, modifier = Modifier.size(18.dp))
-                    }
-                }
-
-                // Call
                 if (customer.phone.isNotBlank()) {
                     Surface(
                         onClick = onCallPhone,
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(6.dp),
                         color = Color(0xFFFFF0E6),
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(26.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Call, contentDescription = "Call", tint = OrangePrimary, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Call, contentDescription = "Call", tint = OrangePrimary, modifier = Modifier.size(14.dp))
                         }
                     }
+                    Spacer(modifier = Modifier.width(3.dp))
                 }
 
-                // Edit
                 Surface(
                     onClick = onEdit,
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(6.dp),
                     color = Color(0xFFF3F4F6),
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(26.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Edit, contentDescription = "Edit", tint = InkDark, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Edit, contentDescription = "Edit", tint = InkDark, modifier = Modifier.size(14.dp))
                     }
-                }
-
-                // Delete
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFF9CA3AF), modifier = Modifier.size(18.dp))
                 }
             }
         }
     }
+}
+
+private fun sendDebtReminder(context: Context, customer: Customer, shopProfile: ShopProfile) {
+    val message = buildString {
+        append("Mwiriwe/Hello ${customer.name},\n\n")
+        append("This is an official statement from *${shopProfile.shopName}*.\n")
+        if (customer.debtBalance > 0) {
+            append("Your pending balance is *${ReceiptGenerator.formatMoney(customer.debtBalance, shopProfile)}*.\n\n")
+            append("Please settle via MTN MoMo / Airtel Money / Cash at your earliest convenience. Murakoze cyane!")
+        } else {
+            append("Thank you for your regular patronage and timely payments! Murakoze cyane.")
+        }
+    }
+
+    SmsHelper.sendSmsOrOpenIntent(context, customer.phone, message)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -665,7 +802,7 @@ fun CustomerFormDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (initialCustomer != null) "Edit Customer Profile" else "Add New Customer",
+                        text = if (initialCustomer != null) "Edit Customer in Ledger" else "Add New Customer",
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
                         color = InkDark
@@ -792,7 +929,7 @@ fun CustomerFormDialog(
                     value = notes,
                     onValueChange = { notes = it },
                     label = { Text("Notes & Preferences") },
-                    placeholder = { Text("e.g. Always prefers morning delivery") },
+                    placeholder = { Text("e.g. Prefers morning delivery") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
                     singleLine = true
@@ -822,7 +959,7 @@ fun CustomerFormDialog(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(50.dp),
+                        .height(48.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
                     shape = RoundedCornerShape(12.dp),
                     enabled = name.isNotBlank()
@@ -946,6 +1083,156 @@ fun RecordDebtPaymentDialog(
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Text("Save Payment", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BulkContactsImportDialog(
+    onImport: (List<PickedContactInfo>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var contactsList by remember { mutableStateOf<List<PickedContactInfo>>(emptyList()) }
+    var selectedContacts by remember { mutableStateOf<Set<PickedContactInfo>>(emptySet()) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            contactsList = ContactsHelper.fetchAllPhoneContacts(context)
+            selectedContacts = contactsList.toSet()
+            isLoading = false
+        } else {
+            isLoading = false
+            Toast.makeText(context, "Contacts permission denied", Toast.LENGTH_SHORT).show()
+            onDismiss()
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (ContactsHelper.hasContactsPermission(context)) {
+            contactsList = ContactsHelper.fetchAllPhoneContacts(context)
+            selectedContacts = contactsList.toSet()
+            isLoading = false
+        } else {
+            permissionLauncher.launch(android.Manifest.permission.READ_CONTACTS)
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Import Contacts into BeBoss",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = InkDark
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = InkDark)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Select contacts from your phone to add as shop customers:",
+                    fontSize = 12.sp,
+                    color = InkMedium
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (isLoading) {
+                    Box(modifier = Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) {
+                        Text("Reading phonebook contacts...", fontSize = 13.sp, color = InkMedium)
+                    }
+                } else if (contactsList.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) {
+                        Text("No contacts found in phonebook.", fontSize = 13.sp, color = InkMedium)
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(280.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(contactsList) { contact ->
+                            val isSelected = selectedContacts.contains(contact)
+                            Surface(
+                                onClick = {
+                                    selectedContacts = if (isSelected) {
+                                        selectedContacts - contact
+                                    } else {
+                                        selectedContacts + contact
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) Color(0xFFFFF0E6) else Color(0xFFF9FAFB),
+                                border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, OrangePrimary) else null
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(contact.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = InkDark)
+                                        Text(contact.phone, fontSize = 11.sp, color = InkMedium)
+                                    }
+                                    if (isSelected) {
+                                        Icon(Icons.Default.People, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Cancel")
+                    }
+
+                    Button(
+                        onClick = { onImport(selectedContacts.toList()) },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
+                        shape = RoundedCornerShape(10.dp),
+                        enabled = selectedContacts.isNotEmpty()
+                    ) {
+                        Text("Import (${selectedContacts.size})", fontWeight = FontWeight.Bold)
                     }
                 }
             }

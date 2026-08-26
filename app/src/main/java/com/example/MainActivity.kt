@@ -1,7 +1,6 @@
 package com.example
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
@@ -25,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.BeBossBottomNav
 import com.example.ui.components.BeBossTopBar
@@ -44,9 +44,11 @@ import com.example.ui.screens.ShopRegistrationScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.AppScreen
 import com.example.ui.viewmodel.BeBossViewModel
+import com.example.util.AppLanguage
+import com.example.util.BiometricAuthManager
 import kotlinx.coroutines.flow.collectLatest
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -132,6 +134,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
             onToggleTheme = { viewModel.toggleDarkMode() }
         )
     } else if (isLocked) {
+        val fragmentActivity = context as? FragmentActivity
         AuthLockScreen(
             currentUser = currentUser,
             allUsers = allUsers,
@@ -141,6 +144,21 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
             isDarkTheme = isDarkTheme,
             onUnlockWithPin = { pin -> viewModel.unlockAppWithPin(pin) },
             onLoginWithCredentials = { user, pass -> viewModel.loginWithCredentials(user, pass) },
+            onBiometricUnlock = {
+                if (fragmentActivity != null && BiometricAuthManager.isBiometricAvailable(context)) {
+                    BiometricAuthManager.promptBiometric(
+                        activity = fragmentActivity,
+                        title = if (currentLanguage == AppLanguage.KINYARWANDA) "Kugenzura Igikumwe" else "Fingerprint Verification",
+                        subtitle = if (currentLanguage == AppLanguage.KINYARWANDA) "Koresha igikumwe gufungura BeBoss" else "Verify fingerprint to unlock BeBoss",
+                        negativeButtonText = if (currentLanguage == AppLanguage.KINYARWANDA) "Koresha PIN" else "Use PIN Instead",
+                        onSuccess = { viewModel.unlockWithBiometric() },
+                        onError = { /* fallback */ },
+                        onFailed = { /* failed */ }
+                    )
+                } else {
+                    viewModel.unlockWithBiometric()
+                }
+            },
             onSelectUser = { user -> viewModel.switchUser(user) },
             onClearError = { viewModel.clearAuthError() },
             onToggleLanguage = { viewModel.toggleLanguage() },
