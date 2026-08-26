@@ -131,6 +131,7 @@ fun SettingsScreen(
     onLogout: () -> Unit = {},
     onSwitchUser: (User) -> Unit = {},
     onActivateVoucher: (String) -> Unit = {},
+    onProcessDirectPayment: ((provider: String, phone: String, durationMonths: Int, onSuccess: (com.example.util.PaymentProcessingResult, com.example.util.SubscriptionPriceBreakdown) -> Unit) -> Unit)? = null,
     onGrantEmergencyGrace: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -522,10 +523,17 @@ fun SettingsScreen(
             }
         }
 
-        // 3. Monthly Shop Subscription Card (5,000 RWF / month)
+        // 3. Monthly Shop Subscription Card (Dynamic Multi-Branch & Worker Pricing)
         item {
             val isActive = shopProfile.isSubscriptionActive
             val daysRemaining = shopProfile.daysRemaining
+            val activeBranchCount = branches.size.coerceAtLeast(1)
+            val activeWorkerCount = allUsers.size.coerceAtLeast(1)
+            val currentPricing = OfflineSubscriptionManager.calculateSubscriptionPrice(
+                branchCount = activeBranchCount,
+                workerCount = activeWorkerCount,
+                durationMonths = 1
+            )
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -563,9 +571,10 @@ fun SettingsScreen(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = Localization.get("monthly_fee_desc", language),
+                                    text = "${currentPricing.branchTierName} • ${currentPricing.totalPayable} FRw/mo",
                                     fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = OrangePrimary,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
@@ -584,6 +593,14 @@ fun SettingsScreen(
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        text = "Calculated for $activeBranchCount Branch(es) & $activeWorkerCount Registered Worker(s). Auto-syncs to cloud.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
                     Spacer(modifier = Modifier.height(14.dp))
 
                     Row(
@@ -592,24 +609,24 @@ fun SettingsScreen(
                     ) {
                         Button(
                             onClick = {
-                                OfflineSubscriptionManager.dialMtnMoMo(context, 5000)
+                                OfflineSubscriptionManager.dialMtnMoMo(context, currentPricing.totalPayable)
                             },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFCC00))
                         ) {
-                            Text("MTN MoMo (5k)", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text("MTN MoMo (${currentPricing.totalPayable} FRw)", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
 
                         Button(
                             onClick = {
-                                OfflineSubscriptionManager.dialAirtelMoney(context, 5000)
+                                OfflineSubscriptionManager.dialAirtelMoney(context, currentPricing.totalPayable)
                             },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
                         ) {
-                            Text("Airtel Money (5k)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text("Airtel (${currentPricing.totalPayable} FRw)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
                     }
 
@@ -823,10 +840,13 @@ fun SettingsScreen(
             text = {
                 SubscriptionScreen(
                     shopProfile = shopProfile,
+                    branches = branches,
+                    allUsers = allUsers,
                     language = language,
                     onActivateVoucher = { code ->
                         onActivateVoucher(code)
                     },
+                    onProcessDirectPayment = onProcessDirectPayment,
                     onGrantEmergencyGrace = onGrantEmergencyGrace,
                     onClose = { showSubscriptionDialog = false }
                 )

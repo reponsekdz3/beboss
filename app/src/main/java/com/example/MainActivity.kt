@@ -332,6 +332,9 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onLogout = { viewModel.logoutUser() },
                                 onSwitchUser = { u -> viewModel.switchUser(u) },
                                 onActivateVoucher = { code -> viewModel.activateSubscriptionVoucher(code) },
+                                onProcessDirectPayment = { provider, phone, durationMonths, onSuccess ->
+                                    viewModel.processDirectSubscriptionPayment(provider, phone, durationMonths, onSuccess)
+                                },
                                 onGrantEmergencyGrace = { viewModel.grantEmergencyGracePeriod() }
                             )
                         }
@@ -388,12 +391,17 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
         )
     }
 
-    // Active Subscription Paywall Lock (If 5,000 RWF monthly fee is expired)
+    // Active Subscription Paywall Lock (If subscription is expired)
     if (!shopProfile.isSubscriptionActive && !isLocked && !isRegistrationNeeded) {
         com.example.ui.screens.SubscriptionPaywallDialog(
             shopProfile = shopProfile,
+            branches = branches,
+            allUsers = allUsers,
             language = currentLanguage,
             onActivateVoucher = { code -> viewModel.activateSubscriptionVoucher(code) },
+            onProcessDirectPayment = { provider, phone, durationMonths, onSuccess ->
+                viewModel.processDirectSubscriptionPayment(provider, phone, durationMonths, onSuccess)
+            },
             onGrantEmergencyGrace = { viewModel.grantEmergencyGracePeriod() }
         )
     }

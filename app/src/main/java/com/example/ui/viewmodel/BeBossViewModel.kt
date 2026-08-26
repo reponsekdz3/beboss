@@ -570,12 +570,19 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // ------------------------------------------------------------------------
-    // SUBSCRIPTION & OFFLINE BILLING (5,000 RWF / MONTH)
+    // SUBSCRIPTION & MULTI-BRANCH / WORKER BILLING
     // ------------------------------------------------------------------------
     fun activateSubscriptionVoucher(code: String) {
         viewModelScope.launch {
             val currentProf = shopProfile.value
-            val result = com.example.util.OfflineSubscriptionManager.validateVoucherCode(code, currentProf)
+            val branchCount = branches.value.size.coerceAtLeast(1)
+            val workerCount = allUsers.value.size.coerceAtLeast(1)
+            val result = com.example.util.OfflineSubscriptionManager.validateVoucherCode(
+                inputCode = code,
+                shopProfile = currentProf,
+                branchCount = branchCount,
+                workerCount = workerCount
+            )
             if (result.isValid) {
                 val currentExpiry = if (currentProf.subscriptionExpiresAt > System.currentTimeMillis()) 
                     currentProf.subscriptionExpiresAt 
@@ -586,13 +593,64 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                     subscriptionStatus = "ACTIVE",
                     subscriptionExpiresAt = newExpiry,
                     lastPaymentRef = code.trim().uppercase(),
+                    lastPaymentAmount = result.verifiedAmount,
                     lastPaymentDate = System.currentTimeMillis(),
                     updatedAt = System.currentTimeMillis()
                 )
                 repository.updateShopProfile(updatedProf)
                 _snackbarMessage.emit(result.message)
+                // Auto-sync subscription status to cloud immediately
+                syncToCloudNow()
             } else {
                 _snackbarMessage.emit(result.message)
+            }
+        }
+    }
+
+    fun processDirectSubscriptionPayment(
+        provider: String,
+        phone: String,
+        durationMonths: Int,
+        onSuccess: (com.example.util.PaymentProcessingResult, com.example.util.SubscriptionPriceBreakdown) -> Unit
+    ) {
+        viewModelScope.launch {
+            val currentProf = shopProfile.value
+            val branchCount = branches.value.size.coerceAtLeast(1)
+            val workerCount = allUsers.value.size.coerceAtLeast(1)
+            val breakdown = com.example.util.OfflineSubscriptionManager.calculateSubscriptionPrice(
+                branchCount = branchCount,
+                workerCount = workerCount,
+                durationMonths = durationMonths
+            )
+            val result = com.example.util.OfflineSubscriptionManager.processDirectMoMoPayment(
+                shopProfile = currentProf,
+                payerPhone = phone,
+                provider = provider,
+                branchCount = branchCount,
+                workerCount = workerCount,
+                durationMonths = durationMonths
+            )
+
+            if (result.isSuccess) {
+                val currentExpiry = if (currentProf.subscriptionExpiresAt > System.currentTimeMillis())
+                    currentProf.subscriptionExpiresAt
+                    else System.currentTimeMillis()
+                val newExpiry = currentExpiry + (result.planDays.toLong() * 24 * 60 * 60 * 1000)
+
+                val updatedProf = currentProf.copy(
+                    subscriptionStatus = "ACTIVE",
+                    subscriptionExpiresAt = newExpiry,
+                    lastPaymentRef = result.transactionRef,
+                    lastPaymentAmount = result.amountPaid,
+                    lastPaymentDate = result.timestamp,
+                    monthlyFeeRwf = breakdown.monthlySubtotal,
+                    updatedAt = result.timestamp
+                )
+                repository.updateShopProfile(updatedProf)
+                _snackbarMessage.emit(result.message)
+                // Auto-sync subscription extension to database & Firebase cloud
+                syncToCloudNow()
+                onSuccess(result, breakdown)
             }
         }
     }
@@ -609,6 +667,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
             )
             repository.updateShopProfile(updatedProf)
             _snackbarMessage.emit("3-Day Emergency Grace Period activated!")
+            syncToCloudNow()
         }
     }
 

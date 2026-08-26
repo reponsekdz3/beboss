@@ -169,6 +169,60 @@ object ReceiptGenerator {
         """.trimIndent()
     }
 
+    /**
+     * Generates a formal digital subscription receipt & official invoice with breakdown of Branches and Staff.
+     */
+    fun generateSubscriptionInvoice(
+        profile: ShopProfile,
+        breakdown: com.example.util.SubscriptionPriceBreakdown,
+        txRef: String,
+        provider: String,
+        payerPhone: String,
+        planDays: Int
+    ): String {
+        val expiryDateStr = SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(profile.subscriptionExpiresAt))
+        val paidDateStr = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.US).format(Date())
+
+        return """
+            ================================
+               BEBOSS POS — OFFICIAL RECEIPT
+                  SUBSCRIPTION INVOICE
+            ================================
+            Shop Name   : ${profile.shopName}
+            Owner Name  : ${profile.name}
+            Phone       : $payerPhone
+            Invoice Ref : $txRef
+            Payment Via : $provider
+            Date & Time : $paidDateStr
+            --------------------------------
+            SUBSCRIPTION ITEMIZATION:
+            --------------------------------
+            1. Branch Base Tier:
+               • Active Branches : ${breakdown.branchCount}
+               • Plan Category   : ${breakdown.branchTierName}
+               • Branch Base Fee : ${breakdown.branchBasePrice} FRw/mo
+
+            2. Staff Administration:
+               • Registered Staff: ${breakdown.workerCount} Workers
+               • Staff Tier      : ${breakdown.workerTierName}
+               • Staff Addon     : ${breakdown.workerFee} FRw/mo
+
+            --------------------------------
+            Monthly Subtotal    : ${breakdown.monthlySubtotal} FRw
+            Billing Cycle       : ${breakdown.durationMonths} Month(s)
+            Duration Plan       : $planDays Days Access
+            ${if (breakdown.discountPercent > 0) "Discount Applied    : -${breakdown.discountAmount} FRw (${breakdown.discountPercent}% OFF)\n" else ""}--------------------------------
+            TOTAL AMOUNT PAID   : ${breakdown.totalPayable} FRw
+            STATUS              : PAID & ACTIVE
+            ACCESS VALID UNTIL  : $expiryDateStr
+            ================================
+            Cloud Auto-Sync     : ENABLED
+            Thank you for building your business with BeBoss!
+            Support: +250 788 765 432
+            ================================
+        """.trimIndent()
+    }
+
     fun shareReceipt(context: Context, text: String) {
         val sendIntent = Intent().apply {
             action = Intent.ACTION_SEND
