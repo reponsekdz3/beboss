@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -35,7 +36,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddShoppingCart
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.History
@@ -52,9 +52,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -65,17 +62,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ShopProfile
 import com.example.data.model.User
 import com.example.ui.theme.DarkNavy
+import com.example.ui.theme.GopherFontFamily
 import com.example.ui.theme.InkDark
 import com.example.ui.theme.InkMedium
 import com.example.ui.theme.LossRed
@@ -112,20 +113,24 @@ fun BeBossTopBar(
             titleContentColor = MaterialTheme.colorScheme.onSurface
         ),
         title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(vertical = 4.dp)
+            ) {
+                // Official BeBoss Logo with Golden Glow Ring
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.35f)),
-                    shadowElevation = 2.dp,
-                    modifier = Modifier.size(36.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF0F172A),
+                    border = BorderStroke(1.5.dp, Brush.linearGradient(listOf(OrangePrimary, Color(0xFFFFB74D)))),
+                    shadowElevation = 4.dp,
+                    modifier = Modifier.size(38.dp)
                 ) {
                     Image(
-                        painter = painterResource(id = R.drawable.img_app_logo_1787747059788),
+                        painter = painterResource(id = R.drawable.beboss_app_logo_1787833759468),
                         contentDescription = "BeBoss Logo",
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(RoundedCornerShape(10.dp)),
+                            .clip(RoundedCornerShape(12.dp)),
                         contentScale = ContentScale.Crop
                     )
                 }
@@ -133,6 +138,7 @@ fun BeBossTopBar(
                 Column {
                     Text(
                         text = Localization.get(currentScreen.stringKey, language),
+                        fontFamily = GopherFontFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp,
                         maxLines = 1,
@@ -141,7 +147,8 @@ fun BeBossTopBar(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = shopProfile.shopName.ifBlank { "BeBoss Store" },
-                            fontSize = 11.sp,
+                            fontFamily = GopherFontFamily,
+                            fontSize = 11.5.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -149,9 +156,10 @@ fun BeBossTopBar(
                         if (currentUser != null) {
                             Text(
                                 text = " • ${currentUser.name.split(" ").first()}",
-                                fontSize = 10.sp,
+                                fontFamily = GopherFontFamily,
+                                fontSize = 10.5.sp,
                                 color = OrangePrimary,
-                                fontWeight = FontWeight.SemiBold,
+                                fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -169,14 +177,15 @@ fun BeBossTopBar(
                 },
                 shape = RoundedCornerShape(10.dp),
                 color = OrangePrimary.copy(alpha = 0.15f),
+                border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.3f)),
                 modifier = Modifier.padding(end = 4.dp)
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(Icons.Default.Bolt, contentDescription = "Quick Actions", tint = OrangePrimary, modifier = Modifier.size(15.dp))
-                    Spacer(modifier = Modifier.width(3.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
                     Text(
                         text = "⚡",
                         fontSize = 11.sp,
@@ -207,16 +216,18 @@ fun BeBossTopBar(
                 onClick = onToggleLanguage,
                 shape = RoundedCornerShape(10.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                 modifier = Modifier.padding(end = 2.dp)
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(language.flag, fontSize = 12.sp)
                     Spacer(modifier = Modifier.width(3.dp))
                     Text(
                         text = if (language == AppLanguage.ENGLISH) "EN" else "RW",
+                        fontFamily = GopherFontFamily,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -253,6 +264,10 @@ fun BeBossTopBar(
     )
 }
 
+/**
+ * Ultra-Modern Enterprise Floating Capsule Bottom Navigation Dock
+ * Featuring smooth active pill indicators, glowing accents, tactile haptics, and live badges
+ */
 @Composable
 fun BeBossBottomNav(
     currentScreen: AppScreen,
@@ -265,250 +280,152 @@ fun BeBossBottomNav(
 ) {
     val haptic = LocalHapticFeedback.current
 
+    val navItems = listOf(
+        NavItem(
+            screen = AppScreen.DASHBOARD,
+            label = Localization.get("dashboard", language),
+            icon = Icons.Default.Dashboard,
+            badgeCount = 0
+        ),
+        NavItem(
+            screen = AppScreen.SALES_POS,
+            label = Localization.get("sales_pos", language),
+            icon = Icons.Default.AddShoppingCart,
+            badgeCount = cartItemCount,
+            isBadgePrimary = true
+        ),
+        NavItem(
+            screen = AppScreen.INVENTORY,
+            label = Localization.get("inventory", language),
+            icon = Icons.Default.Inventory2,
+            badgeCount = lowStockCount,
+            isBadgeError = true
+        ),
+        NavItem(
+            screen = AppScreen.ANALYTICS,
+            label = Localization.get("analytics", language),
+            icon = Icons.Default.BarChart,
+            badgeCount = 0
+        ),
+        NavItem(
+            screen = AppScreen.CUSTOMERS,
+            label = Localization.get("customers", language),
+            icon = Icons.Default.People,
+            badgeCount = debtorCount
+        ),
+        NavItem(
+            screen = AppScreen.SETTINGS,
+            label = Localization.get("settings", language),
+            icon = Icons.Default.Settings,
+            badgeCount = 0
+        )
+    )
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .windowInsetsPadding(WindowInsets.navigationBars),
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 8.dp,
-        shadowElevation = 12.dp
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+        shadowElevation = 16.dp,
+        tonalElevation = 6.dp
     ) {
-        NavigationBar(
-            containerColor = MaterialTheme.colorScheme.surface,
-            tonalElevation = 0.dp,
-            modifier = Modifier.fillMaxWidth()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            // 1. Dashboard
-            NavigationBarItem(
-                selected = currentScreen == AppScreen.DASHBOARD,
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onNavigate(AppScreen.DASHBOARD)
-                },
-                icon = {
-                    Icon(
-                        imageVector = Icons.Default.Dashboard,
-                        contentDescription = "Dashboard",
-                        modifier = Modifier.size(22.dp)
-                    )
-                },
-                label = {
-                    Text(
-                        text = Localization.get("dashboard", language),
-                        fontSize = 10.sp,
-                        fontWeight = if (currentScreen == AppScreen.DASHBOARD) FontWeight.Bold else FontWeight.Medium,
-                        maxLines = 1
-                    )
-                },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = OrangePrimary,
-                    selectedTextColor = OrangePrimary,
-                    indicatorColor = OrangePrimary.copy(alpha = 0.15f)
+            navItems.forEach { item ->
+                val isSelected = currentScreen == item.screen
+                val scale by animateFloatAsState(
+                    targetValue = if (isSelected) 1.06f else 1.0f,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                    label = "nav_scale"
                 )
-            )
+                val pillBgColor by animateColorAsState(
+                    targetValue = if (isSelected) OrangePrimary.copy(alpha = 0.16f) else Color.Transparent,
+                    label = "nav_pill_color"
+                )
 
-            // 2. POS Sale (Highlighted with Live Cart Badge)
-            NavigationBarItem(
-                selected = currentScreen == AppScreen.SALES_POS,
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onNavigate(AppScreen.SALES_POS)
-                },
-                icon = {
-                    if (cartItemCount > 0) {
+                Box(
+                    modifier = Modifier
+                        .scale(scale)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(pillBgColor)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onNavigate(item.screen)
+                        }
+                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        // Icon with Live Badge
                         BadgedBox(
                             badge = {
-                                Badge(
-                                    containerColor = OrangePrimary,
-                                    contentColor = Color.White
-                                ) {
-                                    Text("$cartItemCount", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                                if (item.badgeCount > 0) {
+                                    Badge(
+                                        containerColor = when {
+                                            item.isBadgeError -> LossRed
+                                            item.isBadgePrimary -> OrangePrimary
+                                            else -> Color(0xFFD97706)
+                                        },
+                                        contentColor = Color.White,
+                                        modifier = Modifier.size(if (item.badgeCount > 9) 18.dp else 16.dp)
+                                    ) {
+                                        Text(
+                                            text = if (item.badgeCount > 99) "99+" else "${item.badgeCount}",
+                                            fontFamily = GopherFontFamily,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 9.sp
+                                        )
+                                    }
                                 }
                             }
                         ) {
                             Icon(
-                                imageVector = Icons.Default.AddShoppingCart,
-                                contentDescription = "POS Sale",
-                                modifier = Modifier.size(23.dp)
+                                imageVector = item.icon,
+                                contentDescription = item.label,
+                                tint = if (isSelected) OrangePrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(if (isSelected) 23.dp else 21.dp)
                             )
                         }
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.AddShoppingCart,
-                            contentDescription = "POS Sale",
-                            modifier = Modifier.size(22.dp)
+
+                        Spacer(modifier = Modifier.height(3.dp))
+
+                        // Label
+                        Text(
+                            text = item.label,
+                            fontFamily = GopherFontFamily,
+                            fontSize = 9.5.sp,
+                            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                            color = if (isSelected) OrangePrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            textAlign = TextAlign.Center,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-                },
-                label = {
-                    Text(
-                        text = Localization.get("sales_pos", language),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1
-                    )
-                },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = OrangePrimary,
-                    selectedTextColor = OrangePrimary,
-                    indicatorColor = OrangePrimary.copy(alpha = 0.15f)
-                )
-            )
-
-            // 3. Inventory (With Low Stock Alert Badge)
-            NavigationBarItem(
-                selected = currentScreen == AppScreen.INVENTORY,
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onNavigate(AppScreen.INVENTORY)
-                },
-                icon = {
-                    if (lowStockCount > 0) {
-                        BadgedBox(
-                            badge = {
-                                Badge(
-                                    containerColor = LossRed,
-                                    contentColor = Color.White
-                                ) {
-                                    Text("$lowStockCount", fontWeight = FontWeight.Bold, fontSize = 10.sp)
-                                }
-                            }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Inventory2,
-                                contentDescription = "Inventory",
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Inventory2,
-                            contentDescription = "Inventory",
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                },
-                label = {
-                    Text(
-                        text = Localization.get("inventory", language),
-                        fontSize = 10.sp,
-                        fontWeight = if (currentScreen == AppScreen.INVENTORY) FontWeight.Bold else FontWeight.Medium,
-                        maxLines = 1
-                    )
-                },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = OrangePrimary,
-                    selectedTextColor = OrangePrimary,
-                    indicatorColor = OrangePrimary.copy(alpha = 0.15f)
-                )
-            )
-
-            // 4. Analytics / Reports
-            NavigationBarItem(
-                selected = currentScreen == AppScreen.ANALYTICS,
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onNavigate(AppScreen.ANALYTICS)
-                },
-                icon = {
-                    Icon(
-                        imageVector = Icons.Default.BarChart,
-                        contentDescription = "Analytics",
-                        modifier = Modifier.size(22.dp)
-                    )
-                },
-                label = {
-                    Text(
-                        text = Localization.get("analytics", language),
-                        fontSize = 10.sp,
-                        fontWeight = if (currentScreen == AppScreen.ANALYTICS) FontWeight.Bold else FontWeight.Medium,
-                        maxLines = 1
-                    )
-                },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = OrangePrimary,
-                    selectedTextColor = OrangePrimary,
-                    indicatorColor = OrangePrimary.copy(alpha = 0.15f)
-                )
-            )
-
-            // 5. Customers & Debts (With Debtor Count Badge)
-            NavigationBarItem(
-                selected = currentScreen == AppScreen.CUSTOMERS,
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onNavigate(AppScreen.CUSTOMERS)
-                },
-                icon = {
-                    if (debtorCount > 0) {
-                        BadgedBox(
-                            badge = {
-                                Badge(
-                                    containerColor = Color(0xFFD97706),
-                                    contentColor = Color.White
-                                ) {
-                                    Text("$debtorCount", fontWeight = FontWeight.Bold, fontSize = 9.sp)
-                                }
-                            }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.People,
-                                contentDescription = "Customers",
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.People,
-                            contentDescription = "Customers",
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                },
-                label = {
-                    Text(
-                        text = Localization.get("customers", language),
-                        fontSize = 10.sp,
-                        fontWeight = if (currentScreen == AppScreen.CUSTOMERS) FontWeight.Bold else FontWeight.Medium,
-                        maxLines = 1
-                    )
-                },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = OrangePrimary,
-                    selectedTextColor = OrangePrimary,
-                    indicatorColor = OrangePrimary.copy(alpha = 0.15f)
-                )
-            )
-
-            // 6. Settings
-            NavigationBarItem(
-                selected = currentScreen == AppScreen.SETTINGS,
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onNavigate(AppScreen.SETTINGS)
-                },
-                icon = {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = "Settings",
-                        modifier = Modifier.size(22.dp)
-                    )
-                },
-                label = {
-                    Text(
-                        text = Localization.get("settings", language),
-                        fontSize = 10.sp,
-                        fontWeight = if (currentScreen == AppScreen.SETTINGS) FontWeight.Bold else FontWeight.Medium,
-                        maxLines = 1
-                    )
-                },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = OrangePrimary,
-                    selectedTextColor = OrangePrimary,
-                    indicatorColor = OrangePrimary.copy(alpha = 0.15f)
-                )
-            )
+                }
+            }
         }
     }
 }
 
+private data class NavItem(
+    val screen: AppScreen,
+    val label: String,
+    val icon: ImageVector,
+    val badgeCount: Int = 0,
+    val isBadgePrimary: Boolean = false,
+    val isBadgeError: Boolean = false
+)

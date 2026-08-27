@@ -181,7 +181,7 @@ fun SubscriptionScreen(
                     shadowElevation = 4.dp
                 ) {
                     Image(
-                        painter = painterResource(id = R.drawable.img_app_logo_1787747059788),
+                        painter = painterResource(id = R.drawable.beboss_app_logo_1787833759468),
                         contentDescription = "BeBoss Logo",
                         modifier = Modifier
                             .fillMaxSize()
