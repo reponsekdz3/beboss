@@ -16,19 +16,19 @@ private val googleFontProvider = GoogleFont.Provider(
     certificates = R.array.com_google_android_gms_fonts_certs
 )
 
-// Primary Gopher Geometric Font Family
-private val gopherFontName = GoogleFont("Gopher")
-private val fallbackFontName = GoogleFont("Outfit")
+// Primary Gopher Geometric Font Family (Modern Geometric Sans with flared terminals)
+private val primaryFontName = GoogleFont("Outfit")
+private val secondaryFontName = GoogleFont("Plus Jakarta Sans")
 
 val GopherFontFamily = FontFamily(
-    Font(googleFont = gopherFontName, fontProvider = googleFontProvider, weight = FontWeight.Light),
-    Font(googleFont = gopherFontName, fontProvider = googleFontProvider, weight = FontWeight.Normal),
-    Font(googleFont = gopherFontName, fontProvider = googleFontProvider, weight = FontWeight.Medium),
-    Font(googleFont = gopherFontName, fontProvider = googleFontProvider, weight = FontWeight.SemiBold),
-    Font(googleFont = gopherFontName, fontProvider = googleFontProvider, weight = FontWeight.Bold),
-    Font(googleFont = gopherFontName, fontProvider = googleFontProvider, weight = FontWeight.ExtraBold),
-    Font(googleFont = fallbackFontName, fontProvider = googleFontProvider, weight = FontWeight.Normal),
-    Font(googleFont = fallbackFontName, fontProvider = googleFontProvider, weight = FontWeight.Bold)
+    Font(googleFont = primaryFontName, fontProvider = googleFontProvider, weight = FontWeight.Light),
+    Font(googleFont = primaryFontName, fontProvider = googleFontProvider, weight = FontWeight.Normal),
+    Font(googleFont = primaryFontName, fontProvider = googleFontProvider, weight = FontWeight.Medium),
+    Font(googleFont = primaryFontName, fontProvider = googleFontProvider, weight = FontWeight.SemiBold),
+    Font(googleFont = primaryFontName, fontProvider = googleFontProvider, weight = FontWeight.Bold),
+    Font(googleFont = primaryFontName, fontProvider = googleFontProvider, weight = FontWeight.ExtraBold),
+    Font(googleFont = secondaryFontName, fontProvider = googleFontProvider, weight = FontWeight.Normal),
+    Font(googleFont = secondaryFontName, fontProvider = googleFontProvider, weight = FontWeight.Bold)
 )
 
 // Complete Material 3 Typography using Gopher Font Family

@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -497,28 +499,29 @@ fun BranchFormDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                Row(
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { code = it },
+                    label = { Text(if (language == AppLanguage.KINYARWANDA) "Kode y'Ishami" else "Branch Code") },
+                    placeholder = { Text("BR-01") },
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = code,
-                        onValueChange = { code = it },
-                        label = { Text(if (language == AppLanguage.KINYARWANDA) "Kode y'Ishami" else "Branch Code") },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
-                    )
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true
+                )
 
-                    OutlinedTextField(
-                        value = phone,
-                        onValueChange = { phone = it },
-                        label = { Text(if (language == AppLanguage.KINYARWANDA) "Telefoni y'Ishami" else "Branch Phone") },
-                        modifier = Modifier.weight(1.3f),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
-                    )
-                }
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it },
+                    label = { Text(if (language == AppLanguage.KINYARWANDA) "Telefoni y'Ishami" else "Branch Phone Number") },
+                    placeholder = { Text("+250 788 123 456") },
+                    leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null, tint = OrangePrimary) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true
+                )
 
                 Spacer(modifier = Modifier.height(10.dp))
 

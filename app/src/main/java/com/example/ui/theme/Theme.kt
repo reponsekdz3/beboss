@@ -11,6 +11,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.text.TextStyle
+
 private val DarkColorScheme =
   darkColorScheme(
     primary = OrangePrimary,
@@ -62,6 +66,12 @@ fun MyApplicationTheme(
       else -> LightColorScheme
     }
 
-  MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
+  MaterialTheme(colorScheme = colorScheme, typography = Typography) {
+    CompositionLocalProvider(
+      LocalTextStyle provides TextStyle(fontFamily = GopherFontFamily)
+    ) {
+      content()
+    }
+  }
 }
 

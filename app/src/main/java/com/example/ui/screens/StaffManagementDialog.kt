@@ -498,43 +498,40 @@ fun StaffFormDialog(
                     singleLine = true
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                Row(
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it },
+                    label = { Text(if (language == AppLanguage.KINYARWANDA) "Izina ryo Kwinjira *" else "Username *") },
+                    placeholder = { Text("e.g. jean") },
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = username,
-                        onValueChange = { username = it },
-                        label = { Text(if (language == AppLanguage.KINYARWANDA) "Izina ryo Kwinjira *" else "Username *") },
-                        placeholder = { Text("jean") },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
-                    )
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true
+                )
 
-                    OutlinedTextField(
-                        value = pin,
-                        onValueChange = { if (it.length <= 6) pin = it },
-                        label = { Text(if (language == AppLanguage.KINYARWANDA) "PIN yo Kwinjira *" else "Login PIN *") },
-                        placeholder = { Text(if (initialUser != null) "Unchanged" else "1234") },
-                        visualTransformation = if (showPin) VisualTransformation.None else PasswordVisualTransformation(),
-                        trailingIcon = {
-                            IconButton(onClick = { showPin = !showPin }) {
-                                Icon(
-                                    imageVector = if (showPin) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                    contentDescription = "Toggle PIN",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        modifier = Modifier.weight(1.2f),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
-                    )
-                }
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = { if (it.length <= 6) pin = it },
+                    label = { Text(if (language == AppLanguage.KINYARWANDA) "PIN yo Kwinjira *" else "Login PIN *") },
+                    placeholder = { Text(if (initialUser != null) "Unchanged" else "1234") },
+                    visualTransformation = if (showPin) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { showPin = !showPin }) {
+                            Icon(
+                                imageVector = if (showPin) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = "Toggle PIN",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true
+                )
 
                 // Quick Generate PIN button
                 Row(
@@ -542,8 +539,8 @@ fun StaffFormDialog(
                     horizontalArrangement = Arrangement.End
                 ) {
                     Text(
-                        text = if (language == AppLanguage.KINYARWANDA) "Kora PIN nshya mu buryo bwikora" else "Auto-Generate 4-Digit PIN",
-                        fontSize = 11.sp,
+                        text = if (language == AppLanguage.KINYARWANDA) "⚡ Kora PIN nshya mu buryo bwikora" else "⚡ Auto-Generate 4-Digit PIN",
+                        fontSize = 11.5.sp,
                         color = OrangePrimary,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier
@@ -555,12 +552,12 @@ fun StaffFormDialog(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 OutlinedTextField(
                     value = phone,
                     onValueChange = { phone = it },
-                    label = { Text(if (language == AppLanguage.KINYARWANDA) "Nimero ya Telefoni (WhatsApp)" else "Phone Number (for WhatsApp Invite)") },
+                    label = { Text(if (language == AppLanguage.KINYARWANDA) "Nimero ya Telefoni (WhatsApp)" else "Worker Phone / WhatsApp") },
                     placeholder = { Text("+250 788 123 456") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     modifier = Modifier.fillMaxWidth(),

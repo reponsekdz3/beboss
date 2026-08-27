@@ -996,59 +996,41 @@ fun ProductFormDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Category & Unit
-                Row(
+                OutlinedTextField(
+                    value = category,
+                    onValueChange = { category = it },
+                    label = { Text("Category") },
+                    placeholder = { Text("e.g. Beverages / Grocery") },
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    OutlinedTextField(
-                        value = category,
-                        onValueChange = { category = it },
-                        label = { Text("Category") },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
-                    )
-
-                    OutlinedTextField(
-                        value = unit,
-                        onValueChange = { unit = it },
-                        label = { Text("Unit (pcs, kg...)") },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
-                    )
-                }
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true
+                )
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Cost & Selling Price
-                Row(
+                OutlinedTextField(
+                    value = costPriceStr,
+                    onValueChange = { costPriceStr = it },
+                    label = { Text("Cost Price (Buying) - ${shopProfile.currencySymbol}") },
+                    placeholder = { Text("450") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    OutlinedTextField(
-                        value = costPriceStr,
-                        onValueChange = { costPriceStr = it },
-                        label = { Text("Cost (Buying) (${shopProfile.currencySymbol})") },
-                        placeholder = { Text("450") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
-                    )
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true
+                )
 
-                    OutlinedTextField(
-                        value = sellingPriceStr,
-                        onValueChange = { sellingPriceStr = it },
-                        label = { Text("Selling Price (${shopProfile.currencySymbol})") },
-                        placeholder = { Text("600") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
-                    )
-                }
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = sellingPriceStr,
+                    onValueChange = { sellingPriceStr = it },
+                    label = { Text("Selling Price - ${shopProfile.currencySymbol} *") },
+                    placeholder = { Text("600") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true
+                )
 
                 // Profit Preview Box
                 if (selling > 0) {
@@ -1059,50 +1041,62 @@ fun ProductFormDialog(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("Est. Profit: +${ReceiptGenerator.formatMoney(profitPerUnit, shopProfile)}", fontSize = 12.sp, color = ProfitGreen, fontWeight = FontWeight.Bold)
-                            Text("Margin: ${marginPct.toInt()}%", fontSize = 12.sp, color = ProfitGreen, fontWeight = FontWeight.Bold)
+                            Text("Est. Profit: +${ReceiptGenerator.formatMoney(profitPerUnit, shopProfile)}", fontSize = 12.5.sp, color = ProfitGreen, fontWeight = FontWeight.Bold)
+                            Text("Margin: ${marginPct.toInt()}%", fontSize = 12.5.sp, color = ProfitGreen, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Quantity & Low Stock Alert
-                Row(
+                OutlinedTextField(
+                    value = quantityStr,
+                    onValueChange = { quantityStr = it },
+                    label = { Text("Available Quantity in Stock *") },
+                    placeholder = { Text("10") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    OutlinedTextField(
-                        value = quantityStr,
-                        onValueChange = { quantityStr = it },
-                        label = { Text("Stock Quantity") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
-                    )
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true
+                )
 
-                    OutlinedTextField(
-                        value = lowThresholdStr,
-                        onValueChange = { lowThresholdStr = it },
-                        label = { Text("Min Stock Alert") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
-                    )
-                }
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = unit,
+                    onValueChange = { unit = it },
+                    label = { Text("Unit of Measure (e.g. pcs, kg, boxes, bottles)") },
+                    placeholder = { Text("pcs") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = lowThresholdStr,
+                    onValueChange = { lowThresholdStr = it },
+                    label = { Text("Min Stock Alert Level") },
+                    placeholder = { Text("5") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true
+                )
 
                 Spacer(modifier = Modifier.height(10.dp))
 
                 OutlinedTextField(
                     value = barcode,
                     onValueChange = { barcode = it },
-                    label = { Text("Barcode / SKU (Optional)") },
-                    placeholder = { Text("e.g. 6001001") },
+                    label = { Text("Barcode / SKU Number") },
+                    placeholder = { Text("e.g. 616123456789") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
                     singleLine = true

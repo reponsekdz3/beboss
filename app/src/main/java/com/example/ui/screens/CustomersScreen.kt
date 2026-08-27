@@ -886,30 +886,28 @@ fun CustomerFormDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                Row(
+                OutlinedTextField(
+                    value = city,
+                    onValueChange = { city = it },
+                    label = { Text("City / Town") },
+                    placeholder = { Text("Kigali") },
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    OutlinedTextField(
-                        value = city,
-                        onValueChange = { city = it },
-                        label = { Text("City / Town") },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
-                    )
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true
+                )
 
-                    OutlinedTextField(
-                        value = debtStr,
-                        onValueChange = { debtStr = it },
-                        label = { Text("Initial Debt (${shopProfile.currencySymbol})") },
-                        placeholder = { Text("0") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
-                    )
-                }
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = debtStr,
+                    onValueChange = { debtStr = it },
+                    label = { Text("Initial Debt Balance (${shopProfile.currencySymbol})") },
+                    placeholder = { Text("0") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true
+                )
 
                 Spacer(modifier = Modifier.height(10.dp))
 

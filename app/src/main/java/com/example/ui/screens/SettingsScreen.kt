@@ -27,6 +27,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import com.example.R
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Badge
@@ -726,52 +730,56 @@ fun SettingsScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    Row(
+                    OutlinedTextField(
+                        value = phone,
+                        onValueChange = { phone = it },
+                        label = { Text(Localization.get("phone_number", language)) },
+                        placeholder = { Text("+250 788 123 456") },
+                        leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null, tint = OrangePrimary) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    ExposedDropdownMenuBox(
+                        expanded = currencyExpanded,
+                        onExpandedChange = { currencyExpanded = !currencyExpanded },
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         OutlinedTextField(
-                            value = phone,
-                            onValueChange = { phone = it },
-                            label = { Text(Localization.get("phone_number", language)) },
-                            modifier = Modifier.weight(1f),
+                            value = "$currencySymbol - $currencyCode",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text(Localization.get("currency", language)) },
+                            leadingIcon = { Icon(Icons.Default.AttachMoney, contentDescription = null, tint = OrangePrimary) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = currencyExpanded) },
+                            modifier = Modifier
+                                .menuAnchor()
+                                .fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp)
                         )
-
-                        ExposedDropdownMenuBox(
+                        ExposedDropdownMenu(
                             expanded = currencyExpanded,
-                            onExpandedChange = { currencyExpanded = !currencyExpanded },
-                            modifier = Modifier.weight(1f)
+                            onDismissRequest = { currencyExpanded = false }
                         ) {
-                            OutlinedTextField(
-                                value = "$currencySymbol ($currencyCode)",
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text(Localization.get("currency", language)) },
-                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = currencyExpanded) },
-                                modifier = Modifier.menuAnchor(),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            ExposedDropdownMenu(
-                                expanded = currencyExpanded,
-                                onDismissRequest = { currencyExpanded = false }
-                            ) {
-                                listOf(
-                                    Triple("FRw", "RWF", "Rwandan Franc"),
-                                    Triple("$", "USD", "US Dollar"),
-                                    Triple("KSh", "KES", "Kenyan Shilling"),
-                                    Triple("USh", "UGX", "Ugandan Shilling"),
-                                    Triple("€", "EUR", "Euro")
-                                ).forEach { (sym, code, name) ->
-                                    DropdownMenuItem(
-                                        text = { Text("$sym - $name ($code)") },
-                                        onClick = {
-                                            currencySymbol = sym
-                                            currencyCode = code
-                                            currencyExpanded = false
-                                        }
-                                    )
-                                }
+                            listOf(
+                                Triple("FRw", "RWF", "Rwandan Franc"),
+                                Triple("$", "USD", "US Dollar"),
+                                Triple("KSh", "KES", "Kenyan Shilling"),
+                                Triple("USh", "UGX", "Ugandan Shilling"),
+                                Triple("€", "EUR", "Euro")
+                            ).forEach { (sym, code, name) ->
+                                DropdownMenuItem(
+                                    text = { Text("$sym - $name ($code)") },
+                                    onClick = {
+                                        currencySymbol = sym
+                                        currencyCode = code
+                                        currencyExpanded = false
+                                    }
+                                )
                             }
                         }
                     }
