@@ -14,6 +14,8 @@ import com.example.data.model.DailyAnalyticsPoint
 import com.example.data.model.InventoryValuation
 import com.example.data.model.Product
 import com.example.data.model.ProfitLossSummary
+import com.example.data.model.PurchaseRecord
+import com.example.data.model.PurchaseSummary
 import com.example.data.model.Sale
 import com.example.data.model.SaleItem
 import com.example.data.model.SaleWithItems
@@ -37,6 +39,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -224,6 +227,25 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     val allSales: StateFlow<List<Sale>> = repository.allSales.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
     )
+
+    // Purchases & Stock Inflow History (Excel Ledger)
+    val allPurchases: StateFlow<List<PurchaseRecord>> = repository.allPurchases.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
+
+    val purchaseSummary: StateFlow<PurchaseSummary> = allPurchases.map { purchases ->
+        val totalCost = purchases.sumOf { it.totalPurchaseCost }
+        val totalUnits = purchases.sumOf { it.quantityPurchased }
+        val suppliers = purchases.map { it.supplierName.lowercase() }.distinct().size
+        val avg = if (purchases.isNotEmpty()) totalCost / purchases.size else 0.0
+        PurchaseSummary(
+            totalPurchasesCount = purchases.size,
+            totalUnitsBought = totalUnits,
+            totalExpenditure = totalCost,
+            uniqueSuppliersCount = suppliers,
+            averagePurchaseCost = avg
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PurchaseSummary())
 
     // Analytics
     private val _selectedAnalyticsPeriod = MutableStateFlow(AnalyticsPeriod.THIS_WEEK)
@@ -919,6 +941,94 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
             val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
                 "Igicuruzwa cyasibwe." 
                 else "Product deleted."
+            _snackbarMessage.emit(msg)
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // PURCHASES & SUPPLIER GOODS INFLOW (EXCEL SPREADSHEET LEDGER)
+    // ------------------------------------------------------------------------
+    fun recordPurchaseOrder(
+        productId: String,
+        quantity: Double,
+        unitCostPrice: Double,
+        newSellingPrice: Double? = null,
+        supplierName: String,
+        supplierPhone: String = "",
+        paymentStatus: String = "PAID_CASH",
+        invoiceNumber: String = "",
+        notes: String = ""
+    ) {
+        viewModelScope.launch {
+            val user = _currentUser.value
+            val branch = branches.value.firstOrNull { it.id == _selectedBranchId.value }
+                ?: branches.value.firstOrNull { it.isMainBranch }
+                ?: com.example.data.model.Branch()
+
+            val purchase = repository.recordPurchaseOrder(
+                productId = productId,
+                quantity = quantity,
+                unitCostPrice = unitCostPrice,
+                newSellingPrice = newSellingPrice,
+                supplierName = supplierName,
+                supplierPhone = supplierPhone,
+                paymentStatus = paymentStatus,
+                invoiceNumber = invoiceNumber,
+                branchId = branch.id,
+                branchName = branch.name,
+                buyerId = user?.id ?: "",
+                buyerName = user?.name ?: "Shop Manager",
+                notes = notes
+            )
+
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                "Kugura ibicuruzwa (${purchase.quantityPurchased.toInt()} ${purchase.productName}) byanditswe neza muri Excel Ledger!"
+                else "Stock In / Purchase order for ${purchase.quantityPurchased.toInt()} ${purchase.productName} recorded successfully in Excel Ledger!"
+            _snackbarMessage.emit(msg)
+        }
+    }
+
+    fun quickRestockAndAddToCart(
+        product: Product,
+        quantityToAdd: Double,
+        unitCost: Double,
+        supplierName: String
+    ) {
+        viewModelScope.launch {
+            val user = _currentUser.value
+            val branch = branches.value.firstOrNull { it.id == _selectedBranchId.value }
+                ?: branches.value.firstOrNull { it.isMainBranch }
+                ?: com.example.data.model.Branch()
+
+            repository.recordPurchaseOrder(
+                productId = product.id,
+                quantity = quantityToAdd,
+                unitCostPrice = unitCost,
+                newSellingPrice = product.sellingPrice,
+                supplierName = supplierName.ifBlank { "Immediate Supplier" },
+                branchId = branch.id,
+                branchName = branch.name,
+                buyerId = user?.id ?: "",
+                buyerName = user?.name ?: "Shop Manager",
+                notes = "Quick POS 1-Tap Restock"
+            )
+
+            val updatedProd = repository.getProductById(product.id) ?: product.copy(quantityInStock = product.quantityInStock + quantityToAdd)
+            addToCart(updatedProd, 1.0)
+
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                "${product.name} yongerewe mu bubiko (+${quantityToAdd.toInt()}) kandi yongerewe muri POS Cart!"
+                else "Restocked ${product.name} (+${quantityToAdd.toInt()} units) and added to POS cart!"
+            _snackbarMessage.emit(msg)
+        }
+    }
+
+    fun deletePurchaseRecord(purchaseId: String) {
+        viewModelScope.launch {
+            repository.deletePurchaseRecord(purchaseId)
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                "Inyandiko yo kugura yasibwe."
+                else "Purchase order removed from ledger."
             _snackbarMessage.emit(msg)
         }
     }

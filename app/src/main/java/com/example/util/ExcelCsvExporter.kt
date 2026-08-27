@@ -91,6 +91,40 @@ object ExcelCsvExporter {
     }
 
     /**
+     * Exports purchases and supplier goods inflow history into an Excel-ready CSV spreadsheet.
+     */
+    fun exportPurchasesCsv(context: Context, purchases: List<com.example.data.model.PurchaseRecord>, shopProfile: ShopProfile): File {
+        val fileName = "BeBoss_Purchases_Inflow_${dateFormat.format(Date())}.csv"
+        val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
+        val file = File(exportDir, fileName)
+
+        FileWriter(file).use { writer ->
+            writer.write("\uFEFF")
+            writer.append("PO Reference,Date & Time,Product Name,Category,Supplier Name,Supplier Phone,Quantity Bought,Unit Cost (${shopProfile.currencySymbol}),Total Purchase Cost (${shopProfile.currencySymbol}),Selling Price (${shopProfile.currencySymbol}),Estimated Profit (${shopProfile.currencySymbol}),Payment Status,Branch,Purchased By,Notes\n")
+
+            purchases.forEach { p ->
+                val profit = (p.sellingPriceAtPurchase - p.unitCostPrice) * p.quantityPurchased
+                writer.append("\"${escapeCsv(p.invoiceNumber)}\",")
+                writer.append("\"${dateDisplayFormat.format(Date(p.purchaseDate))}\",")
+                writer.append("\"${escapeCsv(p.productName)}\",")
+                writer.append("\"${escapeCsv(p.category)}\",")
+                writer.append("\"${escapeCsv(p.supplierName)}\",")
+                writer.append("\"${escapeCsv(p.supplierPhone)}\",")
+                writer.append("${p.quantityPurchased},")
+                writer.append("${p.unitCostPrice.toLong()},")
+                writer.append("${p.totalPurchaseCost.toLong()},")
+                writer.append("${p.sellingPriceAtPurchase.toLong()},")
+                writer.append("${profit.toLong()},")
+                writer.append("\"${escapeCsv(p.paymentStatus)}\",")
+                writer.append("\"${escapeCsv(p.branchName)}\",")
+                writer.append("\"${escapeCsv(p.purchasedByName)}\",")
+                writer.append("\"${escapeCsv(p.notes)}\"\n")
+            }
+        }
+        return file
+    }
+
+    /**
      * Exports sales ledger to CSV spreadsheet.
      */
     fun exportSalesCsv(context: Context, sales: List<Sale>, shopProfile: ShopProfile): File {

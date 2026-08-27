@@ -28,6 +28,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.BeBossBottomNav
 import com.example.ui.components.BeBossTopBar
+import com.example.ui.components.PermissionRequestDialog
 import com.example.ui.components.QuickCustomSaleDialog
 import com.example.ui.components.QuickSpeedDialSheet
 import com.example.ui.components.ReceiptDialog
@@ -46,6 +47,7 @@ import com.example.ui.viewmodel.AppScreen
 import com.example.ui.viewmodel.BeBossViewModel
 import com.example.util.AppLanguage
 import com.example.util.BiometricAuthManager
+import com.example.util.PermissionManager
 import kotlinx.coroutines.flow.collectLatest
 
 class MainActivity : FragmentActivity() {
@@ -76,6 +78,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     val totalOutstandingDebt by viewModel.totalOutstandingDebt.collectAsState()
     val cartState by viewModel.cartState.collectAsState()
     val allSales by viewModel.allSales.collectAsState()
+    val allPurchases by viewModel.allPurchases.collectAsState()
+    val purchaseSummary by viewModel.purchaseSummary.collectAsState()
     val allCustomerPayments by viewModel.allCustomerPayments.collectAsState()
     val todaySummary by viewModel.todaySummary.collectAsState()
     val profitLossSummary by viewModel.profitLossSummary.collectAsState()
@@ -263,9 +267,25 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 categories = categories,
                                 inventoryValuation = inventoryValuation,
                                 shopProfile = shopProfile,
+                                purchases = allPurchases,
+                                purchaseSummary = purchaseSummary,
                                 onSaveProduct = { p -> viewModel.saveProduct(p) },
                                 onAdjustStock = { pId, delta, reason -> viewModel.adjustStock(pId, delta, reason) },
-                                onDeleteProduct = { pId -> viewModel.deleteProduct(pId) }
+                                onDeleteProduct = { pId -> viewModel.deleteProduct(pId) },
+                                onRecordPurchase = { prodId, qty, cost, sellPrice, supplier, phone, status, inv, notes ->
+                                    viewModel.recordPurchaseOrder(
+                                        productId = prodId,
+                                        quantity = qty,
+                                        unitCostPrice = cost,
+                                        newSellingPrice = sellPrice,
+                                        supplierName = supplier,
+                                        supplierPhone = phone,
+                                        paymentStatus = status,
+                                        invoiceNumber = inv,
+                                        notes = notes
+                                    )
+                                },
+                                onDeletePurchase = { pId -> viewModel.deletePurchaseRecord(pId) }
                             )
                         }
 
@@ -376,6 +396,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
             products = allProducts,
             customers = customers,
             sales = allSales,
+            purchases = allPurchases,
             shopProfile = shopProfile,
             language = currentLanguage,
             onDismiss = { showUniversalSearchDialog = false },
@@ -387,6 +408,9 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
             onSelectCustomer = { c ->
                 viewModel.setCartCustomer(c)
                 viewModel.navigateTo(AppScreen.SALES_POS)
+            },
+            onQuickRestock = { p ->
+                viewModel.navigateTo(AppScreen.INVENTORY)
             }
         )
     }

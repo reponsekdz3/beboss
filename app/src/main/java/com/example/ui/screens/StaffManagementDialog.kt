@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -34,15 +35,23 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Store
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -60,9 +69,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.data.model.Branch
 import com.example.data.model.ShopProfile
 import com.example.data.model.User
 import com.example.data.model.UserRole
@@ -73,15 +85,19 @@ import com.example.ui.theme.LossRed
 import com.example.ui.theme.OrangeLight
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
+import com.example.util.AppLanguage
 import com.example.util.PdfReportGenerator
 import com.example.util.ShopDataTransferManager
 import java.util.UUID
+import kotlin.random.Random
 
 @Composable
 fun StaffManagementDialog(
     allUsers: List<User>,
     currentUser: User?,
+    branches: List<Branch> = emptyList(),
     shopProfile: ShopProfile,
+    language: AppLanguage = AppLanguage.ENGLISH,
     onSaveUser: (User) -> Unit,
     onDeleteUser: (String) -> Unit,
     onDismiss: () -> Unit
@@ -94,56 +110,90 @@ fun StaffManagementDialog(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 16.dp),
+                .padding(vertical = 14.dp),
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
+            Column(modifier = Modifier.padding(18.dp)) {
+                // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.Security,
-                            contentDescription = null,
-                            tint = OrangePrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = CircleShape,
+                            color = OrangeLight,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Security,
+                                    contentDescription = null,
+                                    tint = OrangePrimary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "Staff & Role Access",
-                                fontSize = 17.sp,
+                                text = if (language == AppLanguage.KINYARWANDA) "Abakozi & Uburenganzira" else "Staff & Workers Management",
+                                fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = InkDark
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "${allUsers.size} Registered Collaborators",
+                                text = if (language == AppLanguage.KINYARWANDA) "${allUsers.size} Abakozi Banditse" else "${allUsers.size} Registered Workers",
                                 fontSize = 11.sp,
-                                color = InkMedium
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = InkDark)
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
+                // Add Worker Button
+                Button(
+                    onClick = {
+                        userToEdit = null
+                        isAddingNew = true
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (language == AppLanguage.KINYARWANDA) "Ongeraho Umukozi Mushya" else "Add New Worker / Collaborator",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Workers List
                 LazyColumn(
-                    modifier = Modifier.weight(1f, fill = false),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(350.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(allUsers) { user ->
                         val isSelf = currentUser?.id == user.id
+                        val assignedBranch = branches.firstOrNull { it.id == user.assignedBranchId }
                         val activePermsCount = listOf(
                             user.canSellPOS, user.canApplyDiscounts, user.canManageInventory,
                             user.canViewCostAndProfit, user.canViewAnalytics, user.canManageCustomers,
                             user.canCollectDebt, user.canDeleteRecords, user.canExportReports,
-                            user.canManageCollaborators, user.canManageShopSettings
+                            user.canManageCollaborators, user.canManageShopSettings, user.canExportImportData
                         ).count { it }
 
                         Surface(
@@ -178,7 +228,8 @@ fun StaffManagementDialog(
                                             Text(
                                                 text = user.name.take(1).uppercase(),
                                                 fontWeight = FontWeight.Bold,
-                                                color = Color.White
+                                                color = Color.White,
+                                                fontSize = 16.sp
                                             )
                                         }
                                         Spacer(modifier = Modifier.width(10.dp))
@@ -188,7 +239,7 @@ fun StaffManagementDialog(
                                                     text = user.name,
                                                     fontWeight = FontWeight.Bold,
                                                     fontSize = 14.sp,
-                                                    color = InkDark
+                                                    color = DarkNavy
                                                 )
                                                 if (isSelf) {
                                                     Spacer(modifier = Modifier.width(4.dp))
@@ -196,8 +247,8 @@ fun StaffManagementDialog(
                                                 }
                                             }
                                             Text(
-                                                text = "${user.role.displayName} • PIN: ${user.pinHash}",
-                                                fontSize = 11.sp,
+                                                text = "${user.role.displayName} • @${user.username}",
+                                                fontSize = 11.5.sp,
                                                 color = InkMedium
                                             )
                                         }
@@ -205,21 +256,57 @@ fun StaffManagementDialog(
 
                                     Surface(
                                         shape = RoundedCornerShape(6.dp),
-                                        color = if (activePermsCount >= 8) Color(0xFFDCFCE7) else OrangeLight
+                                        color = when (user.role) {
+                                            UserRole.OWNER -> OrangeLight
+                                            UserRole.MANAGER -> Color(0xFFDBEAFE)
+                                            UserRole.CASHIER -> Color(0xFFDCFCE7)
+                                        }
                                     ) {
                                         Text(
-                                            text = "$activePermsCount / 11 Perms",
+                                            text = user.role.name,
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = if (activePermsCount >= 8) ProfitGreen else OrangePrimary,
+                                            color = when (user.role) {
+                                                UserRole.OWNER -> OrangePrimary
+                                                UserRole.MANAGER -> Color(0xFF1D4ED8)
+                                                UserRole.CASHIER -> ProfitGreen
+                                            },
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                         )
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.height(10.dp))
-                                HorizontalDivider(color = Color(0xFFE5E7EB), thickness = 0.5.dp)
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                // Branch and phone line
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Store, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(13.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = assignedBranch?.name ?: (if (user.role == UserRole.OWNER) "All Branches (HQ)" else "Main Store"),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = DarkNavy
+                                        )
+                                    }
+
+                                    if (user.phone.isNotBlank()) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Phone, contentDescription = null, tint = InkMedium, modifier = Modifier.size(13.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(user.phone, fontSize = 11.sp, color = InkMedium)
+                                        }
+                                    }
+                                }
+
                                 Spacer(modifier = Modifier.height(8.dp))
+                                HorizontalDivider(color = Color(0xFFE5E7EB), thickness = 0.5.dp)
+                                Spacer(modifier = Modifier.height(6.dp))
 
                                 // Quick Action Buttons
                                 Row(
@@ -239,7 +326,7 @@ fun StaffManagementDialog(
                                         ) {
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                             ) {
                                                 Text("WhatsApp Invite", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = ProfitGreen)
                                             }
@@ -254,13 +341,13 @@ fun StaffManagementDialog(
                                                     val pdf = PdfReportGenerator.generateStaffBadgePdf(context, user, shopProfile)
                                                     PdfReportGenerator.sharePdf(context, pdf, "Access Pass - ${user.name}")
                                                 } catch (e: Exception) {
-                                                    Toast.makeText(context, "Error generating pass: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
                                                 }
                                             }
                                         ) {
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                             ) {
                                                 Icon(Icons.Default.Badge, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(13.dp))
                                                 Spacer(modifier = Modifier.width(3.dp))
@@ -290,19 +377,6 @@ fun StaffManagementDialog(
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Button(
-                    onClick = { isAddingNew = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Add New Collaborator Account", fontWeight = FontWeight.Bold)
-                }
             }
         }
     }
@@ -310,6 +384,8 @@ fun StaffManagementDialog(
     if (isAddingNew || userToEdit != null) {
         StaffFormDialog(
             initialUser = userToEdit,
+            branches = branches,
+            language = language,
             onSave = { u ->
                 onSaveUser(u)
                 isAddingNew = false
@@ -323,17 +399,23 @@ fun StaffManagementDialog(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StaffFormDialog(
     initialUser: User?,
+    branches: List<Branch> = emptyList(),
+    language: AppLanguage = AppLanguage.ENGLISH,
     onSave: (User) -> Unit,
     onDismiss: () -> Unit
 ) {
     var name by remember { mutableStateOf(initialUser?.name ?: "") }
     var username by remember { mutableStateOf(initialUser?.username ?: "") }
     var phone by remember { mutableStateOf(initialUser?.phone ?: "") }
-    var pin by remember { mutableStateOf(initialUser?.pinHash ?: "") }
+    var pin by remember { mutableStateOf(if (initialUser != null && initialUser.pinHash.length <= 6) initialUser.pinHash else "") }
+    var showPin by remember { mutableStateOf(false) }
     var role by remember { mutableStateOf(initialUser?.role ?: UserRole.CASHIER) }
+    var selectedBranchId by remember { mutableStateOf(initialUser?.assignedBranchId ?: (branches.firstOrNull { it.isMainBranch }?.id ?: "")) }
+    var branchDropdownExpanded by remember { mutableStateOf(false) }
 
     // Granular permissions
     var canSellPOS by remember { mutableStateOf(initialUser?.canSellPOS ?: true) }
@@ -372,7 +454,7 @@ fun StaffFormDialog(
                 .fillMaxWidth()
                 .padding(vertical = 12.dp),
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(
                 modifier = Modifier
@@ -385,23 +467,32 @@ fun StaffFormDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (initialUser != null) "Edit Collaborator" else "New Collaborator Account",
+                        text = if (initialUser != null) {
+                            if (language == AppLanguage.KINYARWANDA) "Hindura Amakuru y'Umukozi" else "Edit Worker Profile"
+                        } else {
+                            if (language == AppLanguage.KINYARWANDA) "Ongeraho Umukozi Mushya" else "New Worker Account"
+                        },
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
-                        color = InkDark
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = InkDark)
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedTextField(
                     value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Worker Full Name *") },
-                    placeholder = { Text("e.g. Eric Manzi") },
+                    onValueChange = {
+                        name = it
+                        if (username.isBlank() || initialUser == null) {
+                            username = it.lowercase().replace(" ", "").filter { ch -> ch.isLetterOrDigit() }
+                        }
+                    },
+                    label = { Text(if (language == AppLanguage.KINYARWANDA) "Amazina y'Umukozi *" else "Worker Full Name *") },
+                    placeholder = { Text("e.g. Jean Pierre Mugabo") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
                     singleLine = true
@@ -416,8 +507,8 @@ fun StaffFormDialog(
                     OutlinedTextField(
                         value = username,
                         onValueChange = { username = it },
-                        label = { Text("Username *") },
-                        placeholder = { Text("eric") },
+                        label = { Text(if (language == AppLanguage.KINYARWANDA) "Izina ryo Kwinjira *" else "Username *") },
+                        placeholder = { Text("jean") },
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(10.dp),
                         singleLine = true
@@ -426,21 +517,50 @@ fun StaffFormDialog(
                     OutlinedTextField(
                         value = pin,
                         onValueChange = { if (it.length <= 6) pin = it },
-                        label = { Text("Fast PIN (4 Digits) *") },
-                        placeholder = { Text("1234") },
+                        label = { Text(if (language == AppLanguage.KINYARWANDA) "PIN yo Kwinjira *" else "Login PIN *") },
+                        placeholder = { Text(if (initialUser != null) "Unchanged" else "1234") },
+                        visualTransformation = if (showPin) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showPin = !showPin }) {
+                                Icon(
+                                    imageVector = if (showPin) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = "Toggle PIN",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1.2f),
                         shape = RoundedCornerShape(10.dp),
                         singleLine = true
                     )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                // Quick Generate PIN button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Text(
+                        text = if (language == AppLanguage.KINYARWANDA) "Kora PIN nshya mu buryo bwikora" else "Auto-Generate 4-Digit PIN",
+                        fontSize = 11.sp,
+                        color = OrangePrimary,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clickable {
+                                pin = String.format("%04d", Random.nextInt(1000, 9999))
+                                showPin = true
+                            }
+                            .padding(vertical = 4.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
 
                 OutlinedTextField(
                     value = phone,
                     onValueChange = { phone = it },
-                    label = { Text("Phone Number (for WhatsApp Invite)") },
+                    label = { Text(if (language == AppLanguage.KINYARWANDA) "Nimero ya Telefoni (WhatsApp)" else "Phone Number (for WhatsApp Invite)") },
                     placeholder = { Text("+250 788 123 456") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     modifier = Modifier.fillMaxWidth(),
@@ -448,9 +568,61 @@ fun StaffFormDialog(
                     singleLine = true
                 )
 
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Assigned Branch Dropdown
+                if (branches.isNotEmpty()) {
+                    ExposedDropdownMenuBox(
+                        expanded = branchDropdownExpanded,
+                        onExpandedChange = { branchDropdownExpanded = !branchDropdownExpanded }
+                    ) {
+                        val currentBranchName = branches.firstOrNull { it.id == selectedBranchId }?.name 
+                            ?: (if (selectedBranchId.isBlank()) "All Branches (Master HQ)" else "Select Branch")
+
+                        OutlinedTextField(
+                            value = currentBranchName,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text(if (language == AppLanguage.KINYARWANDA) "Ishami Akoreramo" else "Assigned Work Branch") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = branchDropdownExpanded) },
+                            modifier = Modifier
+                                .menuAnchor()
+                                .fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+
+                        ExposedDropdownMenu(
+                            expanded = branchDropdownExpanded,
+                            onDismissRequest = { branchDropdownExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("All Branches (HQ / Master Access)") },
+                                onClick = {
+                                    selectedBranchId = ""
+                                    branchDropdownExpanded = false
+                                }
+                            )
+                            branches.forEach { b ->
+                                DropdownMenuItem(
+                                    text = { Text("${b.name} (${b.code})") },
+                                    onClick = {
+                                        selectedBranchId = b.id
+                                        branchDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(12.dp))
 
-                Text("1. Quick Role Preset:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = InkDark)
+                Text(
+                    text = if (language == AppLanguage.KINYARWANDA) "1. Hitamo Inshingano (Role):" else "1. Quick Role Preset:",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -475,8 +647,17 @@ fun StaffFormDialog(
                 HorizontalDivider(color = Color(0xFFE5E7EB))
                 Spacer(modifier = Modifier.height(10.dp))
 
-                Text("2. Fine-Grained Permissions Customizer:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = InkDark)
-                Text("Customize exact permissions allowed for this staff member.", fontSize = 11.sp, color = InkMedium)
+                Text(
+                    text = if (language == AppLanguage.KINYARWANDA) "2. Uburenganzira Bwihariye bw'Umukozi:" else "2. Fine-Grained Permissions Customizer:",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = if (language == AppLanguage.KINYARWANDA) "Hitamo neza ibyo uyu mukozi yemerewe gukora muri porogaramu." else "Customize exact capabilities allowed for this staff member.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -495,16 +676,22 @@ fun StaffFormDialog(
 
                 Spacer(modifier = Modifier.height(18.dp))
 
+                val finalBranch = branches.firstOrNull { it.id == selectedBranchId }
+                val isFormValid = name.isNotBlank() && (pin.isNotBlank() || initialUser != null)
+
                 Button(
                     onClick = {
-                        if (name.isNotBlank() && pin.isNotBlank()) {
+                        if (name.isNotBlank()) {
+                            val finalPin = if (pin.isNotBlank()) pin.trim() else (initialUser?.pinHash ?: "1234")
                             val u = User(
                                 id = initialUser?.id ?: UUID.randomUUID().toString(),
                                 name = name.trim(),
                                 username = username.ifBlank { name.lowercase().replace(" ", "") },
                                 phone = phone.trim(),
-                                pinHash = pin.trim(),
+                                pinHash = finalPin,
                                 role = role,
+                                assignedBranchId = selectedBranchId,
+                                assignedBranchName = finalBranch?.name ?: "Main Store",
                                 profileColorHex = when (role) {
                                     UserRole.OWNER -> "#FF6B1A"
                                     UserRole.MANAGER -> "#2563EB"
@@ -531,9 +718,12 @@ fun StaffFormDialog(
                         .height(48.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                    enabled = name.isNotBlank() && pin.isNotBlank()
+                    enabled = isFormValid
                 ) {
-                    Text("Save Collaborator & Permissions", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (language == AppLanguage.KINYARWANDA) "Bika Umukozi n'Uburenganzira" else "Save Worker & Permissions",
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
@@ -555,8 +745,8 @@ private fun PermissionToggleItem(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = InkDark)
-            Text(subtitle, fontSize = 10.5.sp, color = InkMedium)
+            Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+            Text(subtitle, fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(
             checked = checked,

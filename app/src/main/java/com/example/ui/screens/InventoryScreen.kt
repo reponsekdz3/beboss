@@ -89,7 +89,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.data.model.InventoryValuation
 import com.example.data.model.Product
+import com.example.data.model.PurchaseRecord
+import com.example.data.model.PurchaseSummary
 import com.example.data.model.ShopProfile
+import com.example.ui.components.PurchasesLedgerView
 import com.example.ui.theme.BackgroundLight
 import com.example.ui.theme.DarkNavy
 import com.example.ui.theme.InkDark
@@ -114,11 +117,16 @@ fun InventoryScreen(
     categories: List<String>,
     inventoryValuation: InventoryValuation,
     shopProfile: ShopProfile,
+    purchases: List<PurchaseRecord> = emptyList(),
+    purchaseSummary: PurchaseSummary = PurchaseSummary(),
     onSaveProduct: (Product) -> Unit,
     onAdjustStock: (String, Double, String) -> Unit,
-    onDeleteProduct: (String) -> Unit
+    onDeleteProduct: (String) -> Unit,
+    onRecordPurchase: ((productId: String, qty: Double, cost: Double, sellPrice: Double?, supplier: String, phone: String, status: String, invoice: String, notes: String) -> Unit)? = null,
+    onDeletePurchase: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    var selectedInventoryTab by remember { mutableStateOf(0) } // 0 = Stock Ledger, 1 = Purchases / Inflow
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("All") }
     var showOnlyLowStock by remember { mutableStateOf(false) }
@@ -170,11 +178,94 @@ fun InventoryScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(BackgroundLight)) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Top Tab Switcher: Stock Spreadsheet vs Purchases & Inflow
+            Surface(
+                color = Color.White,
+                shadowElevation = 2.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(
+                        onClick = { selectedInventoryTab = 0 },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (selectedInventoryTab == 0) OrangePrimary else Color(0xFFF3F4F6)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 9.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Inventory,
+                                contentDescription = null,
+                                tint = if (selectedInventoryTab == 0) Color.White else InkDark,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Stock Spreadsheet",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (selectedInventoryTab == 0) Color.White else InkDark
+                            )
+                        }
+                    }
+
+                    Surface(
+                        onClick = { selectedInventoryTab = 1 },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (selectedInventoryTab == 1) OrangePrimary else Color(0xFFF3F4F6)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 9.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.TableChart,
+                                contentDescription = null,
+                                tint = if (selectedInventoryTab == 1) Color.White else InkDark,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Purchases & Inflow (${purchases.size})",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (selectedInventoryTab == 1) Color.White else InkDark
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (selectedInventoryTab == 1) {
+                PurchasesLedgerView(
+                    purchases = purchases,
+                    products = products,
+                    purchaseSummary = purchaseSummary,
+                    shopProfile = shopProfile,
+                    onRecordPurchase = { prodId, qty, cost, sellPrice, supplier, phone, status, inv, notes ->
+                        onRecordPurchase?.invoke(prodId, qty, cost, sellPrice, supplier, phone, status, inv, notes)
+                    },
+                    onDeletePurchase = { pId ->
+                        onDeletePurchase?.invoke(pId)
+                    }
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
             // Inventory Summary KPI Grid
             item {
                 Card(
@@ -488,23 +579,27 @@ fun InventoryScreen(
             }
 
             item { Spacer(modifier = Modifier.height(76.dp)) }
-        }
+        } // closes LazyColumn
+        } // closes else
+        } // closes Column
 
         // FAB to Add Product
-        FloatingActionButton(
-            onClick = { isAddingNewProduct = true },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(20.dp)
-                .testTag("add_product_fab"),
-            containerColor = OrangePrimary,
-            contentColor = Color.White,
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Row(modifier = Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Add, contentDescription = "Add Product")
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Add Product", fontWeight = FontWeight.Bold)
+        if (selectedInventoryTab == 0) {
+            FloatingActionButton(
+                onClick = { isAddingNewProduct = true },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(20.dp)
+                    .testTag("add_product_fab"),
+                containerColor = OrangePrimary,
+                contentColor = Color.White,
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Row(modifier = Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Add, contentDescription = "Add Product")
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Add Product", fontWeight = FontWeight.Bold)
+                }
             }
         }
     }

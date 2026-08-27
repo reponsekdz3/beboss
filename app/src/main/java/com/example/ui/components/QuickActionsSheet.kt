@@ -483,30 +483,54 @@ fun UniversalSearchDialog(
     products: List<Product>,
     customers: List<Customer>,
     sales: List<Sale>,
+    purchases: List<com.example.data.model.PurchaseRecord> = emptyList(),
     shopProfile: ShopProfile,
     language: AppLanguage,
     onDismiss: () -> Unit,
     onAddToCart: (Product) -> Unit,
     onOpenReceipt: (String) -> Unit,
-    onSelectCustomer: (Customer) -> Unit
+    onSelectCustomer: (Customer) -> Unit,
+    onQuickRestock: ((Product) -> Unit)? = null
 ) {
     var query by remember { mutableStateOf("") }
-    var selectedFilter by remember { mutableStateOf("ALL") } // ALL, PRODUCTS, CUSTOMERS, SALES
+    var selectedFilter by remember { mutableStateOf("ALL") } // ALL, PRODUCTS, CUSTOMERS, SALES, PURCHASES
     val haptic = LocalHapticFeedback.current
 
     val filteredProducts = remember(query, products) {
-        if (query.isBlank()) products.take(10)
-        else products.filter { it.name.contains(query, ignoreCase = true) || it.barcode.contains(query, ignoreCase = true) || it.category.contains(query, ignoreCase = true) }
+        if (query.isBlank()) products.take(15)
+        else products.filter {
+            it.name.contains(query, ignoreCase = true) ||
+            it.barcode.contains(query, ignoreCase = true) ||
+            it.category.contains(query, ignoreCase = true)
+        }
     }
 
     val filteredCustomers = remember(query, customers) {
-        if (query.isBlank()) customers.take(10)
-        else customers.filter { it.name.contains(query, ignoreCase = true) || it.phone.contains(query, ignoreCase = true) }
+        if (query.isBlank()) customers.take(15)
+        else customers.filter {
+            it.name.contains(query, ignoreCase = true) ||
+            it.phone.contains(query, ignoreCase = true) ||
+            it.city.contains(query, ignoreCase = true)
+        }
     }
 
     val filteredSales = remember(query, sales) {
-        if (query.isBlank()) sales.take(10)
-        else sales.filter { it.customerName.contains(query, ignoreCase = true) || it.id.contains(query, ignoreCase = true) || it.receiptNumber.contains(query, ignoreCase = true) }
+        if (query.isBlank()) sales.take(15)
+        else sales.filter {
+            it.customerName.contains(query, ignoreCase = true) ||
+            it.receiptNumber.contains(query, ignoreCase = true) ||
+            it.id.contains(query, ignoreCase = true) ||
+            it.notes.contains(query, ignoreCase = true)
+        }
+    }
+
+    val filteredPurchases = remember(query, purchases) {
+        if (query.isBlank()) purchases.take(15)
+        else purchases.filter {
+            it.productName.contains(query, ignoreCase = true) ||
+            it.supplierName.contains(query, ignoreCase = true) ||
+            it.invoiceNumber.contains(query, ignoreCase = true)
+        }
     }
 
     AlertDialog(
@@ -519,15 +543,23 @@ fun UniversalSearchDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary)
+                        Surface(
+                            shape = CircleShape,
+                            color = OrangePrimary.copy(alpha = 0.15f),
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(18.dp))
+                            }
+                        }
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = Localization.get("quick_universal_search", language),
+                            text = if (language == AppLanguage.KINYARWANDA) "Gushakisha muri Byose" else "Universal Smart Search",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 17.sp
+                            fontSize = 16.sp
                         )
                     }
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(30.dp)) {
                         Icon(Icons.Default.Close, contentDescription = "Close", modifier = Modifier.size(18.dp))
                     }
                 }
@@ -537,9 +569,9 @@ fun UniversalSearchDialog(
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = { Text("Search products, customers, sales...") },
+                    placeholder = { Text("Search products, debtors, receipts, vendors...", fontSize = 12.sp) },
                     singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(18.dp)) },
                     trailingIcon = {
                         if (query.isNotEmpty()) {
                             IconButton(onClick = { query = "" }) {
@@ -553,16 +585,18 @@ fun UniversalSearchDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Filter Tabs
+                // Filter Tabs Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    val totalCount = filteredProducts.size + filteredCustomers.size + filteredSales.size + filteredPurchases.size
                     listOf(
-                        "ALL" to "All (${filteredProducts.size + filteredCustomers.size + filteredSales.size})",
+                        "ALL" to "All ($totalCount)",
                         "PRODUCTS" to "Stock (${filteredProducts.size})",
                         "CUSTOMERS" to "People (${filteredCustomers.size})",
-                        "SALES" to "Sales (${filteredSales.size})"
+                        "SALES" to "Sales (${filteredSales.size})",
+                        "PURCHASES" to "Inflow (${filteredPurchases.size})"
                     ).forEach { (tab, label) ->
                         val isSelected = selectedFilter == tab
                         Surface(
@@ -575,10 +609,10 @@ fun UniversalSearchDialog(
                         ) {
                             Text(
                                 text = label,
-                                fontSize = 10.sp,
+                                fontSize = 9.5.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isSelected) OrangePrimary else MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
                             )
                         }
                     }
@@ -589,14 +623,14 @@ fun UniversalSearchDialog(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(340.dp),
+                    .height(350.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // Products Section
                 if (selectedFilter == "ALL" || selectedFilter == "PRODUCTS") {
                     if (filteredProducts.isNotEmpty()) {
                         item {
-                            Text("📦 Products & Stock", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = OrangePrimary)
+                            Text("📦 Products & Live Inventory", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = OrangePrimary)
                         }
                         items(filteredProducts) { product ->
                             Card(
@@ -614,24 +648,36 @@ fun UniversalSearchDialog(
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(product.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                         Text(
-                                            "${product.sellingPrice.toInt()} ${shopProfile.currencySymbol} • Stock: ${product.quantityInStock.toInt()} ${product.unit}",
+                                            "${product.sellingPrice.toInt()} ${shopProfile.currencySymbol} • ${product.quantityInStock.toInt()} in stock",
                                             fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            color = if (product.quantityInStock <= 0) LossRed else MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
-                                    Button(
-                                        onClick = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            onAddToCart(product)
-                                            onDismiss()
-                                        },
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                        shape = RoundedCornerShape(8.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary)
-                                    ) {
-                                        Icon(Icons.Default.AddShoppingCart, contentDescription = null, modifier = Modifier.size(14.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Sell", fontSize = 11.sp)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        if (product.quantityInStock <= 0 && onQuickRestock != null) {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    onQuickRestock(product)
+                                                    onDismiss()
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                                shape = RoundedCornerShape(6.dp)
+                                            ) {
+                                                Text("Restock", fontSize = 10.sp, color = DarkNavy)
+                                            }
+                                        }
+                                        Button(
+                                            onClick = {
+                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                onAddToCart(product)
+                                                onDismiss()
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            shape = RoundedCornerShape(6.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary)
+                                        ) {
+                                            Text(if (product.quantityInStock <= 0) "Sell (Backorder)" else "Sell", fontSize = 10.5.sp)
+                                        }
                                     }
                                 }
                             }
@@ -644,7 +690,7 @@ fun UniversalSearchDialog(
                     if (filteredCustomers.isNotEmpty()) {
                         item {
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text("👥 Customers & Debtors", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF2563EB))
+                            Text("👥 Customers & Debt Ledger", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF2563EB))
                         }
                         items(filteredCustomers) { customer ->
                             Card(
@@ -667,7 +713,7 @@ fun UniversalSearchDialog(
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(customer.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                         Text(
-                                            customer.phone.ifBlank { "No phone" },
+                                            customer.phone.ifBlank { "No phone registered" },
                                             fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -721,12 +767,46 @@ fun UniversalSearchDialog(
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text("${s.totalAmount.toInt()} ${shopProfile.currencySymbol}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                         Text(
-                                            "${s.customerName} • $dateStr • ${s.paymentMethod}",
+                                            "${s.customerName} • $dateStr • ${s.receiptNumber}",
                                             fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                     Icon(Icons.Default.Receipt, contentDescription = "Receipt", tint = ProfitGreen, modifier = Modifier.size(20.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Purchases Section
+                if (selectedFilter == "ALL" || selectedFilter == "PURCHASES") {
+                    if (filteredPurchases.isNotEmpty()) {
+                        item {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("🛒 Purchases & Inflow Orders", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DarkNavy)
+                        }
+                        items(filteredPurchases) { p ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("${p.quantityPurchased.toInt()}x ${p.productName}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text(
+                                            "Vendor: ${p.supplierName} • Total: ${p.totalPurchaseCost.toInt()} ${shopProfile.currencySymbol}",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }

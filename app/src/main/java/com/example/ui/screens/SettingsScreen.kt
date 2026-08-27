@@ -52,6 +52,8 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Sync
+import com.example.ui.components.PermissionRequestDialog
+import com.example.util.PermissionManager
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -152,8 +154,11 @@ fun SettingsScreen(
     var currencyExpanded by remember { mutableStateOf(false) }
     var showStaffDialog by remember { mutableStateOf(false) }
     var showBranchDialog by remember { mutableStateOf(false) }
+    var showSyncHubDialog by remember { mutableStateOf(false) }
     var showDataTransferDialog by remember { mutableStateOf(false) }
     var showSubscriptionDialog by remember { mutableStateOf(false) }
+    var showPermissionsDialog by remember { mutableStateOf(false) }
+    var permissionsUpdated by remember { mutableStateOf(false) }
     var showLogoutConfirm by remember { mutableStateOf(false) }
 
     LazyColumn(
@@ -525,6 +530,23 @@ fun SettingsScreen(
                             fontSize = 13.sp
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedButton(
+                        onClick = { showSyncHubDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(18.dp), tint = OrangePrimary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (language == AppLanguage.KINYARWANDA) "Fungura Urubuga rwo Gusangiza Amashami" else "Open Branch & Worker Sync Hub",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.5.sp,
+                            color = OrangePrimary
+                        )
+                    }
                 }
             }
         }
@@ -803,7 +825,144 @@ fun SettingsScreen(
             }
         }
 
-        // 8. Official App Branding & Security Verification Card
+        // 8. Device Permissions & System Integration Hub
+        item {
+            val hasContacts = PermissionManager.hasContactsPermission(context)
+            val hasSms = PermissionManager.hasSmsPermission(context)
+            val hasStorage = PermissionManager.hasStoragePermission(context)
+            val hasCamera = PermissionManager.hasCameraPermission(context)
+            val isAllGranted = hasContacts && hasSms && hasStorage && hasCamera
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isAllGranted) ProfitGreen.copy(alpha = 0.15f) else OrangePrimary.copy(alpha = 0.15f),
+                                modifier = Modifier.size(38.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Security,
+                                        contentDescription = null,
+                                        tint = if (isAllGranted) ProfitGreen else OrangePrimary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = if (language == AppLanguage.KINYARWANDA) "Uburenganzira bwa Telefone (Permissions)" else "Device Permissions & Access",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (isAllGranted) "All capabilities active & ready" else "Grant access for contacts, SMS & backup",
+                                    fontSize = 11.5.sp,
+                                    color = if (isAllGranted) ProfitGreen else OrangePrimary,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Permission Badges Grid
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (hasContacts) Color(0xFFDCFCE7) else Color(0xFFFEE2E2),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text("Contacts", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (hasContacts) ProfitGreen else LossRed)
+                                Text(if (hasContacts) "Granted" else "Missing", fontSize = 9.sp, color = InkMedium)
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (hasSms) Color(0xFFDCFCE7) else Color(0xFFFEE2E2),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text("Messages", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (hasSms) ProfitGreen else LossRed)
+                                Text(if (hasSms) "Granted" else "Missing", fontSize = 9.sp, color = InkMedium)
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (hasStorage) Color(0xFFDCFCE7) else Color(0xFFFEE2E2),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text("Storage", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (hasStorage) ProfitGreen else LossRed)
+                                Text(if (hasStorage) "Granted" else "Missing", fontSize = 9.sp, color = InkMedium)
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (hasCamera) Color(0xFFDCFCE7) else Color(0xFFFEE2E2),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text("Camera", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (hasCamera) ProfitGreen else LossRed)
+                                Text(if (hasCamera) "Granted" else "Missing", fontSize = 9.sp, color = InkMedium)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Button(
+                        onClick = { showPermissionsDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (language == AppLanguage.KINYARWANDA) "Genzura & Tanga Uburenganzira Bwose" else "Manage & Request All Permissions",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.5.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // 9. Official App Branding & Security Verification Card
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -885,10 +1044,32 @@ fun SettingsScreen(
         StaffManagementDialog(
             allUsers = allUsers,
             currentUser = currentUser,
+            branches = branches,
             shopProfile = shopProfile,
+            language = language,
             onSaveUser = onSaveUser,
             onDeleteUser = onDeleteUser,
             onDismiss = { showStaffDialog = false }
+        )
+    }
+
+    // Shop Owner Branch & Worker Sync Hub Dialog
+    if (showSyncHubDialog) {
+        ShopOwnerSyncHubDialog(
+            shopProfile = shopProfile,
+            currentUser = currentUser,
+            allUsers = allUsers,
+            branches = branches,
+            sales = sales,
+            products = products,
+            customers = customers,
+            customerPayments = customerPayments,
+            cloudSyncReport = cloudSyncReport,
+            isSyncing = isSyncing,
+            language = language,
+            onSyncToCloudNow = onSyncToCloudNow,
+            onImportBranchPacket = onImportPackage,
+            onDismiss = { showSyncHubDialog = false }
         )
     }
 
@@ -950,6 +1131,18 @@ fun SettingsScreen(
                 OutlinedButton(onClick = { showLogoutConfirm = false }) {
                     Text(Localization.get("cancel", language))
                 }
+            }
+        )
+    }
+
+    // Permission Request Dialog
+    if (showPermissionsDialog) {
+        PermissionRequestDialog(
+            language = language,
+            onDismiss = { showPermissionsDialog = false },
+            onPermissionGranted = {
+                permissionsUpdated = !permissionsUpdated
+                Toast.makeText(context, "Permissions updated successfully!", Toast.LENGTH_SHORT).show()
             }
         )
     }

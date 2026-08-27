@@ -41,8 +41,94 @@ class BeBossRepository(private val database: AppDatabase) {
     private val shopProfileDao = database.shopProfileDao()
     private val syncQueueDao = database.syncQueueDao()
     private val userDao = database.userDao()
+    private val purchaseDao = database.purchaseDao()
 
     val cloudSyncManager = com.example.util.CloudSyncManager(database)
+
+    // -------------------------------------------------------------
+    // PURCHASES & STOCK INFLOW MANAGEMENT (EXCEL SPREADSHEET LEDGER)
+    // -------------------------------------------------------------
+    val allPurchases: Flow<List<com.example.data.model.PurchaseRecord>> = purchaseDao.getAllPurchases()
+
+    suspend fun getAllPurchasesList(): List<com.example.data.model.PurchaseRecord> = withContext(Dispatchers.IO) {
+        purchaseDao.getAllPurchasesList()
+    }
+
+    suspend fun recordPurchaseOrder(
+        productId: String,
+        quantity: Double,
+        unitCostPrice: Double,
+        newSellingPrice: Double? = null,
+        supplierName: String,
+        supplierPhone: String = "",
+        paymentStatus: String = "PAID_CASH",
+        invoiceNumber: String = "",
+        branchId: String = "main_branch",
+        branchName: String = "Main Store",
+        buyerId: String = "",
+        buyerName: String = "Shop Manager",
+        notes: String = ""
+    ): com.example.data.model.PurchaseRecord = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val product = productDao.getProductById(productId)
+        val productName = product?.name ?: "Restocked Product"
+        val category = product?.category ?: "General"
+        val activeSellingPrice = newSellingPrice ?: (product?.sellingPrice ?: (unitCostPrice * 1.3))
+
+        val invNum = invoiceNumber.trim().ifBlank {
+            "PO-" + SimpleDateFormat("yyMMdd-HHmm", Locale.getDefault()).format(Date(now))
+        }
+
+        val purchase = com.example.data.model.PurchaseRecord(
+            id = UUID.randomUUID().toString(),
+            productId = productId,
+            productName = productName,
+            category = category,
+            supplierName = supplierName.trim().ifBlank { "Wholesale Distributor" },
+            supplierPhone = supplierPhone.trim(),
+            quantityPurchased = quantity.coerceAtLeast(0.1),
+            unitCostPrice = unitCostPrice.coerceAtLeast(0.0),
+            totalPurchaseCost = quantity * unitCostPrice,
+            sellingPriceAtPurchase = activeSellingPrice,
+            paymentStatus = paymentStatus,
+            invoiceNumber = invNum,
+            branchId = branchId,
+            branchName = branchName,
+            purchasedByUserId = buyerId,
+            purchasedByName = buyerName,
+            notes = notes.trim(),
+            purchaseDate = now,
+            createdAt = now
+        )
+
+        // Save purchase record
+        purchaseDao.insertPurchase(purchase)
+
+        // Increment product stock and update cost/selling prices if adjusted
+        if (product != null) {
+            val updatedProduct = product.copy(
+                quantityInStock = product.quantityInStock + quantity,
+                costPrice = if (unitCostPrice > 0) unitCostPrice else product.costPrice,
+                sellingPrice = if (newSellingPrice != null && newSellingPrice > 0) newSellingPrice else product.sellingPrice,
+                updatedAt = now
+            )
+            productDao.insertProduct(updatedProduct)
+        }
+
+        enqueueSync(
+            tableName = "purchases",
+            recordId = purchase.id,
+            operation = "CREATE",
+            payloadJson = """{"productId":"$productId","qty":$quantity,"unitCost":$unitCostPrice,"total":${purchase.totalPurchaseCost},"supplier":"$supplierName"}"""
+        )
+
+        purchase
+    }
+
+    suspend fun deletePurchaseRecord(purchaseId: String) = withContext(Dispatchers.IO) {
+        purchaseDao.deletePurchase(purchaseId)
+        enqueueSync("purchases", purchaseId, "DELETE", """{"id":"$purchaseId"}""")
+    }
 
     // -------------------------------------------------------------
     // BRANCHES & MULTI-STORE MANAGEMENT
@@ -55,8 +141,21 @@ class BeBossRepository(private val database: AppDatabase) {
 
     suspend fun saveBranch(branch: com.example.data.model.Branch) = withContext(Dispatchers.IO) {
         val toSave = branch.copy(updatedAt = System.currentTimeMillis())
+        if (toSave.isMainBranch) {
+            val allOtherBranches = branchDao.getAllActiveBranchesList()
+            for (b in allOtherBranches) {
+                if (b.id != toSave.id && b.isMainBranch) {
+                    branchDao.insertBranch(b.copy(isMainBranch = false, updatedAt = System.currentTimeMillis()))
+                }
+            }
+        }
         branchDao.insertBranch(toSave)
-        enqueueSync("branches", toSave.id, "UPDATE", """{"name":"${toSave.name}","code":"${toSave.code}"}""")
+        enqueueSync(
+            tableName = "branches",
+            recordId = toSave.id,
+            operation = "UPDATE",
+            payloadJson = """{"id":"${toSave.id}","name":"${toSave.name}","code":"${toSave.code}","address":"${toSave.address}","phone":"${toSave.phone}","managerName":"${toSave.managerName}","isMain":${toSave.isMainBranch},"isActive":${toSave.isActive}}"""
+        )
     }
 
     suspend fun deleteBranch(branchId: String) = withContext(Dispatchers.IO) {
@@ -139,11 +238,19 @@ class BeBossRepository(private val database: AppDatabase) {
         } else {
             user.password
         }
-        userDao.insertUser(user.copy(pinHash = securedPin, password = securedPassword))
+        val userToSave = user.copy(pinHash = securedPin, password = securedPassword)
+        userDao.insertUser(userToSave)
+        enqueueSync(
+            tableName = "users",
+            recordId = userToSave.id,
+            operation = "UPDATE",
+            payloadJson = """{"id":"${userToSave.id}","name":"${userToSave.name}","username":"${userToSave.username}","role":"${userToSave.role.name}","branchId":"${userToSave.assignedBranchId}","phone":"${userToSave.phone}","isActive":${userToSave.isActive}}"""
+        )
     }
 
     suspend fun deleteUser(userId: String) = withContext(Dispatchers.IO) {
         userDao.deleteUser(userId)
+        enqueueSync("users", userId, "DELETE", """{"id":"$userId"}""")
     }
 
     suspend fun updateLastLogin(userId: String) = withContext(Dispatchers.IO) {
