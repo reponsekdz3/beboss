@@ -42,10 +42,9 @@ data class ShopImportSummary(
 object ShopDataTransferManager {
 
     /**
-     * Exports full shop data to a local `.beboss` JSON file in phone storage.
+     * Creates full JSON Object for shop data.
      */
-    fun exportShopPackage(
-        context: Context,
+    fun createExportJson(
         profile: ShopProfile,
         users: List<User>,
         products: List<Product>,
@@ -54,7 +53,7 @@ object ShopDataTransferManager {
         saleItems: List<SaleItem>,
         payments: List<CustomerPayment>,
         exportedByUser: User?
-    ): File {
+    ): JSONObject {
         val root = JSONObject()
 
         // 1. Metadata
@@ -172,16 +171,21 @@ object ShopDataTransferManager {
             val sObj = JSONObject().apply {
                 put("id", s.id)
                 put("receiptNumber", s.receiptNumber)
-                put("customerId", s.customerId ?: "")
+                put("customerId", s.customerId)
                 put("customerName", s.customerName)
                 put("totalAmount", s.totalAmount)
                 put("totalCost", s.totalCost)
                 put("totalProfit", s.totalProfit)
                 put("discountAmount", s.discountAmount)
-                put("amountPaid", s.amountPaid)
                 put("paymentMethod", s.paymentMethod)
+                put("amountPaid", s.amountPaid)
                 put("paymentStatus", s.paymentStatus)
                 put("notes", s.notes)
+                put("receiptNumber", s.receiptNumber)
+                put("branchId", s.branchId)
+                put("branchName", s.branchName)
+                put("cashierId", s.cashierId)
+                put("cashierName", s.cashierName)
                 put("saleDate", s.saleDate)
                 put("synced", s.synced)
                 put("updatedAt", s.updatedAt)
@@ -226,6 +230,34 @@ object ShopDataTransferManager {
             paymentsArr.put(pyObj)
         }
         root.put("customerPayments", paymentsArr)
+
+        return root
+    }
+
+    /**
+     * Exports full shop data to a local `.beboss` JSON file in phone storage.
+     */
+    fun exportShopPackage(
+        context: Context,
+        profile: ShopProfile,
+        users: List<User>,
+        products: List<Product>,
+        customers: List<Customer>,
+        sales: List<Sale>,
+        saleItems: List<SaleItem>,
+        payments: List<CustomerPayment>,
+        exportedByUser: User?
+    ): File {
+        val root = createExportJson(
+            profile = profile,
+            users = users,
+            products = products,
+            customers = customers,
+            sales = sales,
+            saleItems = saleItems,
+            payments = payments,
+            exportedByUser = exportedByUser
+        )
 
         // Save to Phone Storage
         val backupDir = File(context.getExternalFilesDir(null), "beboss_backups")

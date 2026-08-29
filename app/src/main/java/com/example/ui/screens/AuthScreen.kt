@@ -35,17 +35,26 @@ import androidx.compose.material.icons.filled.AddBusiness
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Backspace
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Checkroom
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.LocalPharmacy
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Store
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -159,7 +168,7 @@ fun AuthLockScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(language.flag, fontSize = 15.sp)
+                        Icon(Icons.Default.Translate, contentDescription = "Language", tint = Color.White, modifier = Modifier.size(15.dp))
                         Text(
                             text = if (language == AppLanguage.ENGLISH) "EN" else "RW",
                             fontFamily = GopherFontFamily,
@@ -574,14 +583,14 @@ fun ShopRegistrationScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val categories = listOf(
-        "🏪 Retail & Grocery",
-        "👗 Fashion & Boutique",
-        "📱 Electronics & Phones",
-        "💊 Pharmacy & Health",
-        "🔨 Hardware & Tools",
-        "🍽️ Restaurant & Bar",
-        "📦 Wholesale Supply",
-        "💈 Salon & Spa"
+        Pair("Retail & Grocery", Icons.Default.Storefront),
+        Pair("Fashion & Boutique", Icons.Default.Checkroom),
+        Pair("Electronics & Phones", Icons.Default.Smartphone),
+        Pair("Pharmacy & Health", Icons.Default.LocalPharmacy),
+        Pair("Hardware & Tools", Icons.Default.Build),
+        Pair("Restaurant & Bar", Icons.Default.Restaurant),
+        Pair("Wholesale Supply", Icons.Default.Inventory2),
+        Pair("Salon & Spa", Icons.Default.ContentCut)
     )
 
     val currencies = listOf(
@@ -622,10 +631,10 @@ fun ShopRegistrationScreen(
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        Text(language.flag, fontSize = 14.sp)
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(Icons.Default.Translate, contentDescription = "Language", tint = Color.White, modifier = Modifier.size(14.dp))
                         Text(if (language == AppLanguage.ENGLISH) "EN" else "RW", fontFamily = GopherFontFamily, color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -766,22 +775,33 @@ fun ShopRegistrationScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(categories) { cat ->
-                                val selected = selectedCategory == cat
+                            items(categories) { (catName, catIcon) ->
+                                val selected = selectedCategory == catName
                                 Surface(
-                                    onClick = { selectedCategory = cat },
+                                    onClick = { selectedCategory = catName },
                                     shape = RoundedCornerShape(10.dp),
                                     color = if (selected) OrangePrimary.copy(alpha = 0.25f) else Color(0xFF0F172A),
                                     border = if (selected) BorderStroke(1.5.dp, OrangePrimary) else BorderStroke(1.dp, Color(0xFF334155))
                                 ) {
-                                    Text(
-                                        text = cat,
-                                        fontFamily = GopherFontFamily,
-                                        fontSize = 11.5.sp,
-                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (selected) Color.White else Color(0xFF94A3B8),
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                    )
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = catIcon,
+                                            contentDescription = catName,
+                                            tint = if (selected) OrangePrimary else Color(0xFF94A3B8),
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Text(
+                                            text = catName,
+                                            fontFamily = GopherFontFamily,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (selected) Color.White else Color(0xFF94A3B8)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -952,21 +972,32 @@ fun ShopRegistrationScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 4.dp),
+                                .padding(top = 6.dp),
                             horizontalArrangement = Arrangement.End
                         ) {
-                            Text(
-                                text = "⚡ Auto-Generate PIN (e.g. 1234)",
-                                fontFamily = GopherFontFamily,
-                                fontSize = 11.5.sp,
-                                color = OrangePrimary,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
-                                    .clickable {
-                                        pin = (1000 + Random.nextInt(9000)).toString()
-                                    }
-                                    .padding(4.dp)
-                            )
+                            Surface(
+                                onClick = {
+                                    pin = (1000 + Random.nextInt(9000)).toString()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                color = OrangePrimary.copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.3f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(13.dp))
+                                    Text(
+                                        text = if (language == AppLanguage.KINYARWANDA) "Kora PIN mu buryo bwikora" else "Auto-Generate PIN",
+                                        fontFamily = GopherFontFamily,
+                                        fontSize = 11.sp,
+                                        color = OrangePrimary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
 

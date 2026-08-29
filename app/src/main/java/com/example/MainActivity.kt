@@ -98,6 +98,12 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     val selectedBranchId by viewModel.selectedBranchId.collectAsState()
     val connectivityStatus by viewModel.connectivityStatus.collectAsState()
     val cloudSyncReport by viewModel.cloudSyncReport.collectAsState()
+    val localServerStatus by viewModel.localServerStatus.collectAsState()
+    val localServerIp by viewModel.localServerIp.collectAsState()
+    val localConnectedClients by viewModel.localConnectedClients.collectAsState()
+    val localLastReceivedPacket by viewModel.localLastReceivedPacket.collectAsState()
+    val isP2pSyncing by viewModel.isP2pSyncing.collectAsState()
+    val syncAuditLogs by viewModel.syncAuditLogs.collectAsState()
     val isLocked by viewModel.isLocked.collectAsState()
     val isRegistrationNeeded by viewModel.isRegistrationNeeded.collectAsState()
     val authError by viewModel.authError.collectAsState()
@@ -338,11 +344,21 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 cloudSyncReport = cloudSyncReport,
                                 language = currentLanguage,
                                 isDarkTheme = isDarkTheme,
+                                localServerStatus = localServerStatus,
+                                localServerIp = localServerIp,
+                                localConnectedClients = localConnectedClients,
+                                localLastReceivedPacket = localLastReceivedPacket,
+                                isP2pSyncing = isP2pSyncing,
+                                syncAuditLogs = syncAuditLogs,
                                 onToggleLanguage = { viewModel.toggleLanguage() },
                                 onToggleTheme = { viewModel.toggleDarkMode() },
                                 onSaveProfile = { prof -> viewModel.updateShopProfile(prof) },
                                 onSyncNow = { viewModel.performSync() },
                                 onSyncToCloudNow = { viewModel.syncToCloudNow() },
+                                onSyncCloudWithEndpoint = { endpoint -> viewModel.syncToCloudWithEndpoint(endpoint) },
+                                onTestPing = { endpoint, cb -> viewModel.testEndpointPing(endpoint, cb) },
+                                onToggleLocalServer = { enable -> viewModel.toggleLocalSyncServer(enable) },
+                                onSyncWithLocalHub = { hubIp -> viewModel.syncWithLocalMasterHub(hubIp) },
                                 onSaveBranch = { b -> viewModel.saveBranch(b) },
                                 onDeleteBranch = { bId -> viewModel.deleteBranch(bId) },
                                 onSaveUser = { u -> viewModel.saveUser(u) },

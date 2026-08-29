@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -334,14 +335,20 @@ fun PurchasesLedgerView(
                             FilterChip(
                                 selected = isExcelTableView,
                                 onClick = { isExcelTableView = true },
-                                label = { Text("📊 Excel Table", fontSize = 11.sp) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.TableChart, contentDescription = null, modifier = Modifier.size(13.dp), tint = if (isExcelTableView) OrangePrimary else InkMedium)
+                                },
+                                label = { Text("Excel Table", fontSize = 11.sp) },
                                 colors = FilterChipDefaults.filterChipColors(selectedContainerColor = OrangePrimary.copy(alpha = 0.15f))
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             FilterChip(
                                 selected = !isExcelTableView,
                                 onClick = { isExcelTableView = false },
-                                label = { Text("📋 Cards", fontSize = 11.sp) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.ViewAgenda, contentDescription = null, modifier = Modifier.size(13.dp), tint = if (!isExcelTableView) OrangePrimary else InkMedium)
+                                },
+                                label = { Text("Cards", fontSize = 11.sp) },
                                 colors = FilterChipDefaults.filterChipColors(selectedContainerColor = OrangePrimary.copy(alpha = 0.15f))
                             )
                         }

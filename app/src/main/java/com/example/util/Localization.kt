@@ -1,8 +1,8 @@
 package com.example.util
 
 enum class AppLanguage(val code: String, val displayName: String, val flag: String) {
-    ENGLISH("en", "English", "🇬🇧"),
-    KINYARWANDA("rw", "Ikinyarwanda", "🇷🇼")
+    ENGLISH("en", "English", "EN"),
+    KINYARWANDA("rw", "Ikinyarwanda", "RW")
 }
 
 object Localization {
@@ -190,12 +190,12 @@ object Localization {
 
         // Interactive Bottom Nav & Power Actions
         "quick_actions" to mapOf(AppLanguage.ENGLISH to "Quick Actions", AppLanguage.KINYARWANDA to "Ibikorwa by'Ihutirwa"),
-        "quick_custom_sale" to mapOf(AppLanguage.ENGLISH to "⚡ Quick Custom Sale", AppLanguage.KINYARWANDA to "⚡ Gucuruza vuba"),
-        "quick_add_product" to mapOf(AppLanguage.ENGLISH to "📦 Quick Add Product", AppLanguage.KINYARWANDA to "📦 Ongeramo Igicuruzwa"),
-        "quick_new_customer" to mapOf(AppLanguage.ENGLISH to "👤 New Customer / Debt", AppLanguage.KINYARWANDA to "👤 Umukiriya Mushya / Ideni"),
-        "quick_universal_search" to mapOf(AppLanguage.ENGLISH to "🔍 Instant Universal Search", AppLanguage.KINYARWANDA to "🔍 Shakisha Byose"),
-        "send_daily_whatsapp" to mapOf(AppLanguage.ENGLISH to "💬 WhatsApp Daily Summary", AppLanguage.KINYARWANDA to "💬 Raporo ku WhatsApp"),
-        "view_last_receipt" to mapOf(AppLanguage.ENGLISH to "🧾 View Last Receipt", AppLanguage.KINYARWANDA to "🧾 Inyemezabuguzi Iheruka"),
+        "quick_custom_sale" to mapOf(AppLanguage.ENGLISH to "Quick Custom Sale", AppLanguage.KINYARWANDA to "Gucuruza vuba"),
+        "quick_add_product" to mapOf(AppLanguage.ENGLISH to "Quick Add Product", AppLanguage.KINYARWANDA to "Ongeramo Igicuruzwa"),
+        "quick_new_customer" to mapOf(AppLanguage.ENGLISH to "New Customer / Debt", AppLanguage.KINYARWANDA to "Umukiriya Mushya / Ideni"),
+        "quick_universal_search" to mapOf(AppLanguage.ENGLISH to "Instant Universal Search", AppLanguage.KINYARWANDA to "Shakisha Byose"),
+        "send_daily_whatsapp" to mapOf(AppLanguage.ENGLISH to "Daily Business Summary", AppLanguage.KINYARWANDA to "Raporo y'Umunsi"),
+        "view_last_receipt" to mapOf(AppLanguage.ENGLISH to "View Last Receipt", AppLanguage.KINYARWANDA to "Inyemezabuguzi Iheruka"),
         "items_in_cart" to mapOf(AppLanguage.ENGLISH to "items in cart", AppLanguage.KINYARWANDA to "mu gikapu"),
         "low_stock_alert_tab" to mapOf(AppLanguage.ENGLISH to "Low Stock", AppLanguage.KINYARWANDA to "Biri gushira"),
         "unpaid_debtors_tab" to mapOf(AppLanguage.ENGLISH to "Debts Pending", AppLanguage.KINYARWANDA to "Amadeni"),

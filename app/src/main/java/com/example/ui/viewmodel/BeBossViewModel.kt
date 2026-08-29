@@ -108,6 +108,61 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
     )
 
+    // Local P2P WiFi / Hotspot Sync Hub
+    val localNetworkSyncServer = com.example.util.LocalNetworkSyncServer(application, db)
+    val localServerStatus = localNetworkSyncServer.serverStatus
+    val localServerIp = localNetworkSyncServer.serverIpAddress
+    val localConnectedClients = localNetworkSyncServer.connectedClientsCount
+    val localLastReceivedPacket = localNetworkSyncServer.lastReceivedPacketSummary
+    val syncAuditLogs = repository.syncAuditLogs
+
+    private val _isP2pSyncing = MutableStateFlow(false)
+    val isP2pSyncing: StateFlow<Boolean> = _isP2pSyncing.asStateFlow()
+
+    fun toggleLocalSyncServer(enable: Boolean) {
+        if (enable) {
+            val started = localNetworkSyncServer.startServer()
+            if (started) {
+                repository.logSyncEvent("P2P_SERVER", "SUCCESS", "Local Hub Server started on port ${localNetworkSyncServer.port}")
+            }
+        } else {
+            localNetworkSyncServer.stopServer()
+            repository.logSyncEvent("P2P_SERVER", "SUCCESS", "Local Hub Server stopped")
+        }
+    }
+
+    fun syncWithLocalMasterHub(hubIp: String) {
+        viewModelScope.launch {
+            _isP2pSyncing.value = true
+            val res = localNetworkSyncServer.syncWithMasterHub(hubIp, _currentUser.value)
+            _isP2pSyncing.value = false
+            repository.logSyncEvent(
+                type = "P2P_CLIENT",
+                status = if (res.success) "SUCCESS" else "FAILED",
+                summary = res.message,
+                latencyMs = res.latencyMs
+            )
+            _snackbarMessage.emit(res.message)
+        }
+    }
+
+    fun testEndpointPing(endpoint: String, onResult: (com.example.util.EndpointPingResult) -> Unit) {
+        viewModelScope.launch {
+            val res = repository.testServerPing(endpoint)
+            onResult(res)
+        }
+    }
+
+    fun syncToCloudWithEndpoint(endpoint: String? = null) {
+        viewModelScope.launch {
+            _isSyncing.value = true
+            val report = repository.cloudSyncManager.syncAllDataToCloud(endpoint)
+            _cloudSyncReport.value = report
+            _isSyncing.value = false
+            _snackbarMessage.emit(report.message)
+        }
+    }
+
     private val _selectedBranchId = MutableStateFlow("ALL")
     val selectedBranchId: StateFlow<String> = _selectedBranchId.asStateFlow()
 
@@ -870,25 +925,25 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         val timeStr = java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
 
         val text = buildString {
-            append("📊 *${shop.shopName.ifBlank { "BeBoss Store" }} - Daily Business Report*\n")
-            append("📅 $timeStr\n")
+            append("*${shop.shopName.ifBlank { "BeBoss Store" }} - Daily Business Report*\n")
+            append("$timeStr\n")
             append("━━━━━━━━━━━━━━━━━━━━\n")
-            append("💰 *Today's Revenue:* ${summary.totalRevenue.toInt()} ${shop.currencySymbol}\n")
-            append("📈 *Net Estimated Profit:* ${summary.netProfit.toInt()} ${shop.currencySymbol}\n")
-            append("🧾 *Transactions Completed:* ${summary.totalSalesCount}\n")
-            append("📦 *Items Sold:* ${summary.totalItemsSold.toInt()}\n")
-            append("🎯 *Average Basket Value:* ${summary.averageOrderValue.toInt()} ${shop.currencySymbol}\n")
+            append("*Today's Revenue:* ${summary.totalRevenue.toInt()} ${shop.currencySymbol}\n")
+            append("*Net Estimated Profit:* ${summary.netProfit.toInt()} ${shop.currencySymbol}\n")
+            append("*Transactions Completed:* ${summary.totalSalesCount}\n")
+            append("*Items Sold:* ${summary.totalItemsSold.toInt()}\n")
+            append("*Average Basket Value:* ${summary.averageOrderValue.toInt()} ${shop.currencySymbol}\n")
             append("━━━━━━━━━━━━━━━━━━━━\n")
             if (lowStock.isNotEmpty()) {
-                append("⚠️ *Low Stock Alert (${lowStock.size} items):*\n")
+                append("*Low Stock Alert (${lowStock.size} items):*\n")
                 lowStock.take(5).forEach { p ->
                     append("• ${p.name}: ${p.quantityInStock.toInt()} ${p.unit} left\n")
                 }
             } else {
-                append("✅ All product stocks are healthy!\n")
+                append("All product stocks are healthy.\n")
             }
             append("━━━━━━━━━━━━━━━━━━━━\n")
-            append("🚀 _Generated with BeBoss Offline Business POS_")
+            append("_Generated with BeBoss POS_")
         }
 
         val sendIntent = Intent(Intent.ACTION_SEND).apply {

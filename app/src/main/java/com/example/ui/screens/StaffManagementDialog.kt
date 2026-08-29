@@ -535,21 +535,34 @@ fun StaffFormDialog(
 
                 // Quick Generate PIN button
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    Text(
-                        text = if (language == AppLanguage.KINYARWANDA) "⚡ Kora PIN nshya mu buryo bwikora" else "⚡ Auto-Generate 4-Digit PIN",
-                        fontSize = 11.5.sp,
-                        color = OrangePrimary,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clickable {
-                                pin = String.format("%04d", Random.nextInt(1000, 9999))
-                                showPin = true
-                            }
-                            .padding(vertical = 4.dp)
-                    )
+                    Surface(
+                        onClick = {
+                            pin = String.format("%04d", Random.nextInt(1000, 9999))
+                            showPin = true
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        color = OrangePrimary.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.3f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(13.dp))
+                            Text(
+                                text = if (language == AppLanguage.KINYARWANDA) "Kora PIN nshya mu buryo bwikora" else "Auto-Generate 4-Digit PIN",
+                                fontSize = 11.sp,
+                                color = OrangePrimary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))

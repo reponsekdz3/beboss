@@ -37,8 +37,10 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.Receipt
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -630,7 +632,11 @@ fun UniversalSearchDialog(
                 if (selectedFilter == "ALL" || selectedFilter == "PRODUCTS") {
                     if (filteredProducts.isNotEmpty()) {
                         item {
-                            Text("📦 Products & Live Inventory", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = OrangePrimary)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Inventory2, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("Products & Live Inventory", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = OrangePrimary)
+                            }
                         }
                         items(filteredProducts) { product ->
                             Card(
@@ -690,7 +696,11 @@ fun UniversalSearchDialog(
                     if (filteredCustomers.isNotEmpty()) {
                         item {
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text("👥 Customers & Debt Ledger", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF2563EB))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.People, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("Customers & Debt Ledger", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF2563EB))
+                            }
                         }
                         items(filteredCustomers) { customer ->
                             Card(
@@ -743,7 +753,11 @@ fun UniversalSearchDialog(
                     if (filteredSales.isNotEmpty()) {
                         item {
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text("🧾 Sales Receipts", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = ProfitGreen)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("Sales Receipts", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = ProfitGreen)
+                            }
                         }
                         items(filteredSales) { s ->
                             val dateStr = SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()).format(Date(s.saleDate))
@@ -784,7 +798,11 @@ fun UniversalSearchDialog(
                     if (filteredPurchases.isNotEmpty()) {
                         item {
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text("🛒 Purchases & Inflow Orders", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DarkNavy)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.ShoppingCart, contentDescription = null, tint = DarkNavy, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("Purchases & Inflow Orders", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DarkNavy)
+                            }
                         }
                         items(filteredPurchases) { p ->
                             Card(

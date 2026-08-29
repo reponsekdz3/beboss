@@ -29,6 +29,9 @@ interface SaleDao {
     @Query("SELECT * FROM sale_items WHERE saleId = :saleId")
     suspend fun getItemsForSale(saleId: String): List<SaleItem>
 
+    @Query("SELECT * FROM sale_items")
+    suspend fun getAllSaleItemsList(): List<SaleItem>
+
     @Query("SELECT * FROM sale_items WHERE saleId = :saleId")
     fun observeItemsForSale(saleId: String): Flow<List<SaleItem>>
 

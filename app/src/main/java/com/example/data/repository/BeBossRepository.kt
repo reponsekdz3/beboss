@@ -678,11 +678,11 @@ class BeBossRepository(private val database: AppDatabase) {
     }
 
     /**
-     * Pushes pending queue and full store records to cloud / Firebase backend
+     * Pushes pending queue and full store records to cloud / backend with optional custom endpoint
      */
-    suspend fun performSync(): SyncResult = withContext(Dispatchers.IO) {
+    suspend fun performSync(serverEndpoint: String? = null): SyncResult = withContext(Dispatchers.IO) {
         try {
-            val report = cloudSyncManager.syncAllDataToCloud()
+            val report = cloudSyncManager.syncAllDataToCloud(serverEndpoint)
             SyncResult(
                 success = report.state == com.example.util.CloudSyncState.SYNCED,
                 syncedCount = report.itemsPushed,
@@ -691,6 +691,16 @@ class BeBossRepository(private val database: AppDatabase) {
         } catch (e: Exception) {
             SyncResult(success = false, syncedCount = 0, message = "Sync failed: ${e.localizedMessage ?: "Unknown error"}")
         }
+    }
+
+    suspend fun testServerPing(endpoint: String) = withContext(Dispatchers.IO) {
+        cloudSyncManager.testEndpointConnection(endpoint)
+    }
+
+    val syncAuditLogs = cloudSyncManager.syncAuditLogs
+
+    fun logSyncEvent(type: String, status: String, summary: String, latencyMs: Long = 0L, payloadSizeKb: Double = 0.0) {
+        cloudSyncManager.addAuditLog(type, status, summary, latencyMs, payloadSizeKb)
     }
 
     suspend fun clearSyncQueue() = withContext(Dispatchers.IO) {

@@ -381,7 +381,7 @@ fun AnalyticsScreen(
                 OutlinedButton(
                     onClick = {
                         val reportText = buildString {
-                            append("📊 ${shopProfile.shopName.uppercase()} — FINANCIAL SUMMARY\n")
+                            append("${shopProfile.shopName.uppercase()} — FINANCIAL SUMMARY\n")
                             append("Period: ${selectedPeriod.displayName}\n")
                             append("--------------------------------\n")
                             append("Total Sales Revenue : ${ReceiptGenerator.formatMoney(summary.totalRevenue, shopProfile)}\n")

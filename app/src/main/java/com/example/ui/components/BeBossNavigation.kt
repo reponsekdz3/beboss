@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -169,7 +170,7 @@ fun BeBossTopBar(
             }
         },
         actions = {
-            // Quick ⚡ Speed Actions Shortcut
+            // Quick Actions Shortcut
             Surface(
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -184,10 +185,11 @@ fun BeBossTopBar(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.Bolt, contentDescription = "Quick Actions", tint = OrangePrimary, modifier = Modifier.size(15.dp))
-                    Spacer(modifier = Modifier.width(2.dp))
+                    Icon(Icons.Default.Bolt, contentDescription = "Quick Actions", tint = OrangePrimary, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
                     Text(
-                        text = "⚡",
+                        text = "POS",
+                        fontFamily = GopherFontFamily,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = OrangePrimary
@@ -220,11 +222,16 @@ fun BeBossTopBar(
                 modifier = Modifier.padding(end = 2.dp)
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(language.flag, fontSize = 12.sp)
-                    Spacer(modifier = Modifier.width(3.dp))
+                    Icon(
+                        imageVector = Icons.Default.Translate,
+                        contentDescription = "Language",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = if (language == AppLanguage.ENGLISH) "EN" else "RW",
                         fontFamily = GopherFontFamily,
