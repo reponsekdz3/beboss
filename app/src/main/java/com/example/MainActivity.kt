@@ -16,6 +16,7 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -25,6 +26,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.BeBossBottomNav
 import com.example.ui.components.BeBossTopBar
@@ -34,6 +38,7 @@ import com.example.ui.components.QuickSpeedDialSheet
 import com.example.ui.components.ReceiptDialog
 import com.example.ui.components.UniversalSearchDialog
 import com.example.ui.screens.AnalyticsScreen
+import com.example.ui.screens.AppSplashScreen
 import com.example.ui.screens.AuthLockScreen
 import com.example.ui.screens.CustomersScreen
 import com.example.ui.screens.DashboardScreen
@@ -111,9 +116,36 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
+    var showSplashScreen by remember { mutableStateOf(true) }
     var showQuickSpeedDialSheet by remember { mutableStateOf(false) }
     var showQuickCustomSaleDialog by remember { mutableStateOf(false) }
     var showUniversalSearchDialog by remember { mutableStateOf(false) }
+
+    // Lifecycle observer to detect when app was closed/backgrounded and reopened
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var lastPausedTimestamp by remember { mutableStateOf(0L) }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    lastPausedTimestamp = System.currentTimeMillis()
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    val now = System.currentTimeMillis()
+                    // If user was away (e.g. app closed/backgrounded and opened again)
+                    if (lastPausedTimestamp > 0L && (now - lastPausedTimestamp) > 1800L) {
+                        showSplashScreen = true
+                    }
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val debtorsCount = remember(customers) { customers.count { it.debtBalance > 0 } }
 
@@ -126,7 +158,13 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
         }
     }
 
-    if (isRegistrationNeeded) {
+    if (showSplashScreen) {
+        AppSplashScreen(
+            isDarkTheme = isDarkTheme,
+            durationMs = 1800L,
+            onSplashFinished = { showSplashScreen = false }
+        )
+    } else if (isRegistrationNeeded) {
         ShopRegistrationScreen(
             language = currentLanguage,
             isDarkTheme = isDarkTheme,
@@ -371,7 +409,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onProcessDirectPayment = { provider, phone, durationMonths, onSuccess ->
                                     viewModel.processDirectSubscriptionPayment(provider, phone, durationMonths, onSuccess)
                                 },
-                                onGrantEmergencyGrace = { viewModel.grantEmergencyGracePeriod() }
+                                onGrantEmergencyGrace = { viewModel.grantEmergencyGracePeriod() },
+                                onShowSplashScreen = { showSplashScreen = true }
                             )
                         }
                     }

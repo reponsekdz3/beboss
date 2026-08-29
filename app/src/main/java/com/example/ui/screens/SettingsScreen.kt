@@ -154,7 +154,8 @@ fun SettingsScreen(
     onSwitchUser: (User) -> Unit = {},
     onActivateVoucher: (String) -> Unit = {},
     onProcessDirectPayment: ((provider: String, phone: String, durationMonths: Int, onSuccess: (com.example.util.PaymentProcessingResult, com.example.util.SubscriptionPriceBreakdown) -> Unit) -> Unit)? = null,
-    onGrantEmergencyGrace: () -> Unit = {}
+    onGrantEmergencyGrace: () -> Unit = {},
+    onShowSplashScreen: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var shopName by remember(shopProfile.shopName) { mutableStateOf(shopProfile.shopName) }
@@ -1124,6 +1125,22 @@ fun SettingsScreen(
                             text = "Hardware Token & AES Local Database Encrypted",
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    OutlinedButton(
+                        onClick = onShowSplashScreen,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp), tint = OrangePrimary)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (language == AppLanguage.KINYARWANDA) "Reba Uburyo App Ifunguka (Instagram Animation)" else "Replay Instagram-Style Launch Screen",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
