@@ -542,6 +542,23 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 )
                 repository.saveUser(ownerUser)
 
+                // Create and initialize the Real Primary Branch using actual owner and shop details
+                val mainBranch = com.example.data.model.Branch(
+                    id = "main_branch",
+                    name = "${shopName.trim()} (HQ)",
+                    code = "HQ-01",
+                    address = address.trim().ifBlank { "Kigali, Rwanda" },
+                    phone = phone.trim(),
+                    managerName = ownerFullName.trim(),
+                    isMainBranch = true,
+                    colorHex = "#FF6B1A"
+                )
+                repository.saveBranch(mainBranch)
+
+                // Ensure no mock placeholder branches exist
+                repository.deleteBranch("branch_kimironko")
+                repository.deleteBranch("branch_nyabugogo")
+
                 prefs.edit().putString("active_user_id", ownerUser.id).apply()
                 _currentUser.value = ownerUser
                 _isRegistrationNeeded.value = false
@@ -1246,16 +1263,20 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 BeBossNotificationManager.sendDebtPaymentNotification(app, "Gasana Jean", 25000.0, 10000.0, shop.currencySymbol)
             }
             "TRANSFER" -> {
+                val branchList = branches.value
+                val from = branchList.firstOrNull()?.name ?: "${shop.shopName} (HQ)"
+                val to = branchList.getOrNull(1)?.name ?: "Outlet Branch"
+                val prod = allProducts.value.firstOrNull()
                 val transfer = StockTransfer(
-                    transferNumber = "TRF-8821",
-                    productId = "prod_primus",
-                    productName = "Primus Beer 50cl",
-                    fromBranchId = "branch_main",
-                    fromBranchName = "Main Store",
-                    toBranchId = "branch_kgl",
-                    toBranchName = "Kimironko Branch",
-                    quantity = 20.0,
-                    unit = "crates"
+                    transferNumber = "TRF-${(1000..9999).random()}",
+                    productId = prod?.id ?: "prod_sample",
+                    productName = prod?.name ?: "Inventory Goods",
+                    fromBranchId = branchList.firstOrNull()?.id ?: "main_branch",
+                    fromBranchName = from,
+                    toBranchId = branchList.getOrNull(1)?.id ?: "branch_secondary",
+                    toBranchName = to,
+                    quantity = 15.0,
+                    unit = prod?.unit ?: "units"
                 )
                 BeBossNotificationManager.sendStockTransferNotification(app, transfer)
             }
@@ -1263,7 +1284,8 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 BeBossNotificationManager.sendDailyTargetReachedNotification(app, 250000.0, 200000.0, shop.currencySymbol)
             }
             "SYNC" -> {
-                BeBossNotificationManager.sendBranchSyncNotification(app, "Kimironko Branch", 14)
+                val branchName = branches.value.firstOrNull()?.name ?: "${shop.shopName} (HQ)"
+                BeBossNotificationManager.sendBranchSyncNotification(app, branchName, allProducts.value.size)
             }
         }
         viewModelScope.launch {

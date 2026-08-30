@@ -170,7 +170,18 @@ fun PermissionRequestDialog(
                             item = item,
                             language = language,
                             onRequestPermission = {
-                                singlePermissionLauncher.launch(item.permission)
+                                try {
+                                    singlePermissionLauncher.launch(item.permission)
+                                } catch (e: Exception) {
+                                    // Fallback to app settings if system launcher fails
+                                    try {
+                                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                            data = Uri.fromParts("package", context.packageName, null)
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {}
+                                }
                             }
                         )
                     }
@@ -183,7 +194,17 @@ fun PermissionRequestDialog(
                     onClick = {
                         val ungranted = permissionsList.filter { !it.isGranted }.map { it.permission }.toTypedArray()
                         if (ungranted.isNotEmpty()) {
-                            multiplePermissionsLauncher.launch(ungranted)
+                            try {
+                                multiplePermissionsLauncher.launch(ungranted)
+                            } catch (e: Exception) {
+                                try {
+                                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                        data = Uri.fromParts("package", context.packageName, null)
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {}
+                            }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),

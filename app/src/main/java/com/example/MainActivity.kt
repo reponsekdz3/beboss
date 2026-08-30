@@ -2,6 +2,7 @@ package com.example
 
 import android.os.Build
 import android.os.Bundle
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -31,7 +32,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -62,7 +62,8 @@ import com.example.util.BiometricAuthManager
 import com.example.util.PermissionManager
 import kotlinx.coroutines.flow.collectLatest
 
-class MainActivity : FragmentActivity() {
+class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -203,7 +204,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
             onToggleTheme = { viewModel.toggleDarkMode() }
         )
     } else if (isLocked) {
-        val fragmentActivity = context as? FragmentActivity
+        val activity = context as? android.app.Activity
         AuthLockScreen(
             currentUser = currentUser,
             allUsers = allUsers,
@@ -214,9 +215,9 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
             onUnlockWithPin = { pin -> viewModel.unlockAppWithPin(pin) },
             onLoginWithCredentials = { user, pass -> viewModel.loginWithCredentials(user, pass) },
             onBiometricUnlock = {
-                if (fragmentActivity != null && BiometricAuthManager.isBiometricAvailable(context)) {
+                if (activity != null && BiometricAuthManager.isBiometricAvailable(context)) {
                     BiometricAuthManager.promptBiometric(
-                        activity = fragmentActivity,
+                        activity = activity,
                         title = if (currentLanguage == AppLanguage.KINYARWANDA) "Kugenzura Igikumwe" else "Fingerprint Verification",
                         subtitle = if (currentLanguage == AppLanguage.KINYARWANDA) "Koresha igikumwe gufungura BeBoss" else "Verify fingerprint to unlock BeBoss",
                         negativeButtonText = if (currentLanguage == AppLanguage.KINYARWANDA) "Koresha PIN" else "Use PIN Instead",

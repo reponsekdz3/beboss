@@ -88,6 +88,8 @@ dependencies {
   implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.androidx.compose.material3)
   implementation(libs.androidx.biometric)
+  implementation(libs.androidx.fragment.ktx)
+  implementation(libs.androidx.appcompat)
   implementation(libs.androidx.compose.ui)
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.text.google.fonts)

@@ -224,36 +224,32 @@ class BeBossRepository(private val database: AppDatabase) {
     }
 
     suspend fun ensureDefaultBranches(): List<com.example.data.model.Branch> = withContext(Dispatchers.IO) {
+        // Clean up legacy mock branches if present
+        val mockIds = setOf("branch_kimironko", "branch_nyabugogo")
+        val currentBranches = branchDao.getAllActiveBranchesList()
+        currentBranches.filter { it.id in mockIds }.forEach { mockBranch ->
+            branchDao.softDeleteBranch(mockBranch.id)
+        }
+
         val count = branchDao.getBranchCount()
         if (count == 0) {
+            val profile = shopProfileDao.getShopProfileDirect()
+            val shopName = profile?.shopName?.ifBlank { "Main Store" } ?: "Main Store"
+            val address = profile?.address?.ifBlank { "Kigali, Rwanda" } ?: "Kigali, Rwanda"
+            val phone = profile?.phone ?: ""
+            val managerName = profile?.name ?: "Shop Owner"
+
             val mainBranch = com.example.data.model.Branch(
                 id = "main_branch",
-                name = "Main Store (Nyarugenge)",
+                name = "$shopName (HQ)",
                 code = "HQ-01",
-                address = "Nyarugenge Market, Shop #42, Kigali",
-                phone = "+250 788 123 456",
+                address = address,
+                phone = phone,
+                managerName = managerName,
                 isMainBranch = true,
                 colorHex = "#FF6B1A"
             )
-            val kimironkoBranch = com.example.data.model.Branch(
-                id = "branch_kimironko",
-                name = "Kimironko Branch",
-                code = "KMR-02",
-                address = "Kimironko Market Sector 4, Kigali",
-                phone = "+250 788 654 321",
-                isMainBranch = false,
-                colorHex = "#2563EB"
-            )
-            val nyabugogoBranch = com.example.data.model.Branch(
-                id = "branch_nyabugogo",
-                name = "Nyabugogo Depot",
-                code = "NYB-03",
-                address = "Nyabugogo Commercial Center",
-                phone = "+250 789 111 222",
-                isMainBranch = false,
-                colorHex = "#10B981"
-            )
-            val initialList = listOf(mainBranch, kimironkoBranch, nyabugogoBranch)
+            val initialList = listOf(mainBranch)
             branchDao.insertAllBranches(initialList)
             initialList
         } else {

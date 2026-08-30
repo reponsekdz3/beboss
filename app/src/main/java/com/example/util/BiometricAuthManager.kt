@@ -1,25 +1,29 @@
 package com.example.util
 
+import android.app.Activity
 import android.content.Context
-import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricPrompt
+import android.content.DialogInterface
+import android.hardware.biometrics.BiometricPrompt
+import android.os.Build
+import android.os.CancellationSignal
 import androidx.core.content.ContextCompat
-import androidx.fragment.app.FragmentActivity
 
 object BiometricAuthManager {
 
     fun isBiometricAvailable(context: Context): Boolean {
-        val biometricManager = BiometricManager.from(context)
+        val biometricManager = androidx.biometric.BiometricManager.from(context)
         return when (biometricManager.canAuthenticate(
-            BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+            androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG or
+            androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK or
+            androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
         )) {
-            BiometricManager.BIOMETRIC_SUCCESS -> true
+            androidx.biometric.BiometricManager.BIOMETRIC_SUCCESS -> true
             else -> false
         }
     }
 
     fun promptBiometric(
-        activity: FragmentActivity,
+        activity: Activity,
         title: String = "Biometric Verification",
         subtitle: String = "Verify fingerprint or face to unlock BeBoss",
         negativeButtonText: String = "Use PIN Instead",
@@ -29,39 +33,49 @@ object BiometricAuthManager {
     ) {
         val executor = ContextCompat.getMainExecutor(activity)
 
-        val biometricPrompt = BiometricPrompt(
-            activity,
-            executor,
-            object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    super.onAuthenticationSucceeded(result)
-                    onSuccess()
-                }
-
-                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    super.onAuthenticationError(errorCode, errString)
-                    // If user cancelled, don't show harsh error
-                    if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
-                        errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON
-                    ) {
-                        onError(errString.toString())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val cancellationSignal = CancellationSignal()
+            try {
+                val prompt = BiometricPrompt.Builder(activity)
+                    .setTitle(title)
+                    .setSubtitle(subtitle)
+                    .setNegativeButton(negativeButtonText, executor) { _: DialogInterface?, _: Int ->
+                        // Fallback to PIN
+                        onFailed()
                     }
-                }
+                    .build()
 
-                override fun onAuthenticationFailed() {
-                    super.onAuthenticationFailed()
-                    onFailed()
-                }
+                prompt.authenticate(
+                    cancellationSignal,
+                    executor,
+                    object : BiometricPrompt.AuthenticationCallback() {
+                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult?) {
+                            super.onAuthenticationSucceeded(result)
+                            onSuccess()
+                        }
+
+                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence?) {
+                            super.onAuthenticationError(errorCode, errString)
+                            if (errorCode != BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED &&
+                                errorCode != BiometricPrompt.BIOMETRIC_ERROR_CANCELED
+                            ) {
+                                onError(errString?.toString() ?: "Biometric error")
+                            } else {
+                                onFailed()
+                            }
+                        }
+
+                        override fun onAuthenticationFailed() {
+                            super.onAuthenticationFailed()
+                            onFailed()
+                        }
+                    }
+                )
+            } catch (e: Exception) {
+                onError("Biometric authentication unavailable: ${e.message}")
             }
-        )
-
-        val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(title)
-            .setSubtitle(subtitle)
-            .setNegativeButtonText(negativeButtonText)
-            .setConfirmationRequired(false)
-            .build()
-
-        biometricPrompt.authenticate(promptInfo)
+        } else {
+            onError("Biometric authentication requires Android 9+")
+        }
     }
 }
