@@ -1,128 +1,200 @@
-# BeBoss Business POS & ERP — Enterprise Edition 🚀💰
+# BeBoss Business POS, ERP & Multi-Branch Management Ecosystem 🚀🏢💰
 
-**BeBoss** is an ultra-fast, offline-first Android Point of Sale (POS), Inventory, Multi-Branch, and Financial Management ecosystem built specifically for retail shops, supermarkets, wholesalers, boutiques, pharmacies, hardware stores, and multi-location businesses.
-
----
-
-## 💎 Why BeBoss is Essential & How It Helps You Make & Save Money 💵📈
-
-### 1. 🛑 Stop Cash & Stock Theft Completely (100% Cash Register Control)
-* **The Problem in Retail:** Small and medium businesses lose up to 15–25% of annual profits due to untracked discounts, unrecorded cashier sales, and inventory shrinkage (cashier taking cash without ringing items).
-* **How BeBoss Solves It:**
-  * Every sale records the exact Cashier name, timestamp, and payment method (Cash, MoMo, Card, Debt).
-  * Out-of-stock items cannot be sold without restock approval, preventing hidden negative stock transactions.
-  * Role-based permissions (Owner vs Cashier vs Manager) prevent cashiers from deleting records or altering past sales.
-  * **Result:** **100% of collected revenue goes straight into the owner's bank/MoMo account or safe.**
-
-### 2. ⚡ Collect Customer Debts (Amadeni) 3x Faster
-* **The Problem:** Notebook-based debt records get lost, disputed, or forgotten, tying up millions in unpaid customer credit.
-* **How BeBoss Solves It:**
-  * One-tap debtor directory with live outstanding debt balances and payment histories.
-  * Automated SMS and WhatsApp payment reminder generators with exact invoice balances.
-  * Quick payment ledger allowing partial payments with real-time balance reduction.
-  * **Result:** **Immediate liquidity recovery and cash flow acceleration.**
-
-### 3. 🎯 Maximize Profit Margins & Never Sell at a Loss
-* **The Problem:** Changing supplier prices often cause shopkeepers to sell goods at low or negative margins without noticing.
-* **How BeBoss Solves It:**
-  * Excel-Style Stock Ledger calculates live unit margins (`(Selling - Cost) / Selling * 100%`).
-  * Supplier Purchases & Inflow Tracker automatically prompts for selling price updates when wholesale restock costs rise.
-  * Target margin configuration alerts you when product profit is below business targets.
-  * **Result:** **Guaranteed 20–35% higher average net profit on every transaction.**
-
-### 4. 🏢 Scale to Multiple Branches & Workers with Zero Monthly Internet Costs
-* **The Problem:** Cloud-only POS systems require constant expensive 4G internet and stop working during network outages.
-* **How BeBoss Solves It:**
-  * Works 100% offline with an on-device enterprise SQLite Room database.
-  * Multi-branch P2P and encrypted JSON backup synchronization (via WhatsApp, Bluetooth, or SD card) aggregates all branch transactions onto the Owner's phone without high cloud hosting fees.
-  * Optional Firebase Cloud Sync for multi-device real-time sync when internet is connected.
-  * **Result:** **Save hundreds of thousands in monthly internet and subscription bills while maintaining complete control over unlimited branch locations.**
+**BeBoss** is an ultra-fast, offline-first Android Point of Sale (POS), Inventory Control, Multi-Branch, Customer Ledger, and Financial Management ecosystem built specifically for retail stores, supermarkets, wholesalers, boutiques, pharmacies, hardware shops, electronics stores, and multi-location enterprises.
 
 ---
 
-## 🚀 How to Use BeBoss (Step-by-Step Guide)
-
-### Step 1: Initial Launch & Shop Configuration 🏪
-1. **Launch App:** Experience the smooth Instagram-style gradient-ring launch animation.
-2. **Setup Shop Profile:**
-   * Navigate to **Settings** (⚙️).
-   * Enter your **Shop Name**, **Owner Name**, **Phone Number**, **TIN / Tax ID**, and **Currency** (e.g., `FRw` for Rwandan Franc, `$` USD, `KSh`, etc.).
-   * Customize receipt header/footer and thermal printer width (58mm mobile or 80mm desktop).
-   * Set your **Daily Sales Target** and **Opening Cash Float**.
-
-### Step 2: Add Inventory & Inflow Purchases 📦
-1. Go to **Inventory** (📦).
-2. Tap **"Add Product"** or tap **"Seed Rwanda Catalog"** in Settings for immediate instant products.
-3. Fill in Barcode/SKU, Product Name, Category, Cost Price, Selling Price, Minimum Stock Alert, and Initial Quantity.
-4. Use the **Excel-Style Stock Spreadsheet** to view, sort, and adjust stock quantities inline.
-5. In the **Purchases Ledger** tab, record wholesale inventory restocks with invoice numbers and supplier details.
-
-### Step 3: Fast Sales & Checkout at POS 💳
-1. Go to **POS** (🛒).
-2. Tap any product or scan its barcode to add it to the active cart.
-3. If an item is out of stock, tap **"Quick Restock"** right from the POS screen.
-4. Select payment method: **Cash**, **MTN Mobile Money / Airtel Money**, **Card**, or **Credit (Debt)**.
-5. If selling on Credit, choose or add the customer to link the debt to their profile.
-6. Tap **"Complete Sale"**:
-   * Haptic vibration and sound confirmation trigger instantly.
-   * Instant thermal receipt generation with QR code and tax breakdown.
-   * Direct one-tap receipt sharing via WhatsApp or thermal printing.
-
-### Step 4: Track Debts & Record Payments 👥
-1. Open **Customers** (👥).
-2. View total shop outstanding debt at a glance.
-3. Tap on any customer to view debt breakdown and history.
-4. Tap **"Pay Debt"** to record partial or full cash/MoMo repayments.
-5. Tap **"Send SMS Reminder"** or **"Share WhatsApp Statement"** to politely prompt customers for payment.
-
-### Step 5: Review Analytics & Profits 📊
-1. Open **Analytics** (📊).
-2. Select time window: **Today**, **This Week**, **This Month**, **This Year**, or **All Time**.
-3. Inspect **Gross Revenue**, **Cost of Goods Sold (COGS)**, and **Net Profit**.
-4. Check **Top 5 Best-Selling Products** to know which inventory generates the highest returns.
-
-### Step 6: Multi-Branch & Database Maintenance 🛠️
-1. Go to **Settings** (⚙️) -> **SQLite Database Engine & Health**:
-   * **PRAGMA Integrity Check:** One-click validation of B-Tree database health.
-   * **WAL Checkpoint & VACUUM Defragmentation:** Supercharges SQLite query execution speed and shrinks storage footprint.
-   * **Branch Sync Hub:** Send or receive encrypted offline branch packages to consolidate multi-location sales.
+## 🌟 Table of Contents
+1. [Core Capabilities & Value Proposition](#-core-capabilities--value-proposition)
+2. [How BeBoss Drives Real Profitability & Eliminates Business Losses](#-how-beboss-drives-real-profitability--eliminates-business-losses)
+3. [Key Modules & Operational Functionality](#-key-modules--operational-functionality)
+4. [Dynamic Multi-Branch & Staff Subscription Architecture](#-dynamic-multi-branch--staff-subscription-architecture)
+5. [Step-by-Step Operator & Owner Guide](#-step-by-step-operator--owner-guide)
+6. [Offline-First Resilience & SQLite Room Engine](#-offline-first-resilience--sqlite-room-engine)
+7. [Hardware & Peripheral Integrations](#-hardware--peripheral-integrations)
+8. [Security, Roles & Access Control](#-security-roles--access-control)
+9. [Bilingual & Regional Customization](#-bilingual--regional-customization)
+10. [Technical Specifications & Architecture](#-technical-specifications--architecture)
 
 ---
 
-## ⚙️ Supercharged SQLite Database Engine Features
+## 💎 Core Capabilities & Value Proposition
 
-BeBoss is powered by a fine-tuned **Android Room SQLite Database Engine (v6)** optimized for mission-critical enterprise speed:
+* **Zero Cloud Dependency (100% Offline-First):** Complete on-device database architecture ensures sales, receipt printing, inventory tracking, and ledger entries work seamlessly even in remote regions with zero internet connection.
+* **Multi-Branch Operations:** Real branch tracking with inter-branch stock transfers, separate cash floats, branch-level profit/loss reports, and centralized HQ roll-up.
+* **Instant Native Launch & Fluid UI:** High-performance Jetpack Compose interface with window-level Android launch optimizations, rotating gradient animated loading, and full Light/Dark mode adaptability.
+* **Zero Mock or Demo Data:** Pure business records created and governed by the store owner and staff.
 
-| Feature | Technical Architecture | Benefit for Business |
+---
+
+## 📈 How BeBoss Drives Real Profitability & Eliminates Business Losses
+
+### 1. 🛑 Complete Cash & Stock Shrinkage Elimination
+* **The Challenge:** Small and medium retail enterprises lose between 15% and 25% of annual net revenue due to unrecorded cashier sales, untracked manual discounts, and inventory theft.
+* **How BeBoss Solves It:**
+  * Every transaction stamps the active cashier's ID, timestamp, branch, and payment channel (Cash, Mobile Money, Card, or Debt).
+  * Real-time stock decrements prevent ghost sales; out-of-stock items require an authorized restock before checkout.
+  * Role-based permissions prevent cashier-level edits or deletions of past sales receipts.
+  * **Financial Impact:** 100% of revenue collected at the counter reaches the owner's bank, mobile wallet, or safe.
+
+### 2. ⚡ 3x Faster Customer Debt Collection (*Amadeni*)
+* **The Challenge:** Paper notebooks lead to lost records, customer disputes, uncollected balances, and stagnant working capital.
+* **How BeBoss Solves It:**
+  * Real-time customer debt directory tracks outstanding balances, credit limits, and historical repayments.
+  * One-tap automated WhatsApp and SMS balance statements sent directly to debtors with itemized purchase details.
+  * Partial and full payment processing instantly reflects on the customer's balance and the daily cash register.
+  * **Financial Impact:** Fast liquidity recovery and shortened cash conversion cycles.
+
+### 3. 🎯 Intelligent Margin Protection & Supplier Inflow Tracking
+* **The Challenge:** Changing supplier wholesale costs frequently erode profit margins without the shopkeeper noticing.
+* **How BeBoss Solves It:**
+  * Dynamic Excel-style inventory ledger calculates live unit profit margins (`(Selling - Cost) / Selling * 100%`).
+  * Inflow restock purchase orders automatically flag declining margins and prompt recommended retail pricing adjustments.
+  * Real-time visual margin indicators highlight high-margin vs low-margin items.
+  * **Financial Impact:** Consistently protects and boosts gross profit margins by 20% to 35%.
+
+### 4. 🏢 Low-Overhead Multi-Branch Scaling
+* **The Challenge:** Traditional enterprise software charges steep monthly cloud hosting fees and breaks down during ISP outages.
+* **How BeBoss Solves It:**
+  * Peer-to-peer (P2P) branch synchronization and encrypted offline JSON packet transfers consolidate branch data onto the owner's device without recurring cloud infrastructure costs.
+  * Flexible, transparent monthly subscription tiers scale directly with actual store branches and workforce size.
+  * **Financial Impact:** Eliminates costly server subscriptions and minimizes IT overhead.
+
+---
+
+## 📦 Key Modules & Operational Functionality
+
+### 1. Point of Sale (POS) & Checkout Engine
+* **Universal Search & Barcode Scanning:** Fast camera-based barcode reader and instant fuzzy keyword search across large SKU catalogs.
+* **Dynamic Cart Management:** Fast quantity adjustments, percentage/flat discounting, and custom tax handling (e.g., standard 18% VAT or tax-exempt).
+* **Multi-Payment Split:** Accept Cash, MTN Mobile Money, Airtel Money, Bank Cards, or Credit (Debt) in a single order.
+* **Instant Thermal Receipt Generation:** Standard 58mm mobile Bluetooth and 80mm countertop USB thermal printing with itemized breakdown, tax calculation, QR validation, and customizable store headers/footers.
+* **Tactile & Audible Confirmation:** Native haptic pulses and checkout chimes to ensure cashier confidence and eliminate double-charging.
+
+### 2. Inventory & Stock Master
+* **Excel-Style Spreadsheet Ledger:** Fast in-place editing of stock levels, purchase prices, retail prices, and min-stock alert thresholds.
+* **Stock Transfer System:** Track outgoing and incoming shipments between headquarters and branch depots with complete audit logs.
+* **Supplier Purchases & Restock Inflow:** Document wholesale supplier invoices, payment statuses (Paid/Pending), and automatic stock level increments.
+* **Automated Low-Stock Alerts:** Color-coded badges and dedicated filter views for products reaching depletion limits.
+
+### 3. Customer Ledger & CRM
+* **Credit Limit Safeguards:** Set custom credit limits per client to prevent over-extension of shop credit.
+* **Transaction History:** Complete audit trail of every receipt, return, and debt repayment made by each customer.
+* **Direct Messaging Hub:** One-tap WhatsApp chat and native SMS dispatch for marketing promos and overdue payment reminders.
+
+### 4. Financial & Business Analytics
+* **Executive Summary:** Live metrics for Gross Revenue, Cost of Goods Sold (COGS), Net Profit, Total Profit Margin %, and Total Debt Outstanding.
+* **Time-Window Filtering:** Instant analytics breakdown for Today, This Week, This Month, This Year, or All-Time.
+* **Top Performance Insights:** Identifies top 5 best-selling products by quantity and revenue to guide purchasing decisions.
+* **Payment Channel Distribution:** Visual breakdown of revenue across Cash, MoMo, Card, and Credit.
+
+---
+
+## 💳 Dynamic Multi-Branch & Staff Subscription Architecture
+
+BeBoss features an automated, tiered subscription system designed to scale fairly based on the shop's operational complexity:
+
+### Pricing Tiers & Worker Allowances
+| Tier | Branches | Included Staff | Rate / Month | Target Business Profile |
+| :--- | :--- | :--- | :--- | :--- |
+| **Solo / Single Store** | 1 Branch | 1 User (Owner) | **5,000 FRw** | Kiosks, boutiques, single retail shops |
+| **Dual Store Growth** | 2 Branches | Up to 3 Staff | **10,000 FRw** | Growing retail businesses with a depot or 2nd location |
+| **Multi-Branch Enterprise** | 3+ Branches | Up to 5 Staff | **20,000 FRw** | Supermarket chains, wholesalers, multi-outlet networks |
+
+### Team Scale Add-ons
+* **Small Team (2–3 workers):** +2,000 FRw/mo
+* **Medium Team (4–5 workers):** +4,000 FRw/mo
+* **Large Teams (6+ workers):** +1,000 FRw per additional worker/mo
+
+### Billing Frequency Discounts
+* **1 Month:** Standard Monthly Rate
+* **3 Months:** 10% Discount
+* **1 Year VIP Pass:** 20% Discount (Includes dedicated priority business support)
+
+### Automated Offline & Online Verification
+* **Mobile Money USSD & Push:** Quick dialers for MTN MoMo (`*182*8*1*...#`) and Airtel Money (`*500*4*...#`).
+* **Cryptographic Offline Vouchers:** 16-character encrypted voucher keys generated with SHA-256 challenge codes for remote activation without internet.
+* **3-Day Emergency Grace Period:** Automatic soft grace period prevents sudden operational interruption during active business hours.
+
+---
+
+## 🛠️ Step-by-Step Operator & Owner Guide
+
+### Step 1: Initial Setup & Profile Configuration
+1. Launch the app to experience the fast launch screen.
+2. Select your language preference (**English** or **Ikinyarwanda**) and theme (**Dark** or **Light**).
+3. On the registration screen, enter your **Shop Name**, **Category**, **Primary Currency** (`FRw`, `$`, `€`, `KSh`, etc.), and **Master Owner PIN/Password**.
+4. The system automatically initializes your **Headquarters Branch** and registers the owner as the primary Administrator.
+
+### Step 2: Product Ingestion & Catalog Setup
+1. Navigate to **Inventory** (📦).
+2. Tap **"Add Product"** to enter the product details (SKU/Barcode, Name, Category, Cost Price, Selling Price, and Initial Stock).
+3. Open the **Excel Ledger** to adjust stock numbers or review profit margins across your entire product list.
+
+### Step 3: Conducting Sales at the Checkout Counter
+1. Navigate to **POS** (🛒).
+2. Select items by tapping product tiles or using the camera barcode scanner.
+3. Tap **Checkout** and select the payment channel (**Cash**, **MoMo**, **Card**, or **Credit**).
+4. Tap **Complete Sale** to instantly commit the sale, update stock, and print or share the receipt.
+
+### Step 4: Tracking Debts & Customer Collections
+1. Navigate to **Customers** (👥).
+2. Review total outstanding balances.
+3. Tap a customer's profile to record a partial or full payment, or tap **Send SMS / WhatsApp Reminder** to request payment.
+
+### Step 5: Database Maintenance & Health Checks
+1. Navigate to **Settings** (⚙️) -> **Database Engine & Health**.
+2. Run **PRAGMA Integrity Check** to verify SQLite B-Tree index consistency.
+3. Tap **WAL Checkpoint & VACUUM Defragmentation** to optimize query performance and compress storage footprint.
+4. Generate a full JSON backup to secure records off-device.
+
+---
+
+## ⚡ Offline-First Resilience & SQLite Room Engine
+
+BeBoss is engineered on a fine-tuned **Android Room SQLite Database Engine (v6)**:
+
+| Optimization | Implementation | Operational Outcome |
 | :--- | :--- | :--- |
-| **Write-Ahead Logging (WAL)** | `PRAGMA journal_mode=WAL` | High-concurrency simultaneous POS reading and checkout writing without locking the UI |
-| **B-Tree Defragmentation** | `PRAGMA optimize; PRAGMA wal_checkpoint(FULL)` | Instant data retrieval even with 50,000+ sales and customer records |
-| **PRAGMA Integrity Check** | `PRAGMA integrity_check(10)` | Proactive health verification preventing data corruption |
-| **Clean Reset Protocol** | Selective Transaction Purge | Safely purge transactional sales/debt history for a new financial year while **100% preserving product catalog & shop settings** |
-| **JSON Export & Restore** | RFC 4180 / JSON Exchange Format | Effortless full-device backup and disaster recovery |
+| **Write-Ahead Logging (WAL)** | `PRAGMA journal_mode=WAL` | Cashiers can process sales simultaneously while reports are being generated without UI lockups. |
+| **B-Tree Indexing & Defragmentation** | `PRAGMA optimize; PRAGMA wal_checkpoint(FULL)` | Sub-millisecond query execution across 50,000+ transaction records. |
+| **Selective Transaction Purge** | Clean Financial Year Protocol | Purges past sales/debt records for a new fiscal year while **100% preserving product catalogs and shop settings**. |
+| **RFC 4180 JSON Exchange** | Compressed JSON Export/Import | Simple disaster recovery and manual backup transfer via WhatsApp, SD card, or email. |
 
 ---
 
-## 🎨 Modern User Experience & Hardware Capabilities
+## 🖨️ Hardware & Peripheral Integrations
 
-* **Instagram-Style Launch Screen:** Ultra-smooth rotating gradient-animated loading circle matching modern flagship mobile experiences.
-* **Thermal Receipt Printing:** ESC/POS compatible with 58mm mobile Bluetooth printers and 80mm countertop USB printers, complete with TIN tax breakdown, barcode, and custom branding.
-* **Sensory Feedback:** Audible checkout chime and tactile haptic pulse on every button and barcode scan for high-speed cashier accuracy.
-* **Biometric & PIN Security:** Fingerprint authentication and staff PIN codes to prevent unauthorized access to financial metrics.
-* **Dual Language Support:** 100% bilingual in **English** and **Ikinyarwanda (Kinyarwanda)**.
-
----
-
-## 📱 Tech Stack & Engineering Standards
-
-- **Language:** 100% Kotlin
-- **UI Framework:** Jetpack Compose + Material Design 3 (M3)
-- **Database:** Room SQLite v6 with TypeConverters & WAL Engine
-- **State Management:** MVVM with Kotlin Coroutines & `StateFlow`
-- **Biometrics:** AndroidX BiometricPrompt API
-- **Design Tokens:** Edge-to-Edge display with dynamic light/dark theming
+* **Thermal Receipt Printers:** Seamless connection with 58mm mobile Bluetooth printers and 80mm countertop USB ESC/POS printers.
+* **Camera Barcode Scanning:** Ultra-fast on-device image analysis for 1D barcodes (EAN-13, UPC, Code 128) and 2D QR codes.
+* **Biometric Authentication:** Built-in Android BiometricPrompt for fast, secure fingerprint authentication.
+* **Audio & Haptic Feedback:** Multi-frequency tactile haptic pulses and audible confirmation tones.
 
 ---
 
-## 📄 License & Security
-Built with AES-256 encrypted local SQLite database storage and offline token verification for enterprise business reliability.
+## 🔒 Security, Roles & Access Control
+
+* **Owner / Master Administrator:** Full access to financial analytics, profit margins, branch setup, staff management, and database tools.
+* **Branch Manager:** Access to sales, customer management, inventory adjustments, and branch-specific reports.
+* **Cashier:** Streamlined access restricted strictly to POS checkout, receipt printing, and customer balance lookup. Sensitive cost prices, net profit metrics, and record deletion are strictly locked.
+
+---
+
+## 🌍 Bilingual & Regional Customization
+
+BeBoss provides 100% native localization:
+* **English:** Standard international commercial terminology.
+* **Ikinyarwanda:** Tailored for local Rwandan retail businesses (*Kugurisha, Amadeni, Ububiko, Raporo y'Inyungu, Ifatabuguzi ry'Ukwezi*).
+* **Multi-Currency:** Native support for Rwandan Francs (`FRw`), US Dollars (`$`), Euros (`€`), Kenyan Shillings (`KSh`), Ugandan Shillings (`USh`), and Tanzanian Shillings (`TSh`).
+
+---
+
+## 💻 Technical Specifications & Architecture
+
+* **Language:** 100% Kotlin (Modern Coroutines & StateFlow)
+* **UI Framework:** Jetpack Compose with Material Design 3 (M3)
+* **Architecture:** Clean MVVM (Model-View-ViewModel) + Repository Pattern
+* **Local Persistence:** Android Room Database (SQLite v6) with WAL Mode
+* **Image Engine:** Coil for asynchronous, cached image loading
+* **Biometrics:** AndroidX BiometricPrompt API
+* **Target Android Version:** Android 8.0 (API 26) through Android 15+ (Edge-to-Edge Enabled)
