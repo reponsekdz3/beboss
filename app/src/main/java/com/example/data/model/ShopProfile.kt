@@ -46,7 +46,7 @@ data class ShopProfile(
         get() = name
 
     val isSubscriptionActive: Boolean
-        get() = System.currentTimeMillis() <= subscriptionExpiresAt || subscriptionStatus == "ACTIVE"
+        get() = subscriptionStatus != "EXPIRED" && System.currentTimeMillis() <= subscriptionExpiresAt
 
     val daysRemaining: Int
         get() {

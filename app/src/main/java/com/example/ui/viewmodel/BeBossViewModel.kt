@@ -221,9 +221,21 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun saveBranch(branch: com.example.data.model.Branch) {
         viewModelScope.launch {
             repository.saveBranch(branch)
+            val allBranches = db.branchDao().getAllActiveBranchesList()
+            val allStaff = db.userDao().getAllActiveUsersList()
+            val newPricing = com.example.util.OfflineSubscriptionManager.calculateSubscriptionPrice(
+                branchCount = allBranches.size.coerceAtLeast(1),
+                workerCount = allStaff.size.coerceAtLeast(1)
+            )
+            repository.updateShopProfile(
+                shopProfile.value.copy(
+                    monthlyFeeRwf = newPricing.monthlySubtotal,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
             val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                "Ishami '${branch.name}' ryabitswe neza." 
-                else "Branch '${branch.name}' saved."
+                "Ishami '${branch.name}' ryabitswe neza (${newPricing.monthlySubtotal} FRw/mo)." 
+                else "Branch '${branch.name}' saved (${newPricing.monthlySubtotal} FRw/mo)."
             _snackbarMessage.emit(msg)
         }
     }
@@ -231,6 +243,18 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun deleteBranch(branchId: String) {
         viewModelScope.launch {
             repository.deleteBranch(branchId)
+            val allBranches = db.branchDao().getAllActiveBranchesList()
+            val allStaff = db.userDao().getAllActiveUsersList()
+            val newPricing = com.example.util.OfflineSubscriptionManager.calculateSubscriptionPrice(
+                branchCount = allBranches.size.coerceAtLeast(1),
+                workerCount = allStaff.size.coerceAtLeast(1)
+            )
+            repository.updateShopProfile(
+                shopProfile.value.copy(
+                    monthlyFeeRwf = newPricing.monthlySubtotal,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
             val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
                 "Ishami ryasibwe." 
                 else "Branch removed."
@@ -696,7 +720,19 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun saveUser(user: User) {
         viewModelScope.launch {
             repository.saveUser(user)
-            _snackbarMessage.emit("Staff member '${user.name}' saved.")
+            val allBranches = db.branchDao().getAllActiveBranchesList()
+            val allStaff = db.userDao().getAllActiveUsersList()
+            val newPricing = com.example.util.OfflineSubscriptionManager.calculateSubscriptionPrice(
+                branchCount = allBranches.size.coerceAtLeast(1),
+                workerCount = allStaff.size.coerceAtLeast(1)
+            )
+            repository.updateShopProfile(
+                shopProfile.value.copy(
+                    monthlyFeeRwf = newPricing.monthlySubtotal,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+            _snackbarMessage.emit("Staff member '${user.name}' saved (${newPricing.monthlySubtotal} FRw/mo total plan).")
         }
     }
 
@@ -707,6 +743,18 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 return@launch
             }
             repository.deleteUser(userId)
+            val allBranches = db.branchDao().getAllActiveBranchesList()
+            val allStaff = db.userDao().getAllActiveUsersList()
+            val newPricing = com.example.util.OfflineSubscriptionManager.calculateSubscriptionPrice(
+                branchCount = allBranches.size.coerceAtLeast(1),
+                workerCount = allStaff.size.coerceAtLeast(1)
+            )
+            repository.updateShopProfile(
+                shopProfile.value.copy(
+                    monthlyFeeRwf = newPricing.monthlySubtotal,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
             _snackbarMessage.emit("Staff account removed.")
         }
     }

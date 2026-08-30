@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-
-    <style name="Theme.MyApplication" parent="android:Theme.DeviceDefault.NoActionBar" />
+    <style name="Theme.MyApplication" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/dark_navy</item>
+        <item name="android:windowSplashScreenBackground">@color/dark_navy</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/beboss_app_logo_1787833759468</item>
+    </style>
 </resources>

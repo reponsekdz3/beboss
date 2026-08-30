@@ -131,14 +131,26 @@ fun AuthLockScreen(
     val activeUser = currentUser ?: allUsers.firstOrNull()
     val haptic = LocalHapticFeedback.current
 
+    // Adaptive Theme Palette for Auth
+    val bgColors = if (isDarkTheme) {
+        listOf(DarkNavy, Color(0xFF0F172A), Color(0xFF020617))
+    } else {
+        listOf(Color(0xFFF8FAFC), Color(0xFFF1F5F9), Color(0xFFE2E8F0))
+    }
+    val cardBg = if (isDarkTheme) Color(0xFF1E293B) else Color.White
+    val cardBorder = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)
+    val fieldBg = if (isDarkTheme) Color(0xFF0F172A) else Color(0xFFF8FAFC)
+    val textPrimary = if (isDarkTheme) Color.White else Color(0xFF0F172A)
+    val textSecondary = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF64748B)
+    val topPillBg = if (isDarkTheme) Color(0x22FFFFFF) else Color.White
+    val topPillBorder = if (isDarkTheme) Color(0x33FFFFFF) else Color(0xFFCBD5E1)
+    val topPillText = if (isDarkTheme) Color.White else Color(0xFF0F172A)
+    val tabContainerBg = if (isDarkTheme) Color(0xFF0F172A) else Color(0xFFF1F5F9)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(DarkNavy, Color(0xFF0F172A), Color(0xFF020617))
-                )
-            )
+            .background(Brush.verticalGradient(colors = bgColors))
     ) {
         Column(
             modifier = Modifier
@@ -160,19 +172,20 @@ fun AuthLockScreen(
                 Surface(
                     onClick = onToggleLanguage,
                     shape = RoundedCornerShape(16.dp),
-                    color = Color(0x22FFFFFF),
-                    border = BorderStroke(1.dp, Color(0x33FFFFFF))
+                    color = topPillBg,
+                    border = BorderStroke(1.dp, topPillBorder),
+                    shadowElevation = if (isDarkTheme) 0.dp else 2.dp
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(Icons.Default.Translate, contentDescription = "Language", tint = Color.White, modifier = Modifier.size(15.dp))
+                        Icon(Icons.Default.Translate, contentDescription = "Language", tint = topPillText, modifier = Modifier.size(15.dp))
                         Text(
                             text = if (language == AppLanguage.ENGLISH) "EN" else "RW",
                             fontFamily = GopherFontFamily,
-                            color = Color.White,
+                            color = topPillText,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -183,8 +196,9 @@ fun AuthLockScreen(
                 Surface(
                     onClick = onToggleTheme,
                     shape = CircleShape,
-                    color = Color(0x22FFFFFF),
-                    border = BorderStroke(1.dp, Color(0x33FFFFFF))
+                    color = topPillBg,
+                    border = BorderStroke(1.dp, topPillBorder),
+                    shadowElevation = if (isDarkTheme) 0.dp else 2.dp
                 ) {
                     Box(
                         modifier = Modifier.size(36.dp),
@@ -193,7 +207,7 @@ fun AuthLockScreen(
                         Icon(
                             imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
                             contentDescription = "Theme",
-                            tint = if (isDarkTheme) Color(0xFFFFD166) else Color.White,
+                            tint = if (isDarkTheme) Color(0xFFFFD166) else OrangePrimary,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -209,10 +223,10 @@ fun AuthLockScreen(
             ) {
                 Surface(
                     shape = RoundedCornerShape(20.dp),
-                    color = Color(0xFF0F172A),
+                    color = if (isDarkTheme) Color(0xFF0F172A) else Color.White,
                     border = BorderStroke(2.dp, Brush.linearGradient(listOf(OrangePrimary, Color(0xFFFFB74D)))),
                     modifier = Modifier.size(72.dp),
-                    shadowElevation = 10.dp
+                    shadowElevation = if (isDarkTheme) 10.dp else 6.dp
                 ) {
                     Image(
                         painter = painterResource(id = R.drawable.beboss_app_logo_1787833759468),
@@ -231,7 +245,7 @@ fun AuthLockScreen(
                     fontFamily = GopherFontFamily,
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Black,
-                    color = Color.White,
+                    color = textPrimary,
                     letterSpacing = 0.5.sp,
                     textAlign = TextAlign.Center
                 )
@@ -240,8 +254,8 @@ fun AuthLockScreen(
 
                 Surface(
                     shape = RoundedCornerShape(20.dp),
-                    color = OrangePrimary.copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.3f))
+                    color = OrangePrimary.copy(alpha = if (isDarkTheme) 0.15f else 0.12f),
+                    border = BorderStroke(1.dp, OrangePrimary.copy(alpha = if (isDarkTheme) 0.3f else 0.4f))
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
@@ -274,7 +288,7 @@ fun AuthLockScreen(
                         fontFamily = GopherFontFamily,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF94A3B8),
+                        color = textSecondary,
                         letterSpacing = 1.sp
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -286,8 +300,9 @@ fun AuthLockScreen(
                             val isSelected = activeUser?.id == user.id
                             Surface(
                                 shape = RoundedCornerShape(14.dp),
-                                color = if (isSelected) OrangePrimary.copy(alpha = 0.22f) else Color(0xFF1E293B),
-                                border = if (isSelected) BorderStroke(1.8.dp, OrangePrimary) else BorderStroke(1.dp, Color(0xFF334155)),
+                                color = if (isSelected) OrangePrimary.copy(alpha = 0.18f) else cardBg,
+                                border = if (isSelected) BorderStroke(1.8.dp, OrangePrimary) else BorderStroke(1.dp, cardBorder),
+                                shadowElevation = if (isDarkTheme) 0.dp else 1.dp,
                                 modifier = Modifier.clickable {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     onSelectUser(user)
@@ -311,7 +326,7 @@ fun AuthLockScreen(
                                                 },
                                                 CircleShape
                                             ),
-                                        contentAlignment = Alignment.Center
+                                            contentAlignment = Alignment.Center
                                     ) {
                                         Text(
                                             text = user.name.take(1).uppercase(),
@@ -328,13 +343,13 @@ fun AuthLockScreen(
                                             fontFamily = GopherFontFamily,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color.White
+                                            color = textPrimary
                                         )
                                         Text(
                                             text = user.role.displayName.split(" ").first(),
                                             fontFamily = GopherFontFamily,
                                             fontSize = 9.5.sp,
-                                            color = if (isSelected) OrangePrimary else Color(0xFF94A3B8)
+                                            color = if (isSelected) OrangePrimary else textSecondary
                                         )
                                     }
                                 }
@@ -350,9 +365,9 @@ fun AuthLockScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-                border = BorderStroke(1.dp, Color(0xFF334155)),
-                elevation = CardDefaults.cardElevation(8.dp)
+                colors = CardDefaults.cardColors(containerColor = cardBg),
+                border = BorderStroke(1.dp, cardBorder),
+                elevation = CardDefaults.cardElevation(if (isDarkTheme) 8.dp else 4.dp)
             ) {
                 Column(
                     modifier = Modifier.padding(18.dp),
@@ -360,7 +375,7 @@ fun AuthLockScreen(
                 ) {
                     TabRow(
                         selectedTabIndex = selectedTab,
-                        containerColor = Color(0xFF0F172A),
+                        containerColor = tabContainerBg,
                         contentColor = OrangePrimary,
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
@@ -374,7 +389,8 @@ fun AuthLockScreen(
                                     if (language == AppLanguage.KINYARWANDA) "PIN Y'Ibanga" else "Quick 4-Digit PIN",
                                     fontFamily = GopherFontFamily,
                                     fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (selectedTab == 0) OrangePrimary else textSecondary
                                 )
                             }
                         )
@@ -386,7 +402,8 @@ fun AuthLockScreen(
                                     if (language == AppLanguage.KINYARWANDA) "Ijambobanga" else "Staff Password",
                                     fontFamily = GopherFontFamily,
                                     fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (selectedTab == 1) OrangePrimary else textSecondary
                                 )
                             }
                         )
@@ -397,15 +414,15 @@ fun AuthLockScreen(
                     if (authError != null) {
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = LossRed.copy(alpha = 0.2f),
-                            border = BorderStroke(1.dp, LossRed.copy(alpha = 0.5f)),
+                            color = LossRed.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, LossRed.copy(alpha = 0.4f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
                                 text = authError,
                                 fontFamily = GopherFontFamily,
                                 fontSize = 12.sp,
-                                color = Color(0xFFF87171),
+                                color = LossRed,
                                 fontWeight = FontWeight.Bold,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.padding(8.dp)
@@ -427,12 +444,12 @@ fun AuthLockScreen(
                                     modifier = Modifier
                                         .size(16.dp)
                                         .background(
-                                            if (filled) OrangePrimary else Color(0xFF334155),
+                                            if (filled) OrangePrimary else if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0),
                                             CircleShape
                                         )
                                         .border(
                                             1.5.dp,
-                                            if (filled) OrangePrimary else Color(0xFF475569),
+                                            if (filled) OrangePrimary else if (isDarkTheme) Color(0xFF475569) else Color(0xFFCBD5E1),
                                             CircleShape
                                         )
                                 )
@@ -443,6 +460,7 @@ fun AuthLockScreen(
 
                         // Interactive Numeric Keypad with Haptics & Biometrics
                         PinKeypad(
+                            isDarkTheme = isDarkTheme,
                             onDigit = { digit ->
                                 if (pinInput.length < 4) {
                                     val next = pinInput + digit
@@ -474,10 +492,12 @@ fun AuthLockScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = Color(0xFF0F172A),
-                                unfocusedContainerColor = Color(0xFF0F172A),
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
+                                focusedContainerColor = fieldBg,
+                                unfocusedContainerColor = fieldBg,
+                                focusedTextColor = textPrimary,
+                                unfocusedTextColor = textPrimary,
+                                focusedBorderColor = OrangePrimary,
+                                unfocusedBorderColor = cardBorder
                             )
                         )
 
@@ -493,7 +513,7 @@ fun AuthLockScreen(
                                     Icon(
                                         imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                                         contentDescription = "Toggle password",
-                                        tint = Color(0xFF94A3B8)
+                                        tint = textSecondary
                                     )
                                 }
                             },
@@ -502,10 +522,12 @@ fun AuthLockScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = Color(0xFF0F172A),
-                                unfocusedContainerColor = Color(0xFF0F172A),
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
+                                focusedContainerColor = fieldBg,
+                                unfocusedContainerColor = fieldBg,
+                                focusedTextColor = textPrimary,
+                                unfocusedTextColor = textPrimary,
+                                focusedBorderColor = OrangePrimary,
+                                unfocusedBorderColor = cardBorder
                             )
                         )
 
@@ -601,14 +623,26 @@ fun ShopRegistrationScreen(
         Triple("€", "EUR", "Euro")
     )
 
+    val bgColors = if (isDarkTheme) {
+        listOf(DarkNavy, Color(0xFF0F172A), Color(0xFF020617))
+    } else {
+        listOf(Color(0xFFF8FAFC), Color(0xFFF1F5F9), Color(0xFFE2E8F0))
+    }
+    val cardBg = if (isDarkTheme) Color(0xFF1E293B) else Color.White
+    val cardBorder = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)
+    val fieldBg = if (isDarkTheme) Color(0xFF0F172A) else Color(0xFFF8FAFC)
+    val textPrimary = if (isDarkTheme) Color.White else Color(0xFF0F172A)
+    val textSecondary = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF64748B)
+    val topPillBg = if (isDarkTheme) Color(0x22FFFFFF) else Color.White
+    val topPillBorder = if (isDarkTheme) Color(0x33FFFFFF) else Color(0xFFCBD5E1)
+    val topPillText = if (isDarkTheme) Color.White else Color(0xFF0F172A)
+    val chipBg = if (isDarkTheme) Color(0xFF0F172A) else Color(0xFFF8FAFC)
+    val chipBorder = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(DarkNavy, Color(0xFF0F172A), Color(0xFF020617))
-                )
-            )
+            .background(Brush.verticalGradient(colors = bgColors))
     ) {
         Column(
             modifier = Modifier
@@ -626,27 +660,29 @@ fun ShopRegistrationScreen(
                 Surface(
                     onClick = onToggleLanguage,
                     shape = RoundedCornerShape(16.dp),
-                    color = Color(0x22FFFFFF),
-                    border = BorderStroke(1.dp, Color(0x33FFFFFF))
+                    color = topPillBg,
+                    border = BorderStroke(1.dp, topPillBorder),
+                    shadowElevation = if (isDarkTheme) 0.dp else 2.dp
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        Icon(Icons.Default.Translate, contentDescription = "Language", tint = Color.White, modifier = Modifier.size(14.dp))
-                        Text(if (language == AppLanguage.ENGLISH) "EN" else "RW", fontFamily = GopherFontFamily, color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.Translate, contentDescription = "Language", tint = topPillText, modifier = Modifier.size(14.dp))
+                        Text(if (language == AppLanguage.ENGLISH) "EN" else "RW", fontFamily = GopherFontFamily, color = topPillText, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
                 Surface(
                     onClick = onToggleTheme,
                     shape = CircleShape,
-                    color = Color(0x22FFFFFF),
-                    border = BorderStroke(1.dp, Color(0x33FFFFFF))
+                    color = topPillBg,
+                    border = BorderStroke(1.dp, topPillBorder),
+                    shadowElevation = if (isDarkTheme) 0.dp else 2.dp
                 ) {
                     Box(modifier = Modifier.size(34.dp), contentAlignment = Alignment.Center) {
-                        Icon(if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        Icon(if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode, contentDescription = null, tint = if (isDarkTheme) Color(0xFFFFD166) else OrangePrimary, modifier = Modifier.size(16.dp))
                     }
                 }
             }
@@ -656,10 +692,10 @@ fun ShopRegistrationScreen(
             // Title & Official Brand Logo
             Surface(
                 shape = RoundedCornerShape(18.dp),
-                color = Color(0xFF0F172A),
+                color = if (isDarkTheme) Color(0xFF0F172A) else Color.White,
                 border = BorderStroke(2.dp, Brush.linearGradient(listOf(OrangePrimary, Color(0xFFFFB74D)))),
                 modifier = Modifier.size(68.dp),
-                shadowElevation = 8.dp
+                shadowElevation = if (isDarkTheme) 8.dp else 4.dp
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.beboss_app_logo_1787833759468),
@@ -678,7 +714,7 @@ fun ShopRegistrationScreen(
                 fontFamily = GopherFontFamily,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Black,
-                color = Color.White,
+                color = textPrimary,
                 textAlign = TextAlign.Center
             )
 
@@ -688,7 +724,7 @@ fun ShopRegistrationScreen(
                     else "Register your shop profile & master owner credentials to launch.",
                 fontFamily = GopherFontFamily,
                 fontSize = 12.5.sp,
-                color = Color(0xFF94A3B8),
+                color = textSecondary,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
             )
@@ -698,15 +734,15 @@ fun ShopRegistrationScreen(
             if (errorMessage != null) {
                 Surface(
                     shape = RoundedCornerShape(10.dp),
-                    color = LossRed.copy(alpha = 0.2f),
-                    border = BorderStroke(1.dp, LossRed.copy(alpha = 0.5f)),
+                    color = LossRed.copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, LossRed.copy(alpha = 0.4f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = errorMessage!!,
                         fontFamily = GopherFontFamily,
                         fontSize = 12.sp,
-                        color = Color(0xFFF87171),
+                        color = LossRed,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(8.dp)
@@ -718,8 +754,9 @@ fun ShopRegistrationScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-                border = BorderStroke(1.dp, Color(0xFF334155))
+                colors = CardDefaults.cardColors(containerColor = cardBg),
+                border = BorderStroke(1.dp, cardBorder),
+                elevation = CardDefaults.cardElevation(if (isDarkTheme) 8.dp else 4.dp)
             ) {
                 Column(
                     modifier = Modifier.padding(18.dp),
@@ -757,10 +794,12 @@ fun ShopRegistrationScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color(0xFF0F172A),
-                            unfocusedContainerColor = Color(0xFF0F172A),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
+                            focusedContainerColor = fieldBg,
+                            unfocusedContainerColor = fieldBg,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary,
+                            focusedBorderColor = OrangePrimary,
+                            unfocusedBorderColor = cardBorder
                         )
                     )
 
@@ -771,7 +810,7 @@ fun ShopRegistrationScreen(
                             fontFamily = GopherFontFamily,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF94A3B8)
+                            color = textSecondary
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -780,8 +819,8 @@ fun ShopRegistrationScreen(
                                 Surface(
                                     onClick = { selectedCategory = catName },
                                     shape = RoundedCornerShape(10.dp),
-                                    color = if (selected) OrangePrimary.copy(alpha = 0.25f) else Color(0xFF0F172A),
-                                    border = if (selected) BorderStroke(1.5.dp, OrangePrimary) else BorderStroke(1.dp, Color(0xFF334155))
+                                    color = if (selected) OrangePrimary.copy(alpha = 0.2f) else chipBg,
+                                    border = if (selected) BorderStroke(1.5.dp, OrangePrimary) else BorderStroke(1.dp, chipBorder)
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
@@ -791,7 +830,7 @@ fun ShopRegistrationScreen(
                                         Icon(
                                             imageVector = catIcon,
                                             contentDescription = catName,
-                                            tint = if (selected) OrangePrimary else Color(0xFF94A3B8),
+                                            tint = if (selected) OrangePrimary else textSecondary,
                                             modifier = Modifier.size(15.dp)
                                         )
                                         Text(
@@ -799,7 +838,7 @@ fun ShopRegistrationScreen(
                                             fontFamily = GopherFontFamily,
                                             fontSize = 11.5.sp,
                                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (selected) Color.White else Color(0xFF94A3B8)
+                                            color = if (selected) textPrimary else textSecondary
                                         )
                                     }
                                 }
@@ -814,7 +853,7 @@ fun ShopRegistrationScreen(
                             fontFamily = GopherFontFamily,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF94A3B8)
+                            color = textSecondary
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(
@@ -829,8 +868,8 @@ fun ShopRegistrationScreen(
                                         currencyCode = code
                                     },
                                     shape = RoundedCornerShape(10.dp),
-                                    color = if (isSelected) OrangePrimary else Color(0xFF0F172A),
-                                    border = BorderStroke(1.dp, if (isSelected) OrangePrimary else Color(0xFF334155)),
+                                    color = if (isSelected) OrangePrimary else chipBg,
+                                    border = BorderStroke(1.dp, if (isSelected) OrangePrimary else chipBorder),
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Column(
@@ -849,7 +888,7 @@ fun ShopRegistrationScreen(
                                             fontFamily = GopherFontFamily,
                                             fontSize = 9.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = if (isSelected) Color.White.copy(alpha = 0.9f) else Color(0xFF94A3B8)
+                                            color = if (isSelected) Color.White.copy(alpha = 0.9f) else textSecondary
                                         )
                                     }
                                 }
@@ -868,10 +907,12 @@ fun ShopRegistrationScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color(0xFF0F172A),
-                            unfocusedContainerColor = Color(0xFF0F172A),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
+                            focusedContainerColor = fieldBg,
+                            unfocusedContainerColor = fieldBg,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary,
+                            focusedBorderColor = OrangePrimary,
+                            unfocusedBorderColor = cardBorder
                         )
                     )
 
@@ -885,10 +926,12 @@ fun ShopRegistrationScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color(0xFF0F172A),
-                            unfocusedContainerColor = Color(0xFF0F172A),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
+                            focusedContainerColor = fieldBg,
+                            unfocusedContainerColor = fieldBg,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary,
+                            focusedBorderColor = OrangePrimary,
+                            unfocusedBorderColor = cardBorder
                         )
                     )
 
@@ -926,10 +969,12 @@ fun ShopRegistrationScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color(0xFF0F172A),
-                            unfocusedContainerColor = Color(0xFF0F172A),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
+                            focusedContainerColor = fieldBg,
+                            unfocusedContainerColor = fieldBg,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary,
+                            focusedBorderColor = OrangePrimary,
+                            unfocusedBorderColor = cardBorder
                         )
                     )
 
@@ -942,10 +987,12 @@ fun ShopRegistrationScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color(0xFF0F172A),
-                            unfocusedContainerColor = Color(0xFF0F172A),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
+                            focusedContainerColor = fieldBg,
+                            unfocusedContainerColor = fieldBg,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary,
+                            focusedBorderColor = OrangePrimary,
+                            unfocusedBorderColor = cardBorder
                         )
                     )
 
@@ -963,10 +1010,12 @@ fun ShopRegistrationScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = Color(0xFF0F172A),
-                                unfocusedContainerColor = Color(0xFF0F172A),
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
+                                focusedContainerColor = fieldBg,
+                                unfocusedContainerColor = fieldBg,
+                                focusedTextColor = textPrimary,
+                                unfocusedTextColor = textPrimary,
+                                focusedBorderColor = OrangePrimary,
+                                unfocusedBorderColor = cardBorder
                             )
                         )
                         Row(
@@ -1011,7 +1060,7 @@ fun ShopRegistrationScreen(
                                 Icon(
                                     imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                                     contentDescription = "Toggle password",
-                                    tint = Color(0xFF94A3B8)
+                                    tint = textSecondary
                                 )
                             }
                         },
@@ -1020,10 +1069,12 @@ fun ShopRegistrationScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color(0xFF0F172A),
-                            unfocusedContainerColor = Color(0xFF0F172A),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
+                            focusedContainerColor = fieldBg,
+                            unfocusedContainerColor = fieldBg,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary,
+                            focusedBorderColor = OrangePrimary,
+                            unfocusedBorderColor = cardBorder
                         )
                     )
 
@@ -1076,8 +1127,8 @@ fun ShopRegistrationScreen(
                         onClick = onCancel,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF94A3B8)),
-                        border = BorderStroke(1.dp, Color(0xFF334155))
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = textSecondary),
+                        border = BorderStroke(1.dp, cardBorder)
                     ) {
                         Text(Localization.get("cancel", language), fontFamily = GopherFontFamily)
                     }
@@ -1089,11 +1140,18 @@ fun ShopRegistrationScreen(
 
 @Composable
 private fun PinKeypad(
+    isDarkTheme: Boolean = true,
     onDigit: (String) -> Unit,
     onBackspace: () -> Unit,
     onInstantUnlock: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
+    val keyBg = if (isDarkTheme) Color(0xFF0F172A) else Color.White
+    val keyBorder = if (isDarkTheme) Color(0xFF334155) else Color(0xFFCBD5E1)
+    val keyTextColor = if (isDarkTheme) Color.White else Color(0xFF0F172A)
+    val delBg = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)
+    val delIconColor = if (isDarkTheme) Color.White else Color(0xFF334155)
+
     val rows = listOf(
         listOf("1", "2", "3"),
         listOf("4", "5", "6"),
@@ -1115,8 +1173,9 @@ private fun PinKeypad(
                         "DEL" -> {
                             Surface(
                                 shape = CircleShape,
-                                color = Color(0xFF334155),
-                                border = BorderStroke(1.dp, Color(0xFF475569)),
+                                color = delBg,
+                                border = BorderStroke(1.dp, keyBorder),
+                                shadowElevation = if (isDarkTheme) 0.dp else 1.dp,
                                 modifier = Modifier
                                     .size(56.dp)
                                     .clickable {
@@ -1128,7 +1187,7 @@ private fun PinKeypad(
                                     Icon(
                                         imageVector = Icons.Default.Backspace,
                                         contentDescription = "Backspace",
-                                        tint = Color.White,
+                                        tint = delIconColor,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -1137,8 +1196,9 @@ private fun PinKeypad(
                         "BIO" -> {
                             Surface(
                                 shape = CircleShape,
-                                color = Color(0xFF10B981).copy(alpha = 0.22f),
+                                color = Color(0xFF10B981).copy(alpha = if (isDarkTheme) 0.22f else 0.15f),
                                 border = BorderStroke(1.5.dp, ProfitGreen),
+                                shadowElevation = if (isDarkTheme) 0.dp else 1.dp,
                                 modifier = Modifier
                                     .size(56.dp)
                                     .clickable {
@@ -1159,8 +1219,9 @@ private fun PinKeypad(
                         else -> {
                             Surface(
                                 shape = CircleShape,
-                                color = Color(0xFF0F172A),
-                                border = BorderStroke(1.2.dp, Color(0xFF334155)),
+                                color = keyBg,
+                                border = BorderStroke(1.2.dp, keyBorder),
+                                shadowElevation = if (isDarkTheme) 0.dp else 2.dp,
                                 modifier = Modifier
                                     .size(56.dp)
                                     .clickable {
@@ -1174,7 +1235,7 @@ private fun PinKeypad(
                                         fontFamily = GopherFontFamily,
                                         fontSize = 22.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White
+                                        color = keyTextColor
                                     )
                                 }
                             }
