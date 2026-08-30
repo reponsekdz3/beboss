@@ -70,7 +70,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun AppSplashScreen(
     isDarkTheme: Boolean = false,
-    durationMs: Long = 1800L,
+    durationMs: Long = 650L,
     onSplashFinished: () -> Unit = {}
 ) {
     val logoScale = remember { Animatable(0.75f) }

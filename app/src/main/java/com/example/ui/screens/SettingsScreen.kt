@@ -56,7 +56,13 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.LocalShipping
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.ShoppingBag
+import androidx.compose.material.icons.filled.Payment
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Receipt
@@ -164,6 +170,11 @@ fun SettingsScreen(
     onSyncWithLocalHub: (String) -> Unit = {},
     onSaveBranch: (com.example.data.model.Branch) -> Unit = {},
     onDeleteBranch: (String) -> Unit = {},
+    stockTransfers: List<com.example.data.model.StockTransfer> = emptyList(),
+    onCreateStockTransfer: (productId: String, fromBranchId: String, fromBranchName: String, toBranchId: String, toBranchName: String, quantity: Double, notes: String) -> Unit = { _, _, _, _, _, _, _ -> },
+    onDeleteStockTransfer: (String) -> Unit = {},
+    selectedBranchId: String = "ALL",
+    onSelectActiveBranch: (String) -> Unit = {},
     onSaveUser: (User) -> Unit = {},
     onDeleteUser: (String) -> Unit = {},
     onImportPackage: (ShopImportSummary) -> Unit = {},
@@ -178,7 +189,9 @@ fun SettingsScreen(
     onActivateVoucher: (String) -> Unit = {},
     onProcessDirectPayment: ((provider: String, phone: String, durationMonths: Int, onSuccess: (com.example.util.PaymentProcessingResult, com.example.util.SubscriptionPriceBreakdown) -> Unit) -> Unit)? = null,
     onGrantEmergencyGrace: () -> Unit = {},
-    onShowSplashScreen: () -> Unit = {}
+    onShowSplashScreen: () -> Unit = {},
+    onTestNotification: (String) -> Unit = {},
+    onRequestPermissions: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var shopName by remember(shopProfile.shopName) { mutableStateOf(shopProfile.shopName) }
@@ -1649,6 +1662,163 @@ fun SettingsScreen(
             }
         }
 
+        // 9.5 Enterprise Push Notification System & Live Alert Testing Hub
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.35f)),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = CircleShape,
+                                color = OrangeLight,
+                                modifier = Modifier.size(38.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.NotificationsActive,
+                                        contentDescription = null,
+                                        tint = OrangePrimary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = if (language == AppLanguage.KINYARWANDA) "Uburyo bw'Imenyesha (Push Notifications)" else "Enterprise Push Notifications",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (language == AppLanguage.KINYARWANDA) "Imenyesha ry'igurisha, ibicuruzwa biri gushira & amadeni" else "Real-time alerts for Sales, Low Stock, Debts & Sync",
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = ProfitGreen.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = "ACTIVE",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black,
+                                color = ProfitGreen,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = if (language == AppLanguage.KINYARWANDA) 
+                            "Kanda hano munsi kugira ngo ugerageze uburyo buri bwoko bw'imenyesha bugaragara muri telefone yawe:" 
+                            else "Tap below to test real system notifications delivered to your device status bar and notification tray:",
+                        fontSize = 11.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Row 1: Sale & Low Stock
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { onTestNotification("SALE") },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.ShoppingBag, contentDescription = null, modifier = Modifier.size(15.dp), tint = ProfitGreen)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("POS Sale Alert", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = { onTestNotification("LOW_STOCK") },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(15.dp), tint = LossRed)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Low Stock Alert", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Row 2: Debt & Transfer
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { onTestNotification("DEBT") },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.Payment, contentDescription = null, modifier = Modifier.size(15.dp), tint = OrangePrimary)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Debt Payment", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = { onTestNotification("TRANSFER") },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color(0xFF2563EB))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Stock Transfer", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Row 3: Target & Sync
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { onTestNotification("TARGET") },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.Flag, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color(0xFFD97706))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Daily Goal Hit", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = { onTestNotification("SYNC") },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(15.dp), tint = ProfitGreen)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Branch Sync Done", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
         // 10. Official App Branding & Security Verification Card
         item {
             Card(
@@ -1897,9 +2067,17 @@ fun SettingsScreen(
         BranchManagementDialog(
             branches = branches,
             allUsers = allUsers,
+            products = products,
+            sales = sales,
+            stockTransfers = stockTransfers,
+            currencySymbol = currencySymbol,
+            selectedBranchId = selectedBranchId,
             language = language,
+            onSelectActiveBranch = onSelectActiveBranch,
             onSaveBranch = onSaveBranch,
             onDeleteBranch = onDeleteBranch,
+            onCreateStockTransfer = onCreateStockTransfer,
+            onDeleteStockTransfer = onDeleteStockTransfer,
             onDismiss = { showBranchDialog = false }
         )
     }

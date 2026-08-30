@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import com.example.data.model.StockTransfer
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -42,8 +43,67 @@ class BeBossRepository(private val database: AppDatabase) {
     private val syncQueueDao = database.syncQueueDao()
     private val userDao = database.userDao()
     private val purchaseDao = database.purchaseDao()
+    private val stockTransferDao = database.stockTransferDao()
 
     val cloudSyncManager = com.example.util.CloudSyncManager(database)
+
+    // -------------------------------------------------------------
+    // STOCK TRANSFERS (MULTI-BRANCH LOGISTICS)
+    // -------------------------------------------------------------
+    val allStockTransfers: Flow<List<StockTransfer>> = stockTransferDao.getAllTransfers()
+
+    suspend fun getAllStockTransfersList(): List<StockTransfer> = withContext(Dispatchers.IO) {
+        stockTransferDao.getAllTransfersList()
+    }
+
+    suspend fun createStockTransfer(
+        productId: String,
+        fromBranchId: String,
+        fromBranchName: String,
+        toBranchId: String,
+        toBranchName: String,
+        quantity: Double,
+        notes: String = "",
+        transferredBy: String = "Store Operator"
+    ): StockTransfer = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val product = productDao.getProductById(productId)
+        val productName = product?.name ?: "Inventory Item"
+        val unit = product?.unit ?: "pcs"
+        val transferNum = "TRF-" + SimpleDateFormat("yyMMdd-HHmm", Locale.getDefault()).format(Date(now))
+
+        val transfer = StockTransfer(
+            id = UUID.randomUUID().toString(),
+            transferNumber = transferNum,
+            productId = productId,
+            productName = productName,
+            fromBranchId = fromBranchId,
+            fromBranchName = fromBranchName,
+            toBranchId = toBranchId,
+            toBranchName = toBranchName,
+            quantity = quantity,
+            unit = unit,
+            transferDate = now,
+            status = "COMPLETED",
+            notes = notes.trim(),
+            transferredBy = transferredBy,
+            createdAt = now
+        )
+
+        stockTransferDao.insertTransfer(transfer)
+        enqueueSync(
+            tableName = "stock_transfers",
+            recordId = transfer.id,
+            operation = "CREATE",
+            payloadJson = """{"product":"$productName","qty":$quantity,"from":"$fromBranchName","to":"$toBranchName"}"""
+        )
+        transfer
+    }
+
+    suspend fun deleteStockTransfer(id: String) = withContext(Dispatchers.IO) {
+        stockTransferDao.deleteTransfer(id)
+        enqueueSync("stock_transfers", id, "DELETE", """{"id":"$id"}""")
+    }
 
     // -------------------------------------------------------------
     // PURCHASES & STOCK INFLOW MANAGEMENT (EXCEL SPREADSHEET LEDGER)

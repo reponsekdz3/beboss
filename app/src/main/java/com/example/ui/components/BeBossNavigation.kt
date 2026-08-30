@@ -102,6 +102,7 @@ fun BeBossTopBar(
     onToggleTheme: () -> Unit,
     onSearchClick: () -> Unit = {},
     onQuickActionsClick: () -> Unit = {},
+    onSettingsClick: () -> Unit = {},
     onSyncClick: () -> Unit,
     onHistoryClick: () -> Unit,
     onLockClick: () -> Unit
@@ -240,6 +241,22 @@ fun BeBossTopBar(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
+            }
+
+            // Settings Header Shortcut Icon
+            IconButton(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onSettingsClick()
+                },
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = Localization.get("settings", language),
+                    tint = if (currentScreen == AppScreen.SETTINGS) OrangePrimary else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(20.dp)
+                )
             }
 
             // Dark/White Theme Switcher Toggle

@@ -148,4 +148,13 @@ object PermissionManager {
         }
         return list
     }
+
+    fun hasAllCrucialPermissions(context: Context): Boolean {
+        val required = getRequiredPermissionsList()
+        return required.all { hasPermission(context, it) }
+    }
+
+    fun getUngrantedPermissions(context: Context): List<String> {
+        return getRequiredPermissionsList().filter { !hasPermission(context, it) }
+    }
 }

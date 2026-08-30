@@ -20,6 +20,7 @@ import com.example.data.model.Sale
 import com.example.data.model.SaleItem
 import com.example.data.model.SaleWithItems
 import com.example.data.model.ShopProfile
+import com.example.data.model.StockTransfer
 import com.example.data.model.SyncQueueItem
 import com.example.data.model.TopProductReport
 import com.example.data.model.User
@@ -28,6 +29,7 @@ import com.example.data.repository.BeBossRepository
 import com.example.data.repository.CartItem
 import com.example.data.repository.SyncResult
 import com.example.util.AppLanguage
+import com.example.util.BeBossNotificationManager
 import com.example.util.Localization
 import com.example.util.ShopImportSummary
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -103,10 +105,56 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     private val _cloudSyncReport = MutableStateFlow<com.example.util.CloudSyncReport?>(null)
     val cloudSyncReport: StateFlow<com.example.util.CloudSyncReport?> = _cloudSyncReport.asStateFlow()
 
-    // Multi-Branch Management
+    // Multi-Branch Management & Logistics
     val branches: StateFlow<List<com.example.data.model.Branch>> = repository.allBranches.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
     )
+
+    val allStockTransfers: StateFlow<List<StockTransfer>> = repository.allStockTransfers.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
+
+    fun createStockTransfer(
+        productId: String,
+        fromBranchId: String,
+        fromBranchName: String,
+        toBranchId: String,
+        toBranchName: String,
+        quantity: Double,
+        notes: String = ""
+    ) {
+        viewModelScope.launch {
+            try {
+                val user = _currentUser.value
+                val transfer = repository.createStockTransfer(
+                    productId = productId,
+                    fromBranchId = fromBranchId,
+                    fromBranchName = fromBranchName,
+                    toBranchId = toBranchId,
+                    toBranchName = toBranchName,
+                    quantity = quantity,
+                    notes = notes,
+                    transferredBy = user?.name ?: "Store Manager"
+                )
+                // Real system notification trigger
+                BeBossNotificationManager.sendStockTransferNotification(getApplication(), transfer)
+
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Kwohereza ibicuruzwa (${quantity.toInt()} ${transfer.productName}) muri $toBranchName byakozwe neza!"
+                    else "Stock transfer of ${quantity.toInt()} ${transfer.productName} to $toBranchName recorded!"
+                _snackbarMessage.emit(msg)
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Transfer error: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteStockTransfer(id: String) {
+        viewModelScope.launch {
+            repository.deleteStockTransfer(id)
+            _snackbarMessage.emit("Stock transfer log removed.")
+        }
+    }
 
     // Local P2P WiFi / Hotspot Sync Hub
     val localNetworkSyncServer = com.example.util.LocalNetworkSyncServer(application, db)
@@ -843,6 +891,22 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 val saleWithItems = repository.getSaleWithItems(sale.id)
                 _activeReceiptSale.value = saleWithItems
                 clearCart()
+
+                // Real system notification triggers
+                BeBossNotificationManager.sendSaleCompletedNotification(getApplication(), sale, shopProfile.value)
+
+                // Check for low stock items and notify
+                val currentLowStock = repository.getProductById(state.items.firstOrNull()?.product?.id ?: "")
+                if (currentLowStock != null && currentLowStock.isLowStock) {
+                    BeBossNotificationManager.sendLowStockNotification(
+                        getApplication(),
+                        currentLowStock.name,
+                        currentLowStock.quantityInStock,
+                        currentLowStock.lowStockThreshold,
+                        currentLowStock.unit
+                    )
+                }
+
                 val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
                     "Igurisha ryakozwe neza! Inyemezabuguzi irasohotse." 
                     else "Sale recorded successfully! Receipt ready."
@@ -1130,6 +1194,16 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
 
             val updatedPayment = repository.recordCustomerPayment(payment)
             val symbol = shopProfile.value.currencySymbol
+
+            // Real notification trigger
+            BeBossNotificationManager.sendDebtPaymentNotification(
+                context = getApplication(),
+                customerName = payment.customerName,
+                amountPaid = amount,
+                remainingDebt = updatedPayment.remainingDebt,
+                currencySymbol = symbol
+            )
+
             val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) {
                 if (updatedPayment.remainingDebt <= 0) {
                     "Kwishyura ${amount.toInt()} $symbol byakiriwe! UMWENDA WARANGIYE NEZA (0 $symbol)!"
@@ -1144,6 +1218,56 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
             _snackbarMessage.emit(msg)
+        }
+    }
+
+    /**
+     * Diagnostic testing helper to demonstrate real push notifications across all enterprise channels.
+     */
+    fun testNotification(channelType: String) {
+        val app = getApplication<Application>()
+        val shop = shopProfile.value
+        when (channelType) {
+            "SALE" -> {
+                val dummySale = Sale(
+                    id = UUID.randomUUID().toString(),
+                    customerName = "Makuza Eric",
+                    saleDate = System.currentTimeMillis(),
+                    totalAmount = 45000.0,
+                    paymentMethod = "MOMO",
+                    receiptNumber = "REC-DEMO-001"
+                )
+                BeBossNotificationManager.sendSaleCompletedNotification(app, dummySale, shop)
+            }
+            "LOW_STOCK" -> {
+                BeBossNotificationManager.sendLowStockNotification(app, "Inyange Milk 500ml", 2.0, 5.0, "Cartons")
+            }
+            "DEBT" -> {
+                BeBossNotificationManager.sendDebtPaymentNotification(app, "Gasana Jean", 25000.0, 10000.0, shop.currencySymbol)
+            }
+            "TRANSFER" -> {
+                val transfer = StockTransfer(
+                    transferNumber = "TRF-8821",
+                    productId = "prod_primus",
+                    productName = "Primus Beer 50cl",
+                    fromBranchId = "branch_main",
+                    fromBranchName = "Main Store",
+                    toBranchId = "branch_kgl",
+                    toBranchName = "Kimironko Branch",
+                    quantity = 20.0,
+                    unit = "crates"
+                )
+                BeBossNotificationManager.sendStockTransferNotification(app, transfer)
+            }
+            "TARGET" -> {
+                BeBossNotificationManager.sendDailyTargetReachedNotification(app, 250000.0, 200000.0, shop.currencySymbol)
+            }
+            "SYNC" -> {
+                BeBossNotificationManager.sendBranchSyncNotification(app, "Kimironko Branch", 14)
+            }
+        }
+        viewModelScope.launch {
+            _snackbarMessage.emit("Sent real Android notification: $channelType")
         }
     }
 

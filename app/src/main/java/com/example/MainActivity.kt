@@ -1,8 +1,14 @@
 package com.example
 
+import android.os.Build
 import android.os.Bundle
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -51,6 +57,7 @@ import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.AppScreen
 import com.example.ui.viewmodel.BeBossViewModel
 import com.example.util.AppLanguage
+import com.example.util.BeBossNotificationManager
 import com.example.util.BiometricAuthManager
 import com.example.util.PermissionManager
 import kotlinx.coroutines.flow.collectLatest
@@ -59,6 +66,9 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        hideSystemNavigationBars()
+        BeBossNotificationManager.createNotificationChannels(this)
+
         setContent {
             val viewModel: BeBossViewModel = viewModel()
             val isDarkTheme by viewModel.isDarkTheme.collectAsState()
@@ -66,6 +76,28 @@ class MainActivity : FragmentActivity() {
             MyApplicationTheme(darkTheme = isDarkTheme) {
                 BeBossApp(viewModel = viewModel)
             }
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            hideSystemNavigationBars()
+        }
+    }
+
+    /**
+     * Automatically hides the phone bottom navigation bar (home, back, recent tasks)
+     * in immersive mode so the app behaves like an enterprise hardware POS terminal.
+     */
+    private fun hideSystemNavigationBars() {
+        try {
+            val windowInsetsController = WindowCompat.getInsetsController(window, window.decorView)
+            windowInsetsController.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            windowInsetsController.hide(WindowInsetsCompat.Type.navigationBars())
+        } catch (e: Exception) {
+            // Graceful fallback on older vendor skins
         }
     }
 }
@@ -116,40 +148,23 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
     val databaseStats by viewModel.databaseStats.collectAsState()
     val isOptimizingDb by viewModel.isOptimizingDb.collectAsState()
+    val stockTransfers by viewModel.allStockTransfers.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     var showSplashScreen by remember { mutableStateOf(true) }
     var showQuickSpeedDialSheet by remember { mutableStateOf(false) }
     var showQuickCustomSaleDialog by remember { mutableStateOf(false) }
     var showUniversalSearchDialog by remember { mutableStateOf(false) }
-
-    // Lifecycle observer to detect when app was closed/backgrounded and reopened
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var lastPausedTimestamp by remember { mutableStateOf(0L) }
-
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
-                    lastPausedTimestamp = System.currentTimeMillis()
-                }
-                Lifecycle.Event.ON_RESUME -> {
-                    val now = System.currentTimeMillis()
-                    // If user was away (e.g. app closed/backgrounded and opened again)
-                    if (lastPausedTimestamp > 0L && (now - lastPausedTimestamp) > 1800L) {
-                        showSplashScreen = true
-                    }
-                }
-                else -> {}
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
+    var showPermissionOnboardingDialog by remember { mutableStateOf(false) }
 
     val debtorsCount = remember(customers) { customers.count { it.debtBalance > 0 } }
+
+    // Proactively check crucial hardware and phone permissions right after launch
+    LaunchedEffect(showSplashScreen) {
+        if (!showSplashScreen && !com.example.util.PermissionManager.hasAllCrucialPermissions(context)) {
+            showPermissionOnboardingDialog = true
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.snackbarMessage.collectLatest { msg ->
@@ -163,7 +178,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     if (showSplashScreen) {
         AppSplashScreen(
             isDarkTheme = isDarkTheme,
-            durationMs = 1800L,
+            durationMs = 650L,
             onSplashFinished = { showSplashScreen = false }
         )
     } else if (isRegistrationNeeded) {
@@ -236,6 +251,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                     onToggleTheme = { viewModel.toggleDarkMode() },
                     onSearchClick = { showUniversalSearchDialog = true },
                     onQuickActionsClick = { showQuickSpeedDialSheet = true },
+                    onSettingsClick = { viewModel.navigateTo(AppScreen.SETTINGS) },
                     onSyncClick = { viewModel.performSync() },
                     onHistoryClick = { viewModel.navigateTo(AppScreen.SALES_HISTORY) },
                     onLockClick = { viewModel.lockApp() }
@@ -408,6 +424,12 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onSeedSampleData = { viewModel.seedSampleCatalog() },
                                 onSaveBranch = { b -> viewModel.saveBranch(b) },
                                 onDeleteBranch = { bId -> viewModel.deleteBranch(bId) },
+                                onCreateStockTransfer = { prodId, fromId, fromName, toId, toName, qty, notes ->
+                                    viewModel.createStockTransfer(prodId, fromId, fromName, toId, toName, qty, notes)
+                                },
+                                onDeleteStockTransfer = { id -> viewModel.deleteStockTransfer(id) },
+                                selectedBranchId = selectedBranchId,
+                                onSelectActiveBranch = { branchId -> viewModel.selectBranch(branchId) },
                                 onSaveUser = { u -> viewModel.saveUser(u) },
                                 onDeleteUser = { uId -> viewModel.deleteUser(uId) },
                                 onImportPackage = { summary -> viewModel.importShopPackage(summary) },
@@ -419,13 +441,23 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                     viewModel.processDirectSubscriptionPayment(provider, phone, durationMonths, onSuccess)
                                 },
                                 onGrantEmergencyGrace = { viewModel.grantEmergencyGracePeriod() },
-                                onShowSplashScreen = { showSplashScreen = true }
+                                onShowSplashScreen = { showSplashScreen = true },
+                                onTestNotification = { type -> viewModel.testNotification(type) },
+                                onRequestPermissions = { showPermissionOnboardingDialog = true }
                             )
                         }
                     }
                 }
             }
         }
+    }
+
+    // Universal Permission Request Dialog (Proactive on first launch + On-Demand from Settings/Features)
+    if (showPermissionOnboardingDialog) {
+        PermissionRequestDialog(
+            language = currentLanguage,
+            onDismiss = { showPermissionOnboardingDialog = false }
+        )
     }
 
     // Quick Speed Dial Sheet (⚡ Fast Actions)
