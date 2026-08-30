@@ -59,6 +59,18 @@ interface SaleDao {
     @Query("SELECT COUNT(*) FROM sales WHERE saleDate >= :startTime AND saleDate <= :endTime")
     fun getSalesCountBetween(startTime: Long, endTime: Long): Flow<Int>
 
+    @Query("SELECT COUNT(*) FROM sales")
+    suspend fun getSaleCount(): Int
+
+    @Query("SELECT COUNT(*) FROM sale_items")
+    suspend fun getSaleItemCount(): Int
+
+    @Query("DELETE FROM sales")
+    suspend fun clearAllSales()
+
+    @Query("DELETE FROM sale_items")
+    suspend fun clearAllSaleItems()
+
     @Query("""
         SELECT si.productId, si.productName, SUM(si.quantitySold) as totalQuantity, SUM(si.subtotal) as totalRevenue, SUM(si.profit) as totalProfit 
         FROM sale_items si 

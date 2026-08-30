@@ -11,6 +11,7 @@ import com.example.data.dao.ProductDao
 import com.example.data.dao.PurchaseDao
 import com.example.data.dao.SaleDao
 import com.example.data.dao.ShopProfileDao
+import com.example.data.dao.StockTransferDao
 import com.example.data.dao.SyncQueueDao
 import com.example.data.dao.UserDao
 import com.example.data.model.Branch
@@ -21,6 +22,7 @@ import com.example.data.model.PurchaseRecord
 import com.example.data.model.Sale
 import com.example.data.model.SaleItem
 import com.example.data.model.ShopProfile
+import com.example.data.model.StockTransfer
 import com.example.data.model.SyncQueueItem
 import com.example.data.model.User
 
@@ -35,9 +37,10 @@ import com.example.data.model.User
         User::class,
         CustomerPayment::class,
         Branch::class,
-        PurchaseRecord::class
+        PurchaseRecord::class,
+        StockTransfer::class
     ],
-    version = 5,
+    version = 7,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -50,6 +53,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao
     abstract fun branchDao(): BranchDao
     abstract fun purchaseDao(): PurchaseDao
+    abstract fun stockTransferDao(): StockTransferDao
 
     companion object {
         @Volatile

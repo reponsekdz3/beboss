@@ -114,6 +114,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     val authError by viewModel.authError.collectAsState()
     val currentLanguage by viewModel.currentLanguage.collectAsState()
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
+    val databaseStats by viewModel.databaseStats.collectAsState()
+    val isOptimizingDb by viewModel.isOptimizingDb.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     var showSplashScreen by remember { mutableStateOf(true) }
@@ -380,6 +382,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 isSyncing = isSyncing,
                                 connectivityStatus = connectivityStatus,
                                 cloudSyncReport = cloudSyncReport,
+                                databaseStats = databaseStats,
+                                isOptimizingDb = isOptimizingDb,
                                 language = currentLanguage,
                                 isDarkTheme = isDarkTheme,
                                 localServerStatus = localServerStatus,
@@ -397,6 +401,11 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onTestPing = { endpoint, cb -> viewModel.testEndpointPing(endpoint, cb) },
                                 onToggleLocalServer = { enable -> viewModel.toggleLocalSyncServer(enable) },
                                 onSyncWithLocalHub = { hubIp -> viewModel.syncWithLocalMasterHub(hubIp) },
+                                onRefreshDatabaseStats = { viewModel.refreshDatabaseStats() },
+                                onOptimizeDatabase = { viewModel.optimizeDatabase() },
+                                onVerifyDatabaseIntegrity = { viewModel.verifyDatabaseIntegrity() },
+                                onClearTransactionalData = { viewModel.clearTransactionalDataOnly() },
+                                onSeedSampleData = { viewModel.seedSampleCatalog() },
                                 onSaveBranch = { b -> viewModel.saveBranch(b) },
                                 onDeleteBranch = { bId -> viewModel.deleteBranch(bId) },
                                 onSaveUser = { u -> viewModel.saveUser(u) },

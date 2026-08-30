@@ -24,6 +24,12 @@ interface CustomerPaymentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPayments(payments: List<CustomerPayment>)
 
+    @Query("DELETE FROM customer_payments")
+    suspend fun clearAllPayments()
+
+    @Query("SELECT COUNT(*) FROM customer_payments")
+    suspend fun getPaymentCount(): Int
+
     @Query("SELECT COALESCE(SUM(amount), 0.0) FROM customer_payments WHERE customerId = :customerId")
     fun getTotalPaidByCustomer(customerId: String): Flow<Double>
 }

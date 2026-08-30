@@ -1215,4 +1215,77 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
+
+    fun seedSampleCatalog() {
+        seedSampleData()
+    }
+
+    // ------------------------------------------------------------------------
+    // SQLITE DATABASE ENGINE STATE & OPERATIONS
+    // ------------------------------------------------------------------------
+    private val _databaseStats = MutableStateFlow<com.example.data.model.DatabaseEngineStats?>(null)
+    val databaseStats: StateFlow<com.example.data.model.DatabaseEngineStats?> = _databaseStats.asStateFlow()
+
+    private val _databaseMaintenanceResult = MutableStateFlow<com.example.data.model.DatabaseMaintenanceResult?>(null)
+    val databaseMaintenanceResult: StateFlow<com.example.data.model.DatabaseMaintenanceResult?> = _databaseMaintenanceResult.asStateFlow()
+
+    private val _isOptimizingDb = MutableStateFlow(false)
+    val isOptimizingDb: StateFlow<Boolean> = _isOptimizingDb.asStateFlow()
+
+    fun refreshDatabaseStats(context: android.content.Context? = null) {
+        val targetCtx = context ?: getApplication<Application>()
+        viewModelScope.launch {
+            try {
+                val stats = repository.getDatabaseStats(targetCtx)
+                _databaseStats.value = stats
+            } catch (e: Exception) {
+                android.util.Log.e("BeBossViewModel", "Failed to get database stats: ${e.message}")
+            }
+        }
+    }
+
+    fun optimizeDatabase(context: android.content.Context? = null) {
+        val targetCtx = context ?: getApplication<Application>()
+        viewModelScope.launch {
+            _isOptimizingDb.value = true
+            try {
+                val result = repository.optimizeDatabase(targetCtx)
+                _databaseMaintenanceResult.value = result
+                result.stats?.let { _databaseStats.value = it }
+                _snackbarMessage.emit(result.message)
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Optimization failed: ${e.message}")
+            } finally {
+                _isOptimizingDb.value = false
+            }
+        }
+    }
+
+    fun verifyDatabaseIntegrity() {
+        viewModelScope.launch {
+            _isOptimizingDb.value = true
+            try {
+                val result = repository.verifyDatabaseIntegrity()
+                _databaseMaintenanceResult.value = result
+                _snackbarMessage.emit(result.message)
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Integrity check failed: ${e.message}")
+            } finally {
+                _isOptimizingDb.value = false
+            }
+        }
+    }
+
+    fun clearTransactionalDataOnly(context: android.content.Context? = null) {
+        val targetCtx = context ?: getApplication<Application>()
+        viewModelScope.launch {
+            try {
+                repository.clearTransactionalDataOnly()
+                refreshDatabaseStats(targetCtx)
+                _snackbarMessage.emit("All sales transactions reset! Product catalog & customers preserved.")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Failed to reset transactions: ${e.message}")
+            }
+        }
+    }
 }

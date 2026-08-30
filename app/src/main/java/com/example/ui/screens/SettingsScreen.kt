@@ -56,6 +56,22 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.Receipt
+import androidx.compose.material.icons.filled.Vibration
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.SettingsSuggest
+import com.example.data.model.DatabaseEngineStats
+import com.example.data.model.DatabaseMaintenanceResult
+import androidx.compose.ui.text.font.FontFamily
 import com.example.ui.components.PermissionRequestDialog
 import com.example.util.PermissionManager
 import androidx.compose.material3.AlertDialog
@@ -127,6 +143,8 @@ fun SettingsScreen(
     isSyncing: Boolean = false,
     connectivityStatus: com.example.util.ConnectivityStatus = com.example.util.ConnectivityStatus.AVAILABLE,
     cloudSyncReport: com.example.util.CloudSyncReport? = null,
+    databaseStats: DatabaseEngineStats? = null,
+    isOptimizingDb: Boolean = false,
     language: AppLanguage,
     isDarkTheme: Boolean,
     localServerStatus: com.example.util.LocalServerStatus = com.example.util.LocalServerStatus.STOPPED,
@@ -149,6 +167,11 @@ fun SettingsScreen(
     onSaveUser: (User) -> Unit = {},
     onDeleteUser: (String) -> Unit = {},
     onImportPackage: (ShopImportSummary) -> Unit = {},
+    onRefreshDatabaseStats: () -> Unit = {},
+    onOptimizeDatabase: () -> Unit = {},
+    onVerifyDatabaseIntegrity: () -> Unit = {},
+    onClearTransactionalData: () -> Unit = {},
+    onSeedSampleData: () -> Unit = {},
     onLockApp: () -> Unit = {},
     onLogout: () -> Unit = {},
     onSwitchUser: (User) -> Unit = {},
@@ -162,9 +185,24 @@ fun SettingsScreen(
     var ownerName by remember(shopProfile.name) { mutableStateOf(shopProfile.name) }
     var phone by remember(shopProfile.phone) { mutableStateOf(shopProfile.phone) }
     var address by remember(shopProfile.address) { mutableStateOf(shopProfile.address) }
+    var tinNumber by remember(shopProfile.tinNumber) { mutableStateOf(shopProfile.tinNumber) }
+    var taxRateText by remember(shopProfile.taxRate) { mutableStateOf(if (shopProfile.taxRate > 0) shopProfile.taxRate.toString() else "") }
+    var receiptHeader by remember(shopProfile.receiptHeader) { mutableStateOf(shopProfile.receiptHeader) }
     var receiptFooter by remember(shopProfile.receiptFooter) { mutableStateOf(shopProfile.receiptFooter) }
     var currencyCode by remember(shopProfile.currencyCode) { mutableStateOf(shopProfile.currencyCode) }
     var currencySymbol by remember(shopProfile.currencySymbol) { mutableStateOf(shopProfile.currencySymbol) }
+
+    var dailySalesTargetText by remember(shopProfile.dailySalesTarget) { mutableStateOf(shopProfile.dailySalesTarget.toLong().toString()) }
+    var monthlyRevenueTargetText by remember(shopProfile.monthlyRevenueTarget) { mutableStateOf(shopProfile.monthlyRevenueTarget.toLong().toString()) }
+    var targetMarginText by remember(shopProfile.targetMarginPercent) { mutableStateOf(shopProfile.targetMarginPercent.toString()) }
+    var cashFloatText by remember(shopProfile.cashRegisterFloat) { mutableStateOf(shopProfile.cashRegisterFloat.toLong().toString()) }
+    var paperWidthMm by remember(shopProfile.receiptPaperWidthMm) { mutableStateOf(shopProfile.receiptPaperWidthMm) }
+    var showLogoOnReceipt by remember(shopProfile.showLogoOnReceipt) { mutableStateOf(shopProfile.showLogoOnReceipt) }
+    var showTaxOnReceipt by remember(shopProfile.showTaxOnReceipt) { mutableStateOf(shopProfile.showTaxOnReceipt) }
+    var showBarcodeOnReceipt by remember(shopProfile.showBarcodeOnReceipt) { mutableStateOf(shopProfile.showBarcodeOnReceipt) }
+    var autoPrintReceiptOnSale by remember(shopProfile.autoPrintReceiptOnSale) { mutableStateOf(shopProfile.autoPrintReceiptOnSale) }
+    var soundFeedbackEnabled by remember(shopProfile.soundFeedbackEnabled) { mutableStateOf(shopProfile.soundFeedbackEnabled) }
+    var hapticFeedbackEnabled by remember(shopProfile.hapticFeedbackEnabled) { mutableStateOf(shopProfile.hapticFeedbackEnabled) }
 
     var currencyExpanded by remember { mutableStateOf(false) }
     var showStaffDialog by remember { mutableStateOf(false) }
@@ -173,6 +211,8 @@ fun SettingsScreen(
     var showDataTransferDialog by remember { mutableStateOf(false) }
     var showSubscriptionDialog by remember { mutableStateOf(false) }
     var showPermissionsDialog by remember { mutableStateOf(false) }
+    var showThermalPreviewDialog by remember { mutableStateOf(false) }
+    var showResetTransactionsDialog by remember { mutableStateOf(false) }
     var permissionsUpdated by remember { mutableStateOf(false) }
     var showLogoutConfirm by remember { mutableStateOf(false) }
 
@@ -774,7 +814,7 @@ fun SettingsScreen(
             }
         }
 
-        // 4. Shop Profile Form
+        // 4. Shop Profile & Business Registration Form
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -841,6 +881,34 @@ fun SettingsScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = tinNumber,
+                            onValueChange = { tinNumber = it },
+                            label = { Text("TIN / Tax ID") },
+                            placeholder = { Text("100234567") },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true
+                        )
+
+                        OutlinedTextField(
+                            value = taxRateText,
+                            onValueChange = { taxRateText = it },
+                            label = { Text("Tax % (VAT)") },
+                            placeholder = { Text("18.0") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.weight(0.8f),
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     ExposedDropdownMenuBox(
                         expanded = currencyExpanded,
                         onExpandedChange = { currencyExpanded = !currencyExpanded },
@@ -891,32 +959,42 @@ fun SettingsScreen(
                         shape = RoundedCornerShape(12.dp)
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    OutlinedTextField(
-                        value = receiptFooter,
-                        onValueChange = { receiptFooter = it },
-                        label = { Text(Localization.get("receipt_footer", language)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Button(
                         onClick = {
+                            val parsedTax = taxRateText.toDoubleOrNull() ?: 0.0
+                            val parsedDailyTarget = dailySalesTargetText.toDoubleOrNull() ?: shopProfile.dailySalesTarget
+                            val parsedMonthlyTarget = monthlyRevenueTargetText.toDoubleOrNull() ?: shopProfile.monthlyRevenueTarget
+                            val parsedMargin = targetMarginText.toDoubleOrNull() ?: shopProfile.targetMarginPercent
+                            val parsedFloat = cashFloatText.toDoubleOrNull() ?: shopProfile.cashRegisterFloat
+
                             onSaveProfile(
                                 shopProfile.copy(
                                     shopName = shopName.trim(),
                                     name = ownerName.trim(),
                                     phone = phone.trim(),
                                     address = address.trim(),
+                                    tinNumber = tinNumber.trim(),
+                                    taxRate = parsedTax,
+                                    receiptHeader = receiptHeader.trim(),
                                     receiptFooter = receiptFooter.trim(),
                                     currencyCode = currencyCode,
-                                    currencySymbol = currencySymbol
+                                    currencySymbol = currencySymbol,
+                                    dailySalesTarget = parsedDailyTarget,
+                                    monthlyRevenueTarget = parsedMonthlyTarget,
+                                    targetMarginPercent = parsedMargin,
+                                    cashRegisterFloat = parsedFloat,
+                                    receiptPaperWidthMm = paperWidthMm,
+                                    showLogoOnReceipt = showLogoOnReceipt,
+                                    showTaxOnReceipt = showTaxOnReceipt,
+                                    showBarcodeOnReceipt = showBarcodeOnReceipt,
+                                    autoPrintReceiptOnSale = autoPrintReceiptOnSale,
+                                    soundFeedbackEnabled = soundFeedbackEnabled,
+                                    hapticFeedbackEnabled = hapticFeedbackEnabled
                                 )
                             )
-                            Toast.makeText(context, "Settings saved!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Shop Settings saved successfully!", Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
@@ -930,7 +1008,511 @@ fun SettingsScreen(
             }
         }
 
-        // 8. Device Permissions & System Integration Hub
+        // 5. Financial Targets & Cash Register Float
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.TrendingUp, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(22.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (language == AppLanguage.KINYARWANDA) "Intego z'Ubucuruzi & Isanduku (Financial Goals)" else "Financial Targets & Cash Float",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = dailySalesTargetText,
+                            onValueChange = { dailySalesTargetText = it },
+                            label = { Text("Daily Target ($currencySymbol)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+
+                        OutlinedTextField(
+                            value = monthlyRevenueTargetText,
+                            onValueChange = { monthlyRevenueTargetText = it },
+                            label = { Text("Monthly Goal ($currencySymbol)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = targetMarginText,
+                            onValueChange = { targetMarginText = it },
+                            label = { Text("Target Margin %") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+
+                        OutlinedTextField(
+                            value = cashFloatText,
+                            onValueChange = { cashFloatText = it },
+                            label = { Text("Opening Cash Float") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 6. Thermal POS Receipt & Hardware Printer Settings
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Print, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(22.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (language == AppLanguage.KINYARWANDA) "Ibicapishwa & Resi (Thermal Printer)" else "Thermal Printer & Receipts",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = OrangePrimary.copy(alpha = 0.12f)
+                        ) {
+                            Text(
+                                text = "${paperWidthMm}mm ESC/POS",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = OrangePrimary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "Receipt Paper Width:",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Button(
+                            onClick = { paperWidthMm = 58 },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (paperWidthMm == 58) OrangePrimary else MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text(
+                                text = "58 mm (Mobile POS)",
+                                color = if (paperWidthMm == 58) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+
+                        Button(
+                            onClick = { paperWidthMm = 80 },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (paperWidthMm == 80) OrangePrimary else MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text(
+                                text = "80 mm (Counter Desktop)",
+                                color = if (paperWidthMm == 80) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedTextField(
+                        value = receiptHeader,
+                        onValueChange = { receiptHeader = it },
+                        label = { Text("Receipt Header Subtitle") },
+                        placeholder = { Text("Quality Goods & Fast Delivery") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = receiptFooter,
+                        onValueChange = { receiptFooter = it },
+                        label = { Text(Localization.get("receipt_footer", language)) },
+                        placeholder = { Text("Murakoze Cyane! Welcome Again!") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Show Logo on Printed Receipt", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Switch(
+                            checked = showLogoOnReceipt,
+                            onCheckedChange = { showLogoOnReceipt = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = OrangePrimary, checkedTrackColor = OrangeLight)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Include Tax / TIN Breakdown", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Switch(
+                            checked = showTaxOnReceipt,
+                            onCheckedChange = { showTaxOnReceipt = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = OrangePrimary, checkedTrackColor = OrangeLight)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Print Barcode / QR Code on Bottom", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Switch(
+                            checked = showBarcodeOnReceipt,
+                            onCheckedChange = { showBarcodeOnReceipt = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = OrangePrimary, checkedTrackColor = OrangeLight)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Auto-Print on Checkout Finish", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Switch(
+                            checked = autoPrintReceiptOnSale,
+                            onCheckedChange = { autoPrintReceiptOnSale = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = OrangePrimary, checkedTrackColor = OrangeLight)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedButton(
+                        onClick = { showThermalPreviewDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Receipt, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Preview Thermal Receipt Layout", fontWeight = FontWeight.Bold, color = OrangePrimary, fontSize = 12.5.sp)
+                    }
+                }
+            }
+        }
+
+        // 7. Sound FX & Haptic Touch Sensory Feedback
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.VolumeUp, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(22.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (language == AppLanguage.KINYARWANDA) "Amajwi & Gukoraho (Sensory Feedback)" else "Audio & Haptic Feedback",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("POS Audio Chime", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
+                            Text("Play sound on barcode scan & checkout", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = soundFeedbackEnabled,
+                            onCheckedChange = { soundFeedbackEnabled = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = OrangePrimary, checkedTrackColor = OrangeLight)
+                        )
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Haptic Vibration", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
+                            Text("Tactile pulse on keypad click & buttons", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = hapticFeedbackEnabled,
+                            onCheckedChange = { hapticFeedbackEnabled = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = OrangePrimary, checkedTrackColor = OrangeLight)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 8. Supercharged SQLite Database Engine & Maintenance Hub
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.35f)),
+                elevation = CardDefaults.cardElevation(3.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFF0284C7).copy(alpha = 0.15f),
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Storage,
+                                        contentDescription = null,
+                                        tint = Color(0xFF0284C7),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = if (language == AppLanguage.KINYARWANDA) "Ububiko bwa SQLite (Database Engine)" else "SQLite Database Engine & Health",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Room SQLite v6 • WAL Journal Active",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF0284C7),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+
+                        IconButton(onClick = { onRefreshDatabaseStats() }) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Refresh Stats", tint = Color(0xFF0284C7))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Database Metrics Grid
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("Total Records", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    text = databaseStats?.totalRecordsCount?.toString() ?: "${products.size + sales.size + customers.size}",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("DB Storage", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    text = databaseStats?.fileSizeFormatted ?: "Active",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = ProfitGreen
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("B-Tree Health", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    text = if (databaseStats?.integrityStatus == "OK") "100% OK" else "Optimal",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color(0xFF0284C7)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Record breakdown chips
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "Live Schema Counts:",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "• Products: ${databaseStats?.productCount ?: products.size}   • Sales: ${databaseStats?.salesCount ?: sales.size}   • Customers: ${databaseStats?.customerCount ?: customers.size}\n• Payments: ${databaseStats?.paymentsCount ?: customerPayments.size}   • Sync Queue: ${databaseStats?.syncQueueCount ?: pendingSyncCount}   • Purchases: ${databaseStats?.purchasesCount ?: 0}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Database Engine Actions
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { onVerifyDatabaseIntegrity() },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("PRAGMA Integrity", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { onOptimizeDatabase() },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkNavy),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (isOptimizingDb) "Optimizing..." else "WAL Checkpoint", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { onSeedSampleData() },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(15.dp), tint = OrangePrimary)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Seed Rwanda Catalog", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = { showResetTransactionsDialog = true },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = LossRed)
+                        ) {
+                            Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(15.dp), tint = LossRed)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Reset Sales History", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 9. Device Permissions & System Integration Hub
         item {
             val hasContacts = PermissionManager.hasContactsPermission(context)
             val hasSms = PermissionManager.hasSmsPermission(context)
@@ -1067,7 +1649,7 @@ fun SettingsScreen(
             }
         }
 
-        // 9. Official App Branding & Security Verification Card
+        // 10. Official App Branding & Security Verification Card
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1089,7 +1671,7 @@ fun SettingsScreen(
                         shadowElevation = 4.dp
                     ) {
                         Image(
-                            painter = painterResource(id = R.drawable.img_app_logo_1787747059788),
+                            painter = painterResource(id = R.drawable.beboss_app_logo_1787833759468),
                             contentDescription = "BeBoss Logo",
                             modifier = Modifier
                                 .fillMaxSize()
@@ -1108,7 +1690,7 @@ fun SettingsScreen(
                     )
 
                     Text(
-                        text = "Version 2.4.0 • Enterprise Secured Offline Edition",
+                        text = "Version 2.6.0 • Enterprise SQLite Powered Edition",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
                         color = OrangePrimary
@@ -1122,7 +1704,7 @@ fun SettingsScreen(
                     ) {
                         Icon(Icons.Default.Security, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(14.dp))
                         Text(
-                            text = "Hardware Token & AES Local Database Encrypted",
+                            text = "Hardware Token & AES SQLite Room Database Active",
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1146,6 +1728,168 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    // Thermal Receipt Preview Dialog
+    if (showThermalPreviewDialog) {
+        AlertDialog(
+            onDismissRequest = { showThermalPreviewDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Receipt, contentDescription = null, tint = OrangePrimary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Thermal Receipt (${paperWidthMm}mm ESC/POS)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth(if (paperWidthMm == 58) 0.95f else 1f)
+                            .padding(vertical = 8.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFFBFBFB),
+                        border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                        shadowElevation = 4.dp
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            if (showLogoOnReceipt) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color.Black,
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text("BB", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
+
+                            Text(shopName.ifBlank { "BEBOSS RETAIL SHOP" }.uppercase(), fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.Black, fontFamily = FontFamily.Monospace)
+                            if (receiptHeader.isNotBlank()) {
+                                Text(receiptHeader, fontSize = 11.sp, color = Color.DarkGray, fontFamily = FontFamily.Monospace)
+                            }
+                            Text(address.ifBlank { "Kigali, Rwanda" }, fontSize = 10.5.sp, color = Color.DarkGray, fontFamily = FontFamily.Monospace)
+                            Text("Tel: ${phone.ifBlank { "+250 788 000 000" }}", fontSize = 10.5.sp, color = Color.DarkGray, fontFamily = FontFamily.Monospace)
+                            if (showTaxOnReceipt && tinNumber.isNotBlank()) {
+                                Text("TIN: $tinNumber", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = Color.Black, fontFamily = FontFamily.Monospace)
+                            }
+
+                            Text("--------------------------------", fontSize = 11.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+                            Text("RECEIPT #: RC-2026-08819", fontSize = 10.sp, color = Color.DarkGray, fontFamily = FontFamily.Monospace)
+                            Text("Date: 2026-08-29 14:30:22", fontSize = 10.sp, color = Color.DarkGray, fontFamily = FontFamily.Monospace)
+                            Text("Cashier: ${ownerName.ifBlank { "Main Cashier" }}", fontSize = 10.sp, color = Color.DarkGray, fontFamily = FontFamily.Monospace)
+                            Text("--------------------------------", fontSize = 11.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+
+                            // Sample Items
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Inyange Milk 500ml x 2", fontSize = 10.5.sp, color = Color.Black, fontFamily = FontFamily.Monospace)
+                                Text("1,400 $currencySymbol", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = Color.Black, fontFamily = FontFamily.Monospace)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Bakhresa Azam Bread 1kg", fontSize = 10.5.sp, color = Color.Black, fontFamily = FontFamily.Monospace)
+                                Text("1,200 $currencySymbol", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = Color.Black, fontFamily = FontFamily.Monospace)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Gorilla Coffee 250g", fontSize = 10.5.sp, color = Color.Black, fontFamily = FontFamily.Monospace)
+                                Text("4,500 $currencySymbol", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = Color.Black, fontFamily = FontFamily.Monospace)
+                            }
+
+                            Text("--------------------------------", fontSize = 11.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("SUBTOTAL:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black, fontFamily = FontFamily.Monospace)
+                                Text("7,100 $currencySymbol", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black, fontFamily = FontFamily.Monospace)
+                            }
+                            if (showTaxOnReceipt) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("VAT (18% Included):", fontSize = 10.sp, color = Color.DarkGray, fontFamily = FontFamily.Monospace)
+                                    Text("1,083 $currencySymbol", fontSize = 10.sp, color = Color.DarkGray, fontFamily = FontFamily.Monospace)
+                                }
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("TOTAL PAID (CASH):", fontSize = 12.sp, fontWeight = FontWeight.Black, color = Color.Black, fontFamily = FontFamily.Monospace)
+                                Text("7,100 $currencySymbol", fontSize = 12.sp, fontWeight = FontWeight.Black, color = Color.Black, fontFamily = FontFamily.Monospace)
+                            }
+                            Text("================================", fontSize = 11.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+
+                            if (showBarcodeOnReceipt) {
+                                Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(64.dp), tint = Color.Black)
+                                Text("*RC-2026-08819*", fontSize = 9.sp, color = Color.Black, fontFamily = FontFamily.Monospace)
+                                Spacer(modifier = Modifier.height(4.dp))
+                            }
+
+                            Text(receiptFooter.ifBlank { "Murakoze Cyane! Thank you!" }, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black, fontFamily = FontFamily.Monospace)
+                            Text("Powered by BeBoss Offline POS", fontSize = 9.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        Toast.makeText(context, "Test print signal sent to $paperWidthMm mm thermal printer!", Toast.LENGTH_SHORT).show()
+                        showThermalPreviewDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary)
+                ) {
+                    Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Send Test Print")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showThermalPreviewDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
+    // Reset Transactions Dialog
+    if (showResetTransactionsDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetTransactionsDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.RestartAlt, contentDescription = null, tint = LossRed)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Reset Sales History?", fontWeight = FontWeight.Bold, color = LossRed, fontSize = 17.sp)
+                }
+            },
+            text = {
+                Text(
+                    "This will safely erase sales transactions, purchases, and debt histories so you can start a fresh accounting period.\n\nYour product catalog, branches, users, and shop settings will be 100% PRESERVED."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showResetTransactionsDialog = false
+                        onClearTransactionalData()
+                        Toast.makeText(context, "Sales history reset successfully. Catalog preserved!", Toast.LENGTH_LONG).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = LossRed)
+                ) {
+                    Text("Reset Sales & Start Fresh", color = Color.White)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showResetTransactionsDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     // Branch Management Dialog

@@ -46,6 +46,12 @@ interface CustomerDao {
     @Query("SELECT COUNT(*) FROM customers WHERE isDeleted = 0")
     fun getTotalCustomerCount(): Flow<Int>
 
+    @Query("SELECT COUNT(*) FROM customers WHERE isDeleted = 0")
+    suspend fun getCustomerCountDirect(): Int
+
+    @Query("UPDATE customers SET debtBalance = 0.0, updatedAt = :updatedAt WHERE isDeleted = 0")
+    suspend fun resetAllDebtsToZero(updatedAt: Long = System.currentTimeMillis())
+
     @Query("SELECT COALESCE(SUM(debtBalance), 0.0) FROM customers WHERE isDeleted = 0")
     fun getTotalOutstandingDebt(): Flow<Double>
 }

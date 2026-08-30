@@ -58,6 +58,12 @@ interface ProductDao {
     @Query("SELECT COUNT(*) FROM products WHERE isDeleted = 0")
     fun getTotalProductCount(): Flow<Int>
 
+    @Query("SELECT COUNT(*) FROM products WHERE isDeleted = 0")
+    suspend fun getProductCountDirect(): Int
+
+    @Query("DELETE FROM products")
+    suspend fun clearAllProducts()
+
     @Query("SELECT COUNT(*) FROM products WHERE isDeleted = 0 AND quantityInStock <= lowStockThreshold")
     fun getLowStockCount(): Flow<Int>
 }

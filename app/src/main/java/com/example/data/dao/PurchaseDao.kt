@@ -41,6 +41,9 @@ interface PurchaseDao {
     @Query("DELETE FROM purchases WHERE id = :id")
     suspend fun deletePurchase(id: String)
 
+    @Query("DELETE FROM purchases")
+    suspend fun clearAllPurchases()
+
     @Query("SELECT COUNT(*) FROM purchases")
     suspend fun getPurchaseCount(): Int
 
