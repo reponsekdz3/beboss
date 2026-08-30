@@ -47,3 +47,21 @@ data class SaleWithItems(
     val sale: Sale,
     val items: List<SaleItem>
 )
+
+data class CartItem(
+    val product: Product,
+    val quantity: Double = 1.0,
+    val customPrice: Double? = null
+) {
+    val effectiveUnitPrice: Double
+        get() = customPrice ?: product.sellingPrice
+
+    val subtotal: Double
+        get() = effectiveUnitPrice * quantity
+
+    val cost: Double
+        get() = product.costPrice * quantity
+
+    val profit: Double
+        get() = subtotal - cost
+}

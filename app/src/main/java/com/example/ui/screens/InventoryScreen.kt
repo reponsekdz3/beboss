@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Inventory
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
@@ -1091,16 +1092,34 @@ fun ProductFormDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
+                var showBarcodeScannerForForm by remember { mutableStateOf(false) }
+
                 OutlinedTextField(
                     value = barcode,
                     onValueChange = { barcode = it },
                     label = { Text("Barcode / SKU Number") },
                     placeholder = { Text("e.g. 616123456789") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    trailingIcon = {
+                        IconButton(onClick = { showBarcodeScannerForForm = true }) {
+                            Icon(Icons.Filled.QrCodeScanner, contentDescription = "Scan with Camera", tint = OrangePrimary)
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
                     singleLine = true
                 )
+
+                if (showBarcodeScannerForForm) {
+                    com.example.ui.components.CameraBarcodeScannerDialog(
+                        products = emptyList(),
+                        onProductScanned = {},
+                        onBarcodeScanned = { scanned ->
+                            barcode = scanned
+                            showBarcodeScannerForForm = false
+                        },
+                        onDismiss = { showBarcodeScannerForForm = false }
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(18.dp))
 

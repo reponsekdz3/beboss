@@ -9,6 +9,7 @@ import com.example.data.dao.CustomerDao
 import com.example.data.dao.CustomerPaymentDao
 import com.example.data.dao.ProductDao
 import com.example.data.dao.PurchaseDao
+import com.example.data.dao.RedeemedVoucherDao
 import com.example.data.dao.SaleDao
 import com.example.data.dao.ShopProfileDao
 import com.example.data.dao.StockTransferDao
@@ -19,6 +20,7 @@ import com.example.data.model.Customer
 import com.example.data.model.CustomerPayment
 import com.example.data.model.Product
 import com.example.data.model.PurchaseRecord
+import com.example.data.model.RedeemedVoucher
 import com.example.data.model.Sale
 import com.example.data.model.SaleItem
 import com.example.data.model.ShopProfile
@@ -38,9 +40,10 @@ import com.example.data.model.User
         CustomerPayment::class,
         Branch::class,
         PurchaseRecord::class,
-        StockTransfer::class
+        StockTransfer::class,
+        RedeemedVoucher::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -54,6 +57,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun branchDao(): BranchDao
     abstract fun purchaseDao(): PurchaseDao
     abstract fun stockTransferDao(): StockTransferDao
+    abstract fun redeemedVoucherDao(): RedeemedVoucherDao
 
     companion object {
         @Volatile
@@ -66,7 +70,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "beboss_database.db"
                 )
-                .fallbackToDestructiveMigration()
+                .addMigrations(*DatabaseMigrations.ALL_MIGRATIONS)
                 .build()
                 INSTANCE = instance
                 instance

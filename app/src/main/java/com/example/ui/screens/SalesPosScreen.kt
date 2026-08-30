@@ -78,6 +78,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.CartItem
 import com.example.data.model.Customer
 import com.example.data.model.Product
 import com.example.data.model.ShopProfile
@@ -777,9 +778,9 @@ fun SalesPosScreen(
         }
     }
 
-    // Barcode Simulation / Scanner Quick Dialog
+    // Barcode Scanner Dialog (CameraX + Manual Lookup)
     if (showScannerDialog) {
-        BarcodeLookupDialog(
+        com.example.ui.components.CameraBarcodeScannerDialog(
             products = products,
             onProductScanned = { p ->
                 onAddToCart(p)

@@ -23,6 +23,9 @@ data class Product(
     val isLowStock: Boolean
         get() = quantityInStock <= lowStockThreshold
 
+    val isOutOfStock: Boolean
+        get() = quantityInStock <= 0.0
+
     val profitMarginAmount: Double
         get() = sellingPrice - costPrice
 

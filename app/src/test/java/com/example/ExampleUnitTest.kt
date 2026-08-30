@@ -2,7 +2,10 @@ package com.example
 
 import com.example.data.model.ShopProfile
 import com.example.util.OfflineSubscriptionManager
-import org.junit.Assert.*
+import com.example.util.SubscriptionSecurityManager
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExampleUnitTest {
@@ -67,31 +70,50 @@ class ExampleUnitTest {
     }
 
     @Test
-    fun `voucher validation - dual branch 10k key`() {
+    fun `cryptographic voucher validation - dual branch 10k key`() {
         val dummyProfile = ShopProfile(shopName = "Kigali Mart", phone = "0788112233")
-        val result = OfflineSubscriptionManager.validateVoucherCode(
-            inputCode = "RW10K-2026-ACTIVE",
+        val voucher = SubscriptionSecurityManager.generateCryptographicVoucher(
+            shopProfile = dummyProfile,
+            tierCode = "DUAL",
+            days = 30
+        )
+        val result = SubscriptionSecurityManager.verifyVoucherToken(
+            voucherInput = voucher,
             shopProfile = dummyProfile,
             branchCount = 2,
             workerCount = 2
         )
         assertTrue(result.isValid)
         assertEquals(30, result.daysToAdd)
-        assertEquals(10000, result.verifiedAmount)
     }
 
     @Test
-    fun `voucher validation - multi branch 20k key`() {
+    fun `cryptographic voucher validation - multi branch 20k key`() {
         val dummyProfile = ShopProfile(shopName = "Kigali Mart", phone = "0788112233")
-        val result = OfflineSubscriptionManager.validateVoucherCode(
-            inputCode = "RW20K-2026-ACTIVE",
+        val voucher = SubscriptionSecurityManager.generateCryptographicVoucher(
+            shopProfile = dummyProfile,
+            tierCode = "ENTERPRISE",
+            days = 30
+        )
+        val result = SubscriptionSecurityManager.verifyVoucherToken(
+            voucherInput = voucher,
             shopProfile = dummyProfile,
             branchCount = 4,
             workerCount = 5
         )
         assertTrue(result.isValid)
         assertEquals(30, result.daysToAdd)
-        assertEquals(20000, result.verifiedAmount)
+    }
+
+    @Test
+    fun `tampered or fake voucher rejected`() {
+        val dummyProfile = ShopProfile(shopName = "Kigali Mart", phone = "0788112233")
+        val result = SubscriptionSecurityManager.verifyVoucherToken(
+            voucherInput = "BEBOSS-FAKE-EXPLOIT",
+            shopProfile = dummyProfile,
+            branchCount = 1,
+            workerCount = 1
+        )
+        assertFalse(result.isValid)
     }
 }
-

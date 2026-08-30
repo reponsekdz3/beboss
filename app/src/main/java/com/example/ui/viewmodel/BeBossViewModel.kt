@@ -25,9 +25,9 @@ import com.example.data.model.SyncQueueItem
 import com.example.data.model.TopProductReport
 import com.example.data.model.User
 import com.example.data.model.UserRole
+import com.example.data.model.CartItem
 import com.example.data.repository.BeBossRepository
-import com.example.data.repository.CartItem
-import com.example.data.repository.SyncResult
+import com.example.util.SyncAuditLog
 import com.example.util.AppLanguage
 import com.example.util.BeBossNotificationManager
 import com.example.util.Localization
@@ -767,32 +767,15 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
             val currentProf = shopProfile.value
             val branchCount = branches.value.size.coerceAtLeast(1)
             val workerCount = allUsers.value.size.coerceAtLeast(1)
-            val result = com.example.util.OfflineSubscriptionManager.validateVoucherCode(
-                inputCode = code,
+            val result = repository.redeemVoucher(
+                voucherCode = code,
                 shopProfile = currentProf,
                 branchCount = branchCount,
                 workerCount = workerCount
             )
+            _snackbarMessage.emit(result.message)
             if (result.isValid) {
-                val currentExpiry = if (currentProf.subscriptionExpiresAt > System.currentTimeMillis()) 
-                    currentProf.subscriptionExpiresAt 
-                    else System.currentTimeMillis()
-                val newExpiry = currentExpiry + (result.daysToAdd.toLong() * 24 * 60 * 60 * 1000)
-
-                val updatedProf = currentProf.copy(
-                    subscriptionStatus = "ACTIVE",
-                    subscriptionExpiresAt = newExpiry,
-                    lastPaymentRef = code.trim().uppercase(),
-                    lastPaymentAmount = result.verifiedAmount,
-                    lastPaymentDate = System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis()
-                )
-                repository.updateShopProfile(updatedProf)
-                _snackbarMessage.emit(result.message)
-                // Auto-sync subscription status to cloud immediately
                 syncToCloudNow()
-            } else {
-                _snackbarMessage.emit(result.message)
             }
         }
     }
