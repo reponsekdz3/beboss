@@ -17,8 +17,8 @@ data class User(
     val username: String,
     val email: String = "",
     val phone: String = "",
-    val pinHash: String = "1234", // 4-digit fast PIN
-    val password: String = "admin123",
+    val pinHash: String = "", // Secure PBKDF2 hash of fast PIN
+    val password: String = "",
     val role: UserRole = UserRole.OWNER,
     val assignedBranchId: String = "", // Empty means all branches (Boss / Owner)
     val assignedBranchName: String = "All Branches",
@@ -46,7 +46,7 @@ data class User(
             name: String,
             username: String,
             role: UserRole,
-            pin: String = "1234",
+            pin: String = "",
             phone: String = ""
         ): User {
             return when (role) {

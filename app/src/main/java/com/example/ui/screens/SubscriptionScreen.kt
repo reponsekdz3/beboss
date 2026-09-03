@@ -857,9 +857,17 @@ private fun DirectMoMoPaymentDialog(
 ) {
     var selectedProvider by remember { mutableStateOf("MTN MoMo") }
     var phoneInput by remember { mutableStateOf(shopProfile.phone) }
+    var smsRefInput by remember { mutableStateOf("") }
     var isProcessing by remember { mutableStateOf(false) }
-    var stepMessage by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    val activeUssdCode = when {
+        selectedProvider.contains("AIRTEL", ignoreCase = true) -> breakdown.ussdAirtelCode
+        else -> breakdown.ussdMtnCode
+    }
 
     Dialog(onDismissRequest = { if (!isProcessing) onDismiss() }) {
         Card(
@@ -874,7 +882,7 @@ private fun DirectMoMoPaymentDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Pay Subscription Online",
+                        text = "Authentic MoMo Settlement",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = DarkNavy
@@ -917,19 +925,24 @@ private fun DirectMoMoPaymentDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // Provider Selection
-                Text("Select Payment Gateway:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = InkDark)
+                Text("Select Mobile Provider:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = InkDark)
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("MTN MoMo", "Airtel Money", "BK Quick").forEach { prov ->
+                    listOf("MTN MoMo", "Airtel Money").forEach { prov ->
                         val isSelected = selectedProvider == prov
                         Surface(
-                            onClick = { if (!isProcessing) selectedProvider = prov },
+                            onClick = {
+                                if (!isProcessing) {
+                                    selectedProvider = prov
+                                    errorMessage = null
+                                }
+                            },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(10.dp),
                             color = if (isSelected) {
@@ -954,83 +967,134 @@ private fun DirectMoMoPaymentDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedTextField(
                     value = phoneInput,
-                    onValueChange = { phoneInput = it },
-                    label = { Text("Account Phone Number (+250...)") },
+                    onValueChange = {
+                        phoneInput = it
+                        errorMessage = null
+                    },
+                    label = { Text("Payer Phone Number (078... / 073...)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
                     enabled = !isProcessing
                 )
 
-                if (isProcessing) {
-                    Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Step 1: USSD Dial helper button
+                OutlinedButton(
+                    onClick = {
+                        MoMoPaymentGateway.openUssdDialer(context, activeUssdCode)
+                        statusMessage = "Dialer launched for $selectedProvider ($activeUssdCode). Complete payment and copy the SMS reference below."
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Dial USSD ($activeUssdCode)", fontSize = 11.sp)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Step 2: Authentic Telco Reference ID input
+                OutlinedTextField(
+                    value = smsRefInput,
+                    onValueChange = {
+                        smsRefInput = it
+                        errorMessage = null
+                    },
+                    label = { Text("Telco SMS Financial Ref (e.g. MP260903...)") },
+                    placeholder = { Text(if (selectedProvider.contains("MTN")) "MP260903.0852.B123" else "TX2609038812") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    enabled = !isProcessing
+                )
+
+                if (errorMessage != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFFF0FDF4),
-                        border = BorderStroke(1.dp, ProfitGreen.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFFEF2F2),
+                        border = BorderStroke(1.dp, LossRed.copy(alpha = 0.5f)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.5.dp, color = ProfitGreen)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = stepMessage,
-                                fontSize = 12.sp,
-                                color = DarkNavy,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+                        Text(
+                            text = errorMessage ?: "",
+                            color = LossRed,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(8.dp)
+                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                if (statusMessage != null && errorMessage == null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFF0FDF4),
+                        border = BorderStroke(1.dp, ProfitGreen.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = statusMessage ?: "",
+                            color = DarkNavy,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
+                }
+
+                if (isProcessing) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = OrangePrimary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Verifying financial transaction reference...", fontSize = 11.5.sp, color = DarkNavy)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Button(
                     onClick = {
                         isProcessing = true
+                        errorMessage = null
                         coroutineScope.launch {
-                            stepMessage = "Connecting to $selectedProvider gateway..."
-                            delay(1000)
-                            stepMessage = "Prompting PIN on $phoneInput..."
-                            delay(1200)
-                            stepMessage = "Payment confirmed! Extending shop access..."
-                            delay(800)
-
-                            if (onProcessDirectPayment != null) {
-                                onProcessDirectPayment(
-                                    selectedProvider,
-                                    phoneInput,
-                                    breakdown.durationMonths
-                                ) { result, _ ->
-                                    onPaymentCompleted(result)
-                                }
-                            } else {
-                                val result = OfflineSubscriptionManager.processDirectMoMoPayment(
-                                    shopProfile = shopProfile,
-                                    payerPhone = phoneInput,
-                                    provider = selectedProvider,
-                                    branchCount = breakdown.branchCount,
-                                    workerCount = breakdown.workerCount,
-                                    durationMonths = breakdown.durationMonths
-                                )
+                            val pastRefs = setOfNotNull(shopProfile.lastPaymentRef)
+                            val result = OfflineSubscriptionManager.processMoMoPaymentAsync(
+                                context = context,
+                                shopProfile = shopProfile,
+                                payerPhone = phoneInput,
+                                provider = selectedProvider,
+                                branchCount = breakdown.branchCount,
+                                workerCount = breakdown.workerCount,
+                                durationMonths = breakdown.durationMonths,
+                                userEnteredReference = smsRefInput.ifBlank { null },
+                                alreadyUsedRefs = pastRefs
+                            )
+                            isProcessing = false
+                            if (result.isSuccess) {
                                 onPaymentCompleted(result)
+                            } else {
+                                errorMessage = result.message
                             }
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                    enabled = !isProcessing && phoneInput.isNotBlank()
+                    enabled = !isProcessing && (phoneInput.isNotBlank() || smsRefInput.isNotBlank())
                 ) {
                     Text(
-                        text = if (isProcessing) "Processing Payment..." else "Authorize & Pay ${breakdown.totalPayable} FRw",
+                        text = if (isProcessing) "Verifying Settlement..." else "Verify & Activate ${breakdown.totalPayable} FRw",
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )

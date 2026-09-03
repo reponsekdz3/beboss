@@ -784,7 +784,8 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         provider: String,
         phone: String,
         durationMonths: Int,
-        onSuccess: (com.example.util.PaymentProcessingResult, com.example.util.SubscriptionPriceBreakdown) -> Unit
+        userReference: String? = null,
+        onResult: (com.example.util.PaymentProcessingResult, com.example.util.SubscriptionPriceBreakdown) -> Unit
     ) {
         viewModelScope.launch {
             val currentProf = shopProfile.value
@@ -795,13 +796,16 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 workerCount = workerCount,
                 durationMonths = durationMonths
             )
+            val pastRefs = setOfNotNull(currentProf.lastPaymentRef)
             val result = com.example.util.OfflineSubscriptionManager.processDirectMoMoPayment(
                 shopProfile = currentProf,
                 payerPhone = phone,
                 provider = provider,
                 branchCount = branchCount,
                 workerCount = workerCount,
-                durationMonths = durationMonths
+                durationMonths = durationMonths,
+                smsTransactionReference = userReference,
+                alreadyUsedRefs = pastRefs
             )
 
             if (result.isSuccess) {
@@ -821,10 +825,12 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 )
                 repository.updateShopProfile(updatedProf)
                 _snackbarMessage.emit(result.message)
-                // Auto-sync subscription extension to database & Firebase cloud
+                // Auto-sync subscription extension to database & cloud
                 syncToCloudNow()
-                onSuccess(result, breakdown)
+            } else {
+                _snackbarMessage.emit(result.message)
             }
+            onResult(result, breakdown)
         }
     }
 

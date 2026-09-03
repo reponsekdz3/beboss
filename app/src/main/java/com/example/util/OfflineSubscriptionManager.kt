@@ -42,7 +42,9 @@ data class PaymentProcessingResult(
     val provider: String,
     val payerPhone: String,
     val timestamp: Long,
-    val message: String
+    val message: String,
+    val isPending: Boolean = false,
+    val financialId: String? = null
 )
 
 object OfflineSubscriptionManager {
@@ -161,7 +163,9 @@ object OfflineSubscriptionManager {
     }
 
     /**
-     * Executes real direct in-app mobile money payment verification and transaction recording.
+     * Executes authentic mobile money payment verification.
+     * Validates phone format, authentic Telco SMS references, anti-replay,
+     * and strictly rejects unconfirmed or invalid requests without fake approvals.
      */
     fun processDirectMoMoPayment(
         shopProfile: ShopProfile,
@@ -169,28 +173,115 @@ object OfflineSubscriptionManager {
         provider: String,
         branchCount: Int,
         workerCount: Int,
-        durationMonths: Int
+        durationMonths: Int,
+        smsTransactionReference: String? = null,
+        alreadyUsedRefs: Set<String> = emptySet()
     ): PaymentProcessingResult {
         val pricing = calculateSubscriptionPrice(branchCount, workerCount, durationMonths)
         val planDays = durationMonths * 30
         val effectivePayer = if (payerPhone.isNotBlank()) payerPhone else shopProfile.phone
-        val txPrefix = when (provider.uppercase()) {
-            "AIRTEL MONEY", "AIRTEL" -> "AIRTEL-RW-"
-            "BK QUICK", "BANK" -> "BK-RW-"
-            else -> "MOMO-RW-"
-        }
         val timestamp = System.currentTimeMillis()
-        val txRef = "$txPrefix${timestamp.toString().takeLast(8)}"
+
+        // 1. Validate Rwanda phone number
+        val (phoneValid, normalizedPhone) = MoMoPaymentGateway.validateRwandaPhoneNumber(effectivePayer, provider)
+        if (!phoneValid) {
+            return PaymentProcessingResult(
+                isSuccess = false,
+                isPending = false,
+                transactionRef = "",
+                amountPaid = 0,
+                planDays = 0,
+                provider = provider,
+                payerPhone = effectivePayer,
+                timestamp = timestamp,
+                message = normalizedPhone
+            )
+        }
+
+        // 2. If a Telco SMS Reference ID is provided, verify it authentically
+        if (!smsTransactionReference.isNullOrBlank()) {
+            val verifyRes = MoMoPaymentGateway.verifyTelcoTransactionReference(
+                rawReference = smsTransactionReference,
+                provider = provider,
+                amount = pricing.totalPayable,
+                alreadyUsedRefs = alreadyUsedRefs
+            )
+            return PaymentProcessingResult(
+                isSuccess = verifyRes.isSuccess,
+                isPending = verifyRes.isPending,
+                transactionRef = verifyRes.transactionReference,
+                financialId = verifyRes.financialId,
+                amountPaid = if (verifyRes.isSuccess) pricing.totalPayable else 0,
+                planDays = if (verifyRes.isSuccess) planDays else 0,
+                provider = provider,
+                payerPhone = normalizedPhone,
+                timestamp = timestamp,
+                message = verifyRes.message
+            )
+        }
+
+        // 3. If no reference is provided and no automated gateway is available:
+        // Mark as PENDING_CONFIRMATION so the user can complete USSD on their phone,
+        // rather than falsely granting instant access.
+        val ussdCode = when {
+            provider.contains("AIRTEL", ignoreCase = true) -> pricing.ussdAirtelCode
+            else -> pricing.ussdMtnCode
+        }
 
         return PaymentProcessingResult(
-            isSuccess = true,
-            transactionRef = txRef,
-            amountPaid = pricing.totalPayable,
-            planDays = planDays,
+            isSuccess = false,
+            isPending = true,
+            transactionRef = "PENDING-$provider-${timestamp.toString().takeLast(6)}",
+            financialId = null,
+            amountPaid = 0,
+            planDays = 0,
             provider = provider,
-            payerPhone = effectivePayer,
+            payerPhone = normalizedPhone,
             timestamp = timestamp,
-            message = "Payment of ${pricing.totalPayable} FRw recorded via $provider! Ref: $txRef (Subscription extended by $planDays days)"
+            message = "USSD Prompt sent for $provider. Dial $ussdCode or approve the prompt on $normalizedPhone, then enter the SMS reference ID."
+        )
+    }
+
+    /**
+     * Executes asynchronous payment verification using real gateway endpoints.
+     */
+    suspend fun processMoMoPaymentAsync(
+        context: Context,
+        shopProfile: ShopProfile,
+        payerPhone: String,
+        provider: String,
+        branchCount: Int,
+        workerCount: Int,
+        durationMonths: Int,
+        userEnteredReference: String? = null,
+        alreadyUsedRefs: Set<String> = emptySet()
+    ): PaymentProcessingResult {
+        val pricing = calculateSubscriptionPrice(branchCount, workerCount, durationMonths)
+        val planDays = durationMonths * 30
+        val timestamp = System.currentTimeMillis()
+
+        val gatewayRes = MoMoPaymentGateway.executePaymentRequest(
+            context = context,
+            shopProfile = shopProfile,
+            payerPhone = payerPhone,
+            provider = provider,
+            amount = pricing.totalPayable,
+            description = "BeBoss ${pricing.branchTierName} ($durationMonths mo)",
+            userEnteredReference = userEnteredReference,
+            alreadyUsedRefs = alreadyUsedRefs
+        )
+
+        return PaymentProcessingResult(
+            isSuccess = gatewayRes.isSuccess,
+            isPending = gatewayRes.isPending,
+            transactionRef = gatewayRes.transactionReference,
+            financialId = gatewayRes.financialId,
+            amountPaid = if (gatewayRes.isSuccess) pricing.totalPayable else 0,
+            planDays = if (gatewayRes.isSuccess) planDays else 0,
+            provider = provider,
+            payerPhone = gatewayRes.payerPhone,
+            timestamp = timestamp,
+            message = gatewayRes.message
         )
     }
 

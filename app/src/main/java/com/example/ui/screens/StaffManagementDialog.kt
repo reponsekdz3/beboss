@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import com.example.util.SecurityUtils
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -512,12 +513,17 @@ fun StaffFormDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
+                val pinValidation = remember(pin) {
+                    if (pin.isNotBlank()) SecurityUtils.validatePinStrength(pin) else null
+                }
+
                 OutlinedTextField(
                     value = pin,
                     onValueChange = { if (it.length <= 6) pin = it },
-                    label = { Text(if (language == AppLanguage.KINYARWANDA) "PIN yo Kwinjira *" else "Login PIN *") },
-                    placeholder = { Text(if (initialUser != null) "Unchanged" else "1234") },
+                    label = { Text(if (language == AppLanguage.KINYARWANDA) "PIN yo Kwinjira *" else "Login PIN (4-6 digits) *") },
+                    placeholder = { Text(if (initialUser != null) "Leave blank to keep existing PIN" else "Enter strong PIN") },
                     visualTransformation = if (showPin) VisualTransformation.None else PasswordVisualTransformation(),
+                    isError = pin.isNotBlank() && pinValidation?.isValid == false,
                     trailingIcon = {
                         IconButton(onClick = { showPin = !showPin }) {
                             Icon(
@@ -533,6 +539,15 @@ fun StaffFormDialog(
                     singleLine = true
                 )
 
+                if (pin.isNotBlank() && pinValidation != null && !pinValidation.isValid) {
+                    Text(
+                        text = pinValidation.message,
+                        color = LossRed,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 2.dp, start = 4.dp)
+                    )
+                }
+
                 // Quick Generate PIN button
                 Row(
                     modifier = Modifier
@@ -542,7 +557,7 @@ fun StaffFormDialog(
                 ) {
                     Surface(
                         onClick = {
-                            pin = String.format("%04d", Random.nextInt(1000, 9999))
+                            pin = SecurityUtils.generateStrongRandomPin()
                             showPin = true
                         },
                         shape = RoundedCornerShape(8.dp),
@@ -556,7 +571,7 @@ fun StaffFormDialog(
                         ) {
                             Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(13.dp))
                             Text(
-                                text = if (language == AppLanguage.KINYARWANDA) "Kora PIN nshya mu buryo bwikora" else "Auto-Generate 4-Digit PIN",
+                                text = if (language == AppLanguage.KINYARWANDA) "Kora PIN ikomeye mu buryo bwikora" else "Auto-Generate Strong 4-Digit PIN",
                                 fontSize = 11.sp,
                                 color = OrangePrimary,
                                 fontWeight = FontWeight.Bold
@@ -687,18 +702,27 @@ fun StaffFormDialog(
                 Spacer(modifier = Modifier.height(18.dp))
 
                 val finalBranch = branches.firstOrNull { it.id == selectedBranchId }
-                val isFormValid = name.isNotBlank() && (pin.isNotBlank() || initialUser != null)
+                val isPinValid = if (initialUser != null) {
+                    pin.isBlank() || (pinValidation != null && pinValidation.isValid)
+                } else {
+                    pin.isNotBlank() && pinValidation != null && pinValidation.isValid
+                }
+                val isFormValid = name.isNotBlank() && isPinValid
 
                 Button(
                     onClick = {
-                        if (name.isNotBlank()) {
-                            val finalPin = if (pin.isNotBlank()) pin.trim() else (initialUser?.pinHash ?: "1234")
+                        if (isFormValid) {
+                            val finalPinHash = if (pin.isNotBlank()) {
+                                SecurityUtils.hashPin(pin.trim())
+                            } else {
+                                initialUser?.pinHash ?: ""
+                            }
                             val u = User(
                                 id = initialUser?.id ?: UUID.randomUUID().toString(),
                                 name = name.trim(),
                                 username = username.ifBlank { name.lowercase().replace(" ", "") },
                                 phone = phone.trim(),
-                                pinHash = finalPin,
+                                pinHash = finalPinHash,
                                 role = role,
                                 assignedBranchId = selectedBranchId,
                                 assignedBranchName = finalBranch?.name ?: "Main Store",

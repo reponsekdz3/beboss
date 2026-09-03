@@ -162,6 +162,20 @@ object SecurityUtils {
     }
 
     /**
+     * Generates a cryptographically secure, non-trivial 4-digit PIN that passes strength validation.
+     */
+    fun generateStrongRandomPin(): String {
+        val random = SecureRandom()
+        while (true) {
+            val num = random.nextInt(9000) + 1000
+            val candidate = num.toString()
+            if (validatePinStrength(candidate).isValid) {
+                return candidate
+            }
+        }
+    }
+
+    /**
      * Validates PIN complexity (must be 4-6 digits, not trivially repeated like 0000 or sequential 1234).
      */
     fun validatePinStrength(pin: String): PinStrengthResult {

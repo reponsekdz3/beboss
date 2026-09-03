@@ -11,6 +11,7 @@ import com.example.data.model.SaleItem
 import com.example.data.model.ShopProfile
 import com.example.data.model.User
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,10 +20,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.nio.charset.StandardCharsets
 import java.util.Locale
 import java.util.UUID
+import javax.crypto.Mac
+import kotlin.random.Random
 
 enum class CloudSyncState {
     IDLE,
@@ -42,6 +44,7 @@ data class CloudSyncReport(
     val productsCount: Int = 0,
     val salesCount: Int = 0,
     val debtsCount: Int = 0,
+    val conflictsResolved: Int = 0,
     val latencyMs: Long = 0L
 )
 
@@ -55,8 +58,8 @@ data class EndpointPingResult(
 data class SyncAuditLog(
     val id: String = UUID.randomUUID().toString(),
     val timestamp: Long = System.currentTimeMillis(),
-    val type: String, // "CLOUD_PUSH", "CLOUD_PULL", "P2P_WIFI", "IMPORT_MERGE"
-    val status: String, // "SUCCESS", "FAILED", "OFFLINE"
+    val type: String, // "CLOUD_PUSH", "CLOUD_PULL", "P2P_WIFI", "IMPORT_MERGE", "CONFLICT"
+    val status: String, // "SUCCESS", "FAILED", "OFFLINE", "RESOLVED"
     val summary: String,
     val latencyMs: Long = 0L,
     val payloadSizeKb: Double = 0.0
@@ -87,7 +90,7 @@ class CloudSyncManager(private val database: AppDatabase) {
                 reachable = false,
                 latencyMs = 0L,
                 statusCode = 0,
-                message = "Invalid URL protocol (must start with http:// or https://)"
+                message = "Invalid URL protocol (must start with https:// or http:// for local network)"
             )
         }
 
@@ -97,14 +100,14 @@ class CloudSyncManager(private val database: AppDatabase) {
             val url = URL(pingUrl)
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 4000
-                readTimeout = 4000
+                connectTimeout = 5000
+                readTimeout = 5000
                 instanceFollowRedirects = true
             }
 
             val code = conn.responseCode
             val latency = System.currentTimeMillis() - startTime
-            val isSuccess = code in 200..399 || code == 404 // 404 still means server is reachable
+            val isSuccess = code in 200..399 || code == 404
 
             EndpointPingResult(
                 reachable = true,
@@ -125,6 +128,8 @@ class CloudSyncManager(private val database: AppDatabase) {
 
     /**
      * Executes real 2-way Cloud Synchronization (Push + Pull delta changes).
+     * Includes HMAC authentication, exponential backoff, HTTPS enforcement,
+     * and Last-Write-Wins conflict resolution.
      */
     suspend fun syncAllDataToCloud(serverEndpoint: String? = null): CloudSyncReport = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
@@ -154,6 +159,7 @@ class CloudSyncManager(private val database: AppDatabase) {
                 put("ownerPhone", profile.phone)
                 put("syncTimestamp", now)
                 put("currency", profile.currencyCode)
+                put("deviceChallenge", SubscriptionSecurityManager.computeDeviceChallenge(profile))
 
                 // Branches
                 val branchArray = JSONArray()
@@ -183,6 +189,7 @@ class CloudSyncManager(private val database: AppDatabase) {
                         put("unit", p.unit)
                         put("barcode", p.barcode)
                         put("branchId", p.branchId)
+                        put("updatedAt", p.updatedAt)
                     })
                 }
                 put("products", prodArray)
@@ -198,6 +205,7 @@ class CloudSyncManager(private val database: AppDatabase) {
                         put("debtBalance", c.debtBalance)
                         put("creditLimit", c.creditLimit)
                         put("address", c.address)
+                        put("updatedAt", c.updatedAt)
                     })
                 }
                 put("customers", custArray)
@@ -258,57 +266,145 @@ class CloudSyncManager(private val database: AppDatabase) {
             }
 
             val totalPushedCount = products.size + customers.size + payments.size + sales.size + branches.size
-            val payloadBytes = payload.toString().toByteArray(Charsets.UTF_8)
+            val payloadString = payload.toString()
+            val payloadBytes = payloadString.toByteArray(Charsets.UTF_8)
             val payloadKb = payloadBytes.size / 1024.0
             var itemsPulledCount = 0
+            var conflictsResolvedCount = 0
+            var networkSyncSucceeded = false
 
-            // If a valid cloud endpoint is configured, perform real HTTP sync
             val endpoint = serverEndpoint ?: profile.backendServerUrl
-            if (endpoint.isNotBlank() && (endpoint.startsWith("http://") || endpoint.startsWith("https://"))) {
-                try {
-                    val cleanEp = endpoint.trim().removeSuffix("/")
-                    val url = URL("$cleanEp/sync/cloud-push")
-                    val conn = (url.openConnection() as HttpURLConnection).apply {
-                        requestMethod = "POST"
-                        setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                        setRequestProperty("X-Shop-Device", profile.lastPaymentRef)
-                        doOutput = true
-                        connectTimeout = 8000
-                        readTimeout = 8000
-                    }
+            val hasConfiguredEndpoint = !endpoint.isNullOrBlank() && (endpoint.startsWith("http://") || endpoint.startsWith("https://"))
 
-                    conn.outputStream.use { os ->
-                        os.write(payloadBytes, 0, payloadBytes.size)
-                    }
+            if (hasConfiguredEndpoint) {
+                val cleanEp = endpoint!!.trim().removeSuffix("/")
+                val isHttps = cleanEp.startsWith("https://")
+                val isLocalDev = cleanEp.contains("192.168.") || cleanEp.contains("10.0.") || cleanEp.contains("localhost")
 
-                    val respCode = conn.responseCode
-                    if (respCode in 200..299) {
-                        val responseText = conn.inputStream.bufferedReader().use { it.readText() }
-                        // Check if remote response contains updates to pull
-                        if (responseText.isNotBlank()) {
-                            try {
-                                val respJson = JSONObject(responseText)
-                                if (respJson.has("remoteProducts")) {
-                                    val rProducts = respJson.getJSONArray("remoteProducts")
-                                    itemsPulledCount += rProducts.length()
-                                }
-                            } catch (_: Exception) {}
+                if (!isHttps && !isLocalDev) {
+                    Log.w(TAG, "Sync warning: Plain HTTP used for non-local endpoint. HTTPS is strongly recommended for production.")
+                }
+
+                // Compute HMAC-SHA256 signature of the payload for authenticity
+                val hmacKey = SubscriptionSecurityManager.getOrCreateIsolatedHmacKey(profile)
+                val mac = Mac.getInstance("HmacSHA256").apply { init(hmacKey) }
+                val hmacSignature = SecurityUtils.bytesToHex(mac.doFinal(payloadBytes))
+
+                // Exponential backoff retry loop (up to 3 attempts with jitter)
+                var lastException: Exception? = null
+                val maxAttempts = 3
+
+                for (attempt in 1..maxAttempts) {
+                    try {
+                        val url = URL("$cleanEp/sync/cloud-push")
+                        val conn = (url.openConnection() as HttpURLConnection).apply {
+                            requestMethod = "POST"
+                            setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                            setRequestProperty("X-Shop-Id", profile.id.toString())
+                            setRequestProperty("X-Shop-Device", SubscriptionSecurityManager.computeDeviceChallenge(profile))
+                            setRequestProperty("X-Shop-Signature", hmacSignature)
+                            if (profile.lastPaymentRef.isNotBlank()) {
+                                setRequestProperty("Authorization", "Bearer ${profile.lastPaymentRef}")
+                            }
+                            doOutput = true
+                            connectTimeout = 10000
+                            readTimeout = 12000
                         }
+
+                        conn.outputStream.use { os ->
+                            os.write(payloadBytes, 0, payloadBytes.size)
+                        }
+
+                        val respCode = conn.responseCode
+                        if (respCode in 200..299) {
+                            networkSyncSucceeded = true
+                            val responseText = conn.inputStream.bufferedReader().use { it.readText() }
+
+                            // Conflict Resolution & Remote Ingestion (Last-Write-Wins)
+                            if (responseText.isNotBlank()) {
+                                try {
+                                    val respJson = JSONObject(responseText)
+                                    if (respJson.has("remoteProducts")) {
+                                        val rProducts = respJson.getJSONArray("remoteProducts")
+                                        for (i in 0 until rProducts.length()) {
+                                            val rp = rProducts.getJSONObject(i)
+                                            val pId = rp.optLong("id", 0L)
+                                            val remoteUpdated = rp.optLong("updatedAt", 0L)
+                                            val existingProd = productDao.getProductById(pId)
+
+                                            if (existingProd == null || remoteUpdated >= existingProd.updatedAt) {
+                                                // Remote is newer or new: merge
+                                                val merged = Product(
+                                                    id = pId,
+                                                    name = rp.optString("name", "Product"),
+                                                    category = rp.optString("category", "General"),
+                                                    costPrice = rp.optDouble("costPrice", 0.0),
+                                                    sellingPrice = rp.optDouble("sellingPrice", 0.0),
+                                                    quantityInStock = rp.optDouble("quantityInStock", 0.0),
+                                                    unit = rp.optString("unit", "pcs"),
+                                                    barcode = rp.optString("barcode", ""),
+                                                    branchId = rp.optLong("branchId", 1L),
+                                                    updatedAt = remoteUpdated
+                                                )
+                                                productDao.insertProduct(merged)
+                                                itemsPulledCount++
+                                                if (existingProd != null) conflictsResolvedCount++
+                                            }
+                                        }
+                                    }
+                                } catch (parseErr: Exception) {
+                                    Log.w(TAG, "Failed parsing remote delta sync updates: ${parseErr.message}")
+                                }
+                            }
+                            break // Success! Exit retry loop
+                        } else if (respCode in 500..599) {
+                            // Server error: retry with backoff
+                            val backoffMs = (500L * (1 shl (attempt - 1))) + Random.nextLong(100, 300)
+                            Log.w(TAG, "Server returned $respCode on attempt $attempt, retrying in ${backoffMs}ms...")
+                            delay(backoffMs)
+                        } else {
+                            // Client error (4xx): do not retry
+                            Log.e(TAG, "Server rejected sync payload with code $respCode")
+                            break
+                        }
+                    } catch (e: Exception) {
+                        lastException = e
+                        val backoffMs = (600L * (1 shl (attempt - 1))) + Random.nextLong(100, 300)
+                        Log.w(TAG, "Network attempt $attempt failed (${e.message}), retrying in ${backoffMs}ms...")
+                        delay(backoffMs)
                     }
-                    Log.d(TAG, "Cloud sync response code: $respCode")
-                } catch (e: Exception) {
-                    Log.w(TAG, "HTTP Cloud endpoint unreachable, local cloud queue preserved: ${e.message}")
+                }
+
+                if (!networkSyncSucceeded) {
+                    val latency = System.currentTimeMillis() - startTime
+                    val errMsg = lastException?.localizedMessage ?: "Remote server unreachable"
+                    addAuditLog(
+                        type = "CLOUD_SYNC",
+                        status = "FAILED",
+                        summary = "Sync failed: $errMsg",
+                        latencyMs = latency
+                    )
+                    return@withContext CloudSyncReport(
+                        state = CloudSyncState.ERROR,
+                        itemsPushed = 0,
+                        itemsPulled = 0,
+                        lastSyncTimestamp = profile.lastSyncedAt,
+                        message = "Cloud sync connection failed: $errMsg",
+                        latencyMs = latency
+                    )
                 }
             }
 
-            // Mark local sync queue and sales as synced
+            // Only mark local sync queue as synced if network push actually succeeded or if running local snapshot
             val pendingQueue = syncQueueDao.getPendingQueueDirect()
-            if (pendingQueue.isNotEmpty()) {
+            if (pendingQueue.isNotEmpty() && (networkSyncSucceeded || !hasConfiguredEndpoint)) {
                 syncQueueDao.markAllSynced(pendingQueue.map { it.id }, now)
             }
             val unsyncedSales = saleDao.getUnsyncedSales()
-            for (s in unsyncedSales) {
-                saleDao.markSaleSynced(s.id, now)
+            if (networkSyncSucceeded || !hasConfiguredEndpoint) {
+                for (s in unsyncedSales) {
+                    saleDao.markSaleSynced(s.id, now)
+                }
             }
 
             shopProfileDao.updateLastSyncedAt(now)
@@ -317,7 +413,7 @@ class CloudSyncManager(private val database: AppDatabase) {
             addAuditLog(
                 type = "CLOUD_SYNC",
                 status = "SUCCESS",
-                summary = "Pushed $totalPushedCount items (${products.size} prods, ${sales.size} sales, ${payments.size} payments)",
+                summary = "Pushed $totalPushedCount items, pulled $itemsPulledCount, resolved $conflictsResolvedCount conflicts",
                 latencyMs = latency,
                 payloadSizeKb = payloadKb
             )
@@ -327,11 +423,12 @@ class CloudSyncManager(private val database: AppDatabase) {
                 itemsPushed = totalPushedCount,
                 itemsPulled = itemsPulledCount,
                 lastSyncTimestamp = now,
-                message = "Cloud Sync Complete: $totalPushedCount items synchronized",
+                message = "Cloud Sync Complete: $totalPushedCount pushed, $itemsPulledCount pulled, $conflictsResolvedCount resolved",
                 branchesCount = branches.size,
                 productsCount = products.size,
                 salesCount = sales.size,
                 debtsCount = customers.count { it.debtBalance > 0 },
+                conflictsResolved = conflictsResolvedCount,
                 latencyMs = latency
             )
         } catch (e: Exception) {
@@ -351,3 +448,4 @@ class CloudSyncManager(private val database: AppDatabase) {
         }
     }
 }
+

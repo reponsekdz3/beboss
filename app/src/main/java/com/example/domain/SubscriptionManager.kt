@@ -83,7 +83,9 @@ class SubscriptionManager(
         provider: String,
         branchCount: Int,
         workerCount: Int,
-        durationMonths: Int
+        durationMonths: Int,
+        smsTransactionReference: String? = null,
+        alreadyUsedRefs: Set<String> = emptySet()
     ): PaymentProcessingResult = withContext(Dispatchers.IO) {
         val result = OfflineSubscriptionManager.processDirectMoMoPayment(
             shopProfile = shopProfile,
@@ -91,7 +93,9 @@ class SubscriptionManager(
             provider = provider,
             branchCount = branchCount,
             workerCount = workerCount,
-            durationMonths = durationMonths
+            durationMonths = durationMonths,
+            smsTransactionReference = smsTransactionReference,
+            alreadyUsedRefs = alreadyUsedRefs
         )
 
         if (result.isSuccess) {
