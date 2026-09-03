@@ -466,9 +466,67 @@ class BeBossRepository(private val database: AppDatabase) {
     }
 
     suspend fun clearTransactionalDataOnly() = withContext(Dispatchers.IO) {
+        clearAllSalesData()
+    }
+
+    suspend fun clearAllProducts() = withContext(Dispatchers.IO) {
+        inventoryManager.clearAllProducts()
+    }
+
+    suspend fun clearAllCustomers() = withContext(Dispatchers.IO) {
+        customerDebtManager.clearAllCustomers()
+    }
+
+    suspend fun deleteSale(saleId: String) = withContext(Dispatchers.IO) {
+        salesManager.deleteSale(saleId)
+    }
+
+    suspend fun clearAllSalesData() = withContext(Dispatchers.IO) {
         salesManager.clearAllSales()
         customerPaymentDao.clearAllPayments()
+        purchaseDao.clearAllPurchases()
+        stockTransferDao.clearAllTransfers()
         syncQueueDao.clearQueue()
+    }
+
+    suspend fun resetWholeApp(context: Context) = withContext(Dispatchers.IO) {
+        // 1. Wipe all transactional records
+        salesManager.clearAllSales()
+        customerPaymentDao.clearAllPayments()
+        purchaseDao.clearAllPurchases()
+        stockTransferDao.clearAllTransfers()
+        syncQueueDao.clearQueue()
+        redeemedVoucherDao.clearAllVouchers()
+
+        // 2. Wipe master products and customers
+        inventoryManager.clearAllProducts()
+        customerDebtManager.clearAllCustomers()
+
+        // 3. Reset shop profile to clean fresh store
+        val freshProfile = ShopProfile(
+            id = 1,
+            name = "Store Manager",
+            phone = "",
+            email = "",
+            shopName = "My Retail Store",
+            address = "Kigali, Rwanda",
+            currencyCode = "RWF",
+            currencySymbol = "FRw",
+            taxRate = 18.0,
+            tinNumber = "",
+            receiptFooter = "Thank you for shopping with us!",
+            isOnlineSyncEnabled = false,
+            backendServerUrl = "https://api.beboss.app/v1",
+            subscriptionStatus = "ACTIVE",
+            monthlyFeeRwf = 5000,
+            subscriptionExpiresAt = System.currentTimeMillis() + (30L * 24 * 60 * 60 * 1000L),
+            trialStartedAt = System.currentTimeMillis()
+        )
+        shopProfileDao.insertOrUpdateProfile(freshProfile)
+
+        // 4. Ensure fresh default admin user & primary branch
+        ensureDefaultAdminUser()
+        ensureDefaultBranches()
     }
 
     // -------------------------------------------------------------

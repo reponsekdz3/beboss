@@ -335,6 +335,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onSaveProduct = { p -> viewModel.saveProduct(p) },
                                 onAdjustStock = { pId, delta, reason -> viewModel.adjustStock(pId, delta, reason) },
                                 onDeleteProduct = { pId -> viewModel.deleteProduct(pId) },
+                                onClearAllProducts = { viewModel.clearAllProducts() },
                                 onRecordPurchase = { prodId, qty, cost, sellPrice, supplier, phone, status, inv, notes ->
                                     viewModel.recordPurchaseOrder(
                                         productId = prodId,
@@ -373,7 +374,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 allPayments = allCustomerPayments,
                                 onSaveCustomer = { c -> viewModel.saveCustomer(c) },
                                 onRecordPayment = { cId, amt -> viewModel.recordDebtPayment(cId, amt) },
-                                onDeleteCustomer = { cId -> viewModel.deleteCustomer(cId) }
+                                onDeleteCustomer = { cId -> viewModel.deleteCustomer(cId) },
+                                onClearAllCustomers = { viewModel.clearAllCustomers() }
                             )
                         }
 
@@ -381,7 +383,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                             SalesHistoryScreen(
                                 sales = allSales,
                                 shopProfile = shopProfile,
-                                onOpenReceipt = { saleId -> viewModel.openReceipt(saleId) }
+                                onOpenReceipt = { saleId -> viewModel.openReceipt(saleId) },
+                                onDeleteSale = { saleId -> viewModel.deleteSale(saleId) }
                             )
                         }
 
@@ -422,6 +425,9 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onOptimizeDatabase = { viewModel.optimizeDatabase() },
                                 onVerifyDatabaseIntegrity = { viewModel.verifyDatabaseIntegrity() },
                                 onClearTransactionalData = { viewModel.clearTransactionalDataOnly() },
+                                onClearAllProducts = { viewModel.clearAllProducts() },
+                                onClearAllCustomers = { viewModel.clearAllCustomers() },
+                                onResetWholeApp = { viewModel.resetWholeApp() },
                                 onSeedSampleData = { viewModel.seedSampleCatalog() },
                                 onSaveBranch = { b -> viewModel.saveBranch(b) },
                                 onDeleteBranch = { bId -> viewModel.deleteBranch(bId) },

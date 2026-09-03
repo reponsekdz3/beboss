@@ -54,4 +54,10 @@ interface CustomerDao {
 
     @Query("SELECT COALESCE(SUM(debtBalance), 0.0) FROM customers WHERE isDeleted = 0")
     fun getTotalOutstandingDebt(): Flow<Double>
+
+    @Query("DELETE FROM customers WHERE id = :customerId")
+    suspend fun deleteCustomerPermanently(customerId: String)
+
+    @Query("DELETE FROM customers")
+    suspend fun clearAllCustomers()
 }

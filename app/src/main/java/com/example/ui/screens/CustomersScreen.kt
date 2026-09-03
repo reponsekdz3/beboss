@@ -122,7 +122,8 @@ fun CustomersScreen(
     allPayments: List<CustomerPayment> = emptyList(),
     onSaveCustomer: (Customer) -> Unit,
     onRecordPayment: (String, Double) -> Unit,
-    onDeleteCustomer: (String) -> Unit
+    onDeleteCustomer: (String) -> Unit,
+    onClearAllCustomers: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
@@ -133,6 +134,7 @@ fun CustomersScreen(
     var customerToEdit by remember { mutableStateOf<Customer?>(null) }
     var customerForPayment by remember { mutableStateOf<Customer?>(null) }
     var customerToDelete by remember { mutableStateOf<Customer?>(null) }
+    var showClearAllCustomersDialog by remember { mutableStateOf(false) }
     var isAddingNew by remember { mutableStateOf(false) }
     var showBulkContactsDialog by remember { mutableStateOf(false) }
 
@@ -241,6 +243,20 @@ fun CustomersScreen(
                                 Icon(Icons.Default.Contacts, contentDescription = null, modifier = Modifier.size(15.dp), tint = DarkNavy)
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("Import Contacts", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = DarkNavy)
+                            }
+
+                            if (onClearAllCustomers != null && customers.isNotEmpty()) {
+                                OutlinedButton(
+                                    onClick = { showClearAllCustomersDialog = true },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = LossRed)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(15.dp), tint = LossRed)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Clear All", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LossRed)
+                                }
                             }
                         }
                     }
@@ -419,6 +435,13 @@ fun CustomersScreen(
                 isAddingNew = false
                 customerToEdit = null
             },
+            onDelete = if (customerToEdit != null) {
+                {
+                    val toDelete = customerToEdit
+                    customerToEdit = null
+                    customerToDelete = toDelete
+                }
+            } else null,
             onDismiss = {
                 isAddingNew = false
                 customerToEdit = null
@@ -481,6 +504,37 @@ fun CustomersScreen(
             },
             dismissButton = {
                 OutlinedButton(onClick = { customerToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Clear All Customers Dialog
+    if (showClearAllCustomersDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearAllCustomersDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Delete, contentDescription = null, tint = LossRed)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Wipe All Customers?", fontWeight = FontWeight.Bold, color = LossRed)
+                }
+            },
+            text = { Text("Are you sure you want to delete ALL customers? All debts and customer ledgers will be permanently removed.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showClearAllCustomersDialog = false
+                        onClearAllCustomers?.invoke()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = LossRed)
+                ) {
+                    Text("Wipe All Customers")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showClearAllCustomersDialog = false }) {
                     Text("Cancel")
                 }
             }
@@ -671,9 +725,9 @@ private fun ExcelCustomerRow(
                 }
             }
 
-            // Action Icons: Pay (if debt), Reminder, Call, Edit
+            // Action Icons: Pay (if debt), Reminder, Call, Edit, Delete
             Row(
-                modifier = Modifier.width(96.dp),
+                modifier = Modifier.width(124.dp),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -727,6 +781,18 @@ private fun ExcelCustomerRow(
                         Icon(Icons.Default.Edit, contentDescription = "Edit", tint = InkDark, modifier = Modifier.size(14.dp))
                     }
                 }
+                Spacer(modifier = Modifier.width(3.dp))
+
+                Surface(
+                    onClick = onDelete,
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFFFEE2E2),
+                    modifier = Modifier.size(26.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete Customer", tint = LossRed, modifier = Modifier.size(14.dp))
+                    }
+                }
             }
         }
     }
@@ -753,6 +819,7 @@ fun CustomerFormDialog(
     initialCustomer: Customer?,
     shopProfile: ShopProfile,
     onSave: (Customer) -> Unit,
+    onDelete: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -963,6 +1030,20 @@ fun CustomerFormDialog(
                     enabled = name.isNotBlank()
                 ) {
                     Text("Save Customer Profile", fontWeight = FontWeight.Bold)
+                }
+
+                if (initialCustomer != null && onDelete != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onDelete,
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = LossRed)
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, tint = LossRed, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Delete Customer from System", color = LossRed, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
                 }
             }
         }

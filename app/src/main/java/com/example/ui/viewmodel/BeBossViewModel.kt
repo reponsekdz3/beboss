@@ -1334,6 +1334,21 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun deleteSale(saleId: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteSale(saleId)
+                refreshDatabaseStats()
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Ibyagurishijwe byasibwe, ububiko bwasubijweho."
+                    else "Sale transaction deleted and stock restored."
+                _snackbarMessage.emit(msg)
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Failed to delete sale: ${e.message}")
+            }
+        }
+    }
+
     // ------------------------------------------------------------------------
     // ANALYTICS & REPORTS
     // ------------------------------------------------------------------------
@@ -1458,10 +1473,70 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             try {
                 repository.clearTransactionalDataOnly()
+                clearCart()
+                closeReceipt()
                 refreshDatabaseStats(targetCtx)
-                _snackbarMessage.emit("All sales transactions reset! Product catalog & customers preserved.")
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Amateka yose yo kugurisha yasibwe! Ibicuruzwa n'abakiriya byagumyeho."
+                    else "All sales & transaction history reset! Products & customers preserved."
+                _snackbarMessage.emit(msg)
             } catch (e: Exception) {
                 _snackbarMessage.emit("Failed to reset transactions: ${e.message}")
+            }
+        }
+    }
+
+    fun clearAllProducts(context: android.content.Context? = null) {
+        val targetCtx = context ?: getApplication<Application>()
+        viewModelScope.launch {
+            try {
+                repository.clearAllProducts()
+                clearCart()
+                _productSearchQuery.value = ""
+                refreshDatabaseStats(targetCtx)
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Ibicuruzwa byose byasibwe mu bubiko!"
+                    else "All products and inventory stock wiped from database!"
+                _snackbarMessage.emit(msg)
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Failed to clear products: ${e.message}")
+            }
+        }
+    }
+
+    fun clearAllCustomers(context: android.content.Context? = null) {
+        val targetCtx = context ?: getApplication<Application>()
+        viewModelScope.launch {
+            try {
+                repository.clearAllCustomers()
+                _customerSearchQuery.value = ""
+                refreshDatabaseStats(targetCtx)
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Abakiriya bose n'imyenda byasibwe!"
+                    else "All customers and credit debt records cleared!"
+                _snackbarMessage.emit(msg)
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Failed to clear customers: ${e.message}")
+            }
+        }
+    }
+
+    fun resetWholeApp(context: android.content.Context? = null) {
+        val targetCtx = context ?: getApplication<Application>()
+        viewModelScope.launch {
+            try {
+                repository.resetWholeApp(targetCtx)
+                clearCart()
+                closeReceipt()
+                _productSearchQuery.value = ""
+                _customerSearchQuery.value = ""
+                refreshDatabaseStats(targetCtx)
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Porogaramu yose yasubijwe ku ntangiriro (Factory Reset)! Amakuru yose yasibwe."
+                    else "Whole app factory reset complete! All products, customers & transactions wiped clean."
+                _snackbarMessage.emit(msg)
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Failed to reset app: ${e.message}")
             }
         }
     }

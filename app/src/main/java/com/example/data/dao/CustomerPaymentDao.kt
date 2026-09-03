@@ -27,6 +27,9 @@ interface CustomerPaymentDao {
     @Query("DELETE FROM customer_payments")
     suspend fun clearAllPayments()
 
+    @Query("DELETE FROM customer_payments WHERE customerId = :customerId")
+    suspend fun deletePaymentsForCustomer(customerId: String)
+
     @Query("SELECT COUNT(*) FROM customer_payments")
     suspend fun getPaymentCount(): Int
 

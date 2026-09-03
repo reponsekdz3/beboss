@@ -123,6 +123,7 @@ fun InventoryScreen(
     onSaveProduct: (Product) -> Unit,
     onAdjustStock: (String, Double, String) -> Unit,
     onDeleteProduct: (String) -> Unit,
+    onClearAllProducts: (() -> Unit)? = null,
     onRecordPurchase: ((productId: String, qty: Double, cost: Double, sellPrice: Double?, supplier: String, phone: String, status: String, invoice: String, notes: String) -> Unit)? = null,
     onDeletePurchase: ((String) -> Unit)? = null
 ) {
@@ -137,6 +138,7 @@ fun InventoryScreen(
     var productToEdit by remember { mutableStateOf<Product?>(null) }
     var productToAdjust by remember { mutableStateOf<Product?>(null) }
     var productToDelete by remember { mutableStateOf<Product?>(null) }
+    var showClearAllProductsDialog by remember { mutableStateOf(false) }
     var isAddingNewProduct by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
 
@@ -430,6 +432,20 @@ fun InventoryScreen(
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("PDF Report", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LossRed)
                             }
+
+                            if (onClearAllProducts != null && products.isNotEmpty()) {
+                                OutlinedButton(
+                                    onClick = { showClearAllProductsDialog = true },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = LossRed)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(15.dp), tint = LossRed)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Clear All", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LossRed)
+                                }
+                            }
                         }
                     }
                 }
@@ -616,6 +632,13 @@ fun InventoryScreen(
                 isAddingNewProduct = false
                 productToEdit = null
             },
+            onDelete = if (productToEdit != null) {
+                {
+                    val toDelete = productToEdit
+                    productToEdit = null
+                    productToDelete = toDelete
+                }
+            } else null,
             onDismiss = {
                 isAddingNewProduct = false
                 productToEdit = null
@@ -641,7 +664,7 @@ fun InventoryScreen(
         AlertDialog(
             onDismissRequest = { productToDelete = null },
             title = { Text("Delete Product", fontWeight = FontWeight.Bold) },
-            text = { Text("Are you sure you want to delete '${productToDelete!!.name}'? This will remove it from the Excel stock sheet.") },
+            text = { Text("Are you sure you want to delete '${productToDelete!!.name}'? This will permanently remove it from your stock sheet.") },
             confirmButton = {
                 Button(
                     onClick = {
@@ -655,6 +678,36 @@ fun InventoryScreen(
             },
             dismissButton = {
                 OutlinedButton(onClick = { productToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showClearAllProductsDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearAllProductsDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Delete, contentDescription = null, tint = LossRed)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Wipe All Products?", fontWeight = FontWeight.Bold, color = LossRed)
+                }
+            },
+            text = { Text("Are you sure you want to delete ALL products from your stock sheet? This will completely clear your inventory catalog.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showClearAllProductsDialog = false
+                        onClearAllProducts?.invoke()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = LossRed)
+                ) {
+                    Text("Wipe All Products")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showClearAllProductsDialog = false }) {
                     Text("Cancel")
                 }
             }
@@ -764,7 +817,7 @@ private fun ExcelTableHeaderRow(
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
-                modifier = Modifier.width(72.dp),
+                modifier = Modifier.width(100.dp),
                 textAlign = TextAlign.Center
             )
         }
@@ -910,7 +963,7 @@ private fun ExcelProductRow(
 
             // Actions Menu
             Row(
-                modifier = Modifier.width(72.dp),
+                modifier = Modifier.width(100.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -926,6 +979,12 @@ private fun ExcelProductRow(
                 ) {
                     Icon(Icons.Default.Edit, contentDescription = "Edit", tint = InkDark, modifier = Modifier.size(16.dp))
                 }
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete Product", tint = LossRed, modifier = Modifier.size(16.dp))
+                }
             }
         }
     }
@@ -937,6 +996,7 @@ fun ProductFormDialog(
     categories: List<String>,
     shopProfile: ShopProfile,
     onSave: (Product) -> Unit,
+    onDelete: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     var name by remember { mutableStateOf(initialProduct?.name ?: "") }
@@ -1149,6 +1209,20 @@ fun ProductFormDialog(
                     enabled = name.isNotBlank()
                 ) {
                     Text("Save to Excel Sheet", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                }
+
+                if (initialProduct != null && onDelete != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onDelete,
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = LossRed)
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, tint = LossRed, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Delete Product from Stock", color = LossRed, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
                 }
             }
         }

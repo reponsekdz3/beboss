@@ -20,4 +20,7 @@ interface RedeemedVoucherDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRedeemedVoucher(voucher: RedeemedVoucher)
+
+    @Query("DELETE FROM redeemed_vouchers")
+    suspend fun clearAllVouchers()
 }

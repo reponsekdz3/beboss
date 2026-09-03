@@ -21,14 +21,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -50,6 +55,7 @@ import com.example.data.model.ShopProfile
 import com.example.ui.theme.BackgroundLight
 import com.example.ui.theme.InkDark
 import com.example.ui.theme.InkMedium
+import com.example.ui.theme.LossRed
 import com.example.ui.theme.OrangeLight
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
@@ -59,10 +65,12 @@ import com.example.util.ReceiptGenerator
 fun SalesHistoryScreen(
     sales: List<Sale>,
     shopProfile: ShopProfile,
-    onOpenReceipt: (String) -> Unit
+    onOpenReceipt: (String) -> Unit,
+    onDeleteSale: ((String) -> Unit)? = null
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedPaymentMethod by remember { mutableStateOf("All") }
+    var saleToDelete by remember { mutableStateOf<Sale?>(null) }
 
     val filtered = sales.filter { s ->
         val matchesMethod = selectedPaymentMethod == "All" || s.paymentMethod.equals(selectedPaymentMethod, ignoreCase = true)
@@ -205,24 +213,78 @@ fun SalesHistoryScreen(
                                 }
                             }
 
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text(
-                                    text = ReceiptGenerator.formatMoney(sale.totalAmount, shopProfile),
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = InkDark
-                                )
-                                Text(
-                                    text = "+${ReceiptGenerator.formatMoney(sale.totalProfit, shopProfile)} profit",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = ProfitGreen
-                                )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = ReceiptGenerator.formatMoney(sale.totalAmount, shopProfile),
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = InkDark
+                                    )
+                                    Text(
+                                        text = "+${ReceiptGenerator.formatMoney(sale.totalProfit, shopProfile)} profit",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = ProfitGreen
+                                    )
+                                }
+
+                                if (onDeleteSale != null) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    IconButton(
+                                        onClick = { saleToDelete = sale },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = "Delete / Void Sale",
+                                            tint = LossRed.copy(alpha = 0.8f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    if (saleToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { saleToDelete = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Delete, contentDescription = null, tint = LossRed)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Void & Delete Sale?", fontWeight = FontWeight.Bold, color = LossRed)
+                }
+            },
+            text = {
+                Text(
+                    "Are you sure you want to delete receipt #${saleToDelete!!.receiptNumber}?\n\n• Items sold will be returned to inventory stock\n• Customer debt will be recalculated if on credit\n• Financial ledgers will be updated."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val id = saleToDelete!!.id
+                        saleToDelete = null
+                        onDeleteSale?.invoke(id)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = LossRed)
+                ) {
+                    Text("Void & Delete Sale", color = Color.White)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { saleToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }

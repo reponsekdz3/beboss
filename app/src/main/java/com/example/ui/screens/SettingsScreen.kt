@@ -182,6 +182,9 @@ fun SettingsScreen(
     onOptimizeDatabase: () -> Unit = {},
     onVerifyDatabaseIntegrity: () -> Unit = {},
     onClearTransactionalData: () -> Unit = {},
+    onClearAllProducts: () -> Unit = {},
+    onClearAllCustomers: () -> Unit = {},
+    onResetWholeApp: () -> Unit = {},
     onSeedSampleData: () -> Unit = {},
     onLockApp: () -> Unit = {},
     onLogout: () -> Unit = {},
@@ -226,6 +229,9 @@ fun SettingsScreen(
     var showPermissionsDialog by remember { mutableStateOf(false) }
     var showThermalPreviewDialog by remember { mutableStateOf(false) }
     var showResetTransactionsDialog by remember { mutableStateOf(false) }
+    var showClearProductsDialog by remember { mutableStateOf(false) }
+    var showClearCustomersDialog by remember { mutableStateOf(false) }
+    var showResetWholeAppDialog by remember { mutableStateOf(false) }
     var permissionsUpdated by remember { mutableStateOf(false) }
     var showLogoutConfirm by remember { mutableStateOf(false) }
 
@@ -1521,6 +1527,50 @@ fun SettingsScreen(
                             Text("Reset Sales History", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Wipe Catalog & Wipe Customers Buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { showClearProductsDialog = true },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = LossRed)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(15.dp), tint = LossRed)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Wipe All Products", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = { showClearCustomersDialog = true },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = LossRed)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(15.dp), tint = LossRed)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Wipe All Customers", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Complete Factory Reset Button
+                    Button(
+                        onClick = { showResetWholeAppDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = LossRed)
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Factory Reset Whole App (Wipe All)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
                 }
             }
         }
@@ -2056,6 +2106,114 @@ fun SettingsScreen(
             },
             dismissButton = {
                 OutlinedButton(onClick = { showResetTransactionsDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Clear All Products Dialog
+    if (showClearProductsDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearProductsDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Delete, contentDescription = null, tint = LossRed)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Wipe All Products?", fontWeight = FontWeight.Bold, color = LossRed, fontSize = 17.sp)
+                }
+            },
+            text = {
+                Text(
+                    "Are you sure you want to delete ALL products from your stock sheet?\n\nThis will permanently remove all catalog items, inventory counts, and barcode mappings from the database."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showClearProductsDialog = false
+                        onClearAllProducts()
+                        Toast.makeText(context, "All products wiped from database.", Toast.LENGTH_LONG).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = LossRed)
+                ) {
+                    Text("Wipe All Products", color = Color.White)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showClearProductsDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Clear All Customers Dialog
+    if (showClearCustomersDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearCustomersDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Delete, contentDescription = null, tint = LossRed)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Wipe All Customers?", fontWeight = FontWeight.Bold, color = LossRed, fontSize = 17.sp)
+                }
+            },
+            text = {
+                Text(
+                    "Are you sure you want to delete ALL customers?\n\nThis will permanently remove all customer contact cards, ledger records, and debt history."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showClearCustomersDialog = false
+                        onClearAllCustomers()
+                        Toast.makeText(context, "All customers wiped from database.", Toast.LENGTH_LONG).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = LossRed)
+                ) {
+                    Text("Wipe All Customers", color = Color.White)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showClearCustomersDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Factory Reset Whole App Dialog
+    if (showResetWholeAppDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetWholeAppDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Delete, contentDescription = null, tint = LossRed)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Factory Reset Whole App?", fontWeight = FontWeight.Bold, color = LossRed, fontSize = 17.sp)
+                }
+            },
+            text = {
+                Text(
+                    "WARNING: This is an irreversible factory reset.\n\n• ALL products and inventory stock will be erased\n• ALL customers and debt records will be wiped\n• ALL sales history, receipts, payments, and purchases will be cleared\n• Shop profile and users will be reset to default factory state.\n\nProceed only if you want a completely fresh start."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showResetWholeAppDialog = false
+                        onResetWholeApp()
+                        Toast.makeText(context, "Whole app factory reset completed.", Toast.LENGTH_LONG).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = LossRed)
+                ) {
+                    Text("Factory Reset Everything", color = Color.White)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showResetWholeAppDialog = false }) {
                     Text("Cancel")
                 }
             }

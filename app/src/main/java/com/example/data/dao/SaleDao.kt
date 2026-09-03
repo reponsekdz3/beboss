@@ -71,6 +71,12 @@ interface SaleDao {
     @Query("DELETE FROM sale_items")
     suspend fun clearAllSaleItems()
 
+    @Query("DELETE FROM sales WHERE id = :saleId")
+    suspend fun deleteSale(saleId: String)
+
+    @Query("DELETE FROM sale_items WHERE saleId = :saleId")
+    suspend fun deleteSaleItems(saleId: String)
+
     @Query("""
         SELECT si.productId, si.productName, SUM(si.quantitySold) as totalQuantity, SUM(si.subtotal) as totalRevenue, SUM(si.profit) as totalProfit 
         FROM sale_items si 

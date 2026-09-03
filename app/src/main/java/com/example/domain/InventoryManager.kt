@@ -73,13 +73,25 @@ class InventoryManager(
     }
 
     suspend fun deleteProduct(productId: String) = withContext(Dispatchers.IO) {
-        productDao.softDeleteProduct(productId)
+        productDao.deleteProductPermanently(productId)
         syncQueueDao.enqueue(
             SyncQueueItem(
                 tableName = "products",
                 recordId = productId,
                 operation = "DELETE",
                 payloadJson = """{"id":"$productId"}"""
+            )
+        )
+    }
+
+    suspend fun clearAllProducts() = withContext(Dispatchers.IO) {
+        productDao.clearAllProducts()
+        syncQueueDao.enqueue(
+            SyncQueueItem(
+                tableName = "products",
+                recordId = "ALL",
+                operation = "DELETE_ALL",
+                payloadJson = "{}"
             )
         )
     }

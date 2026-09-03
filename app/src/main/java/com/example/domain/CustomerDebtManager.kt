@@ -94,13 +94,27 @@ class CustomerDebtManager(
     }
 
     suspend fun deleteCustomer(customerId: String) = withContext(Dispatchers.IO) {
-        customerDao.softDeleteCustomer(customerId)
+        customerDao.deleteCustomerPermanently(customerId)
+        customerPaymentDao.deletePaymentsForCustomer(customerId)
         syncQueueDao.enqueue(
             SyncQueueItem(
                 tableName = "customers",
                 recordId = customerId,
                 operation = "DELETE",
                 payloadJson = """{"id":"$customerId"}"""
+            )
+        )
+    }
+
+    suspend fun clearAllCustomers() = withContext(Dispatchers.IO) {
+        customerDao.clearAllCustomers()
+        customerPaymentDao.clearAllPayments()
+        syncQueueDao.enqueue(
+            SyncQueueItem(
+                tableName = "customers",
+                recordId = "ALL",
+                operation = "DELETE_ALL",
+                payloadJson = "{}"
             )
         )
     }

@@ -141,6 +141,35 @@ class SalesManager(
         sale
     }
 
+    suspend fun deleteSale(saleId: String, restockInventory: Boolean = true) = withContext(Dispatchers.IO) {
+        val sale = saleDao.getSaleById(saleId) ?: return@withContext
+        val items = saleDao.getItemsForSale(saleId)
+        val now = System.currentTimeMillis()
+
+        if (restockInventory) {
+            for (item in items) {
+                productDao.incrementStock(item.productId, item.quantitySold, now)
+            }
+        }
+
+        val unpaidDebt = (sale.totalAmount - sale.amountPaid).coerceAtLeast(0.0)
+        if (sale.customerId != null && unpaidDebt > 0.0) {
+            customerDao.recordDebtPayment(sale.customerId, unpaidDebt, now)
+        }
+
+        saleDao.deleteSaleItems(saleId)
+        saleDao.deleteSale(saleId)
+
+        syncQueueDao.enqueue(
+            SyncQueueItem(
+                tableName = "sales",
+                recordId = saleId,
+                operation = "DELETE",
+                payloadJson = """{"deleted":true,"saleId":"$saleId"}"""
+            )
+        )
+    }
+
     suspend fun clearAllSales() = withContext(Dispatchers.IO) {
         saleDao.clearAllSales()
         saleDao.clearAllSaleItems()
