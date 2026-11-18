@@ -150,6 +150,18 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     val databaseStats by viewModel.databaseStats.collectAsState()
     val isOptimizingDb by viewModel.isOptimizingDb.collectAsState()
     val stockTransfers by viewModel.allStockTransfers.collectAsState()
+    val paymentVerificationRequests by viewModel.paymentVerificationRequests.collectAsState()
+    val discoveredHubs by viewModel.discoveredHubs.collectAsState()
+    val isDiscoveringHubs by viewModel.isDiscoveringHubs.collectAsState()
+    val peerSyncEvents by viewModel.peerSyncEvents.collectAsState()
+    val adminSession by viewModel.adminSession.collectAsState()
+    val adminAuthError by viewModel.adminAuthError.collectAsState()
+    val isAdminAuthenticating by viewModel.isAdminAuthenticating.collectAsState()
+    val adminPaymentRequests by viewModel.adminPaymentRequests.collectAsState()
+    val adminShopAccounts by viewModel.adminShopAccounts.collectAsState()
+    val adminUnlockCodes by viewModel.adminUnlockCodes.collectAsState()
+    val adminAuditLogs by viewModel.adminAuditLogs.collectAsState()
+    val isAdminLoading by viewModel.isAdminLoading.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     var showSplashScreen by remember { mutableStateOf(true) }
@@ -292,6 +304,12 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 recentSales = allSales,
                                 currentUser = currentUser,
                                 language = currentLanguage,
+                                branches = branches,
+                                selectedBranchId = selectedBranchId,
+                                connectivityStatus = connectivityStatus,
+                                isSyncing = isSyncing,
+                                cloudSyncReport = cloudSyncReport,
+                                onSelectBranch = { branchId -> viewModel.selectBranch(branchId) },
                                 onNavigate = { screen -> viewModel.navigateTo(screen) },
                                 onOpenReceipt = { saleId -> viewModel.openReceipt(saleId) },
                                 onRestockClick = { product ->
@@ -445,9 +463,60 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onSwitchUser = { u -> viewModel.switchUser(u) },
                                 onActivateVoucher = { code -> viewModel.activateSubscriptionVoucher(code) },
                                 onProcessDirectPayment = { provider, phone, durationMonths, onSuccess ->
-                                    viewModel.processDirectSubscriptionPayment(provider, phone, durationMonths, onSuccess)
+                                    viewModel.processDirectSubscriptionPayment(provider, phone, durationMonths, onResult = onSuccess)
                                 },
                                 onGrantEmergencyGrace = { viewModel.grantEmergencyGracePeriod() },
+                                paymentVerificationRequests = paymentVerificationRequests,
+                                discoveredHubs = discoveredHubs,
+                                isDiscoveringHubs = isDiscoveringHubs,
+                                peerSyncEvents = peerSyncEvents,
+                                onStartLanDiscovery = { viewModel.startLanDiscovery() },
+                                onStopLanDiscovery = { viewModel.stopLanDiscovery() },
+                                onGenerateBranchShareToken = { branchFilter, onReady ->
+                                    viewModel.createBranchShareToken(branchFilter, onReady)
+                                },
+                                onExportFullBranchPackage = { branchFilter, onReady ->
+                                    viewModel.exportFullBranchPackage(context, branchFilter, onReady)
+                                },
+                                onSubmitPaymentVerification = { provider, payerPhone, username, regPhone, months, branchCount, workerCount, telcoRef, onDone ->
+                                    viewModel.submitUssdPaymentProof(
+                                        provider = provider,
+                                        payerPhone = payerPhone,
+                                        username = username,
+                                        registeredPhone = regPhone,
+                                        durationMonths = months,
+                                        branchCount = branchCount,
+                                        workerCount = workerCount,
+                                        telcoReference = telcoRef,
+                                        onSubmitted = onDone
+                                    )
+                                },
+                                onCheckCloudApproval = { viewModel.checkCloudUnlockApprovals() },
+                                adminSession = adminSession,
+                                adminAuthError = adminAuthError,
+                                isAdminAuthenticating = isAdminAuthenticating,
+                                adminPaymentRequests = adminPaymentRequests,
+                                adminShopAccounts = adminShopAccounts,
+                                adminUnlockCodes = adminUnlockCodes,
+                                adminAuditLogs = adminAuditLogs,
+                                isAdminLoading = isAdminLoading,
+                                onAdminSignIn = { email, password -> viewModel.signInSupabaseAdmin(email, password) },
+                                onAdminSignUp = { email, password, fullName -> viewModel.signUpSupabaseAdmin(email, password, fullName) },
+                                onAdminSignOut = { viewModel.signOutSupabaseAdmin() },
+                                onRefreshAdminDashboard = { viewModel.refreshAdminDashboardData() },
+                                onAdminApprovePayment = { req, onDone ->
+                                    viewModel.adminApproveAndGenerateCode(req, onDone)
+                                },
+                                onAdminRejectPayment = { req, reason ->
+                                    viewModel.adminRejectPayment(req, reason)
+                                },
+                                onAdminIssueManualCode = { username, regPhone, tier, days, amt, onDone ->
+                                    viewModel.adminIssueManualCode(username, regPhone, tier, days, amt, onDone)
+                                },
+                                onAdminRevokeCode = { codeDto ->
+                                    viewModel.adminRevokeCode(codeDto)
+                                },
+                                onShareAdminWebPortal = { viewModel.shareAdminWebPortal(context) },
                                 onShowSplashScreen = { showSplashScreen = true },
                                 onTestNotification = { type -> viewModel.testNotification(type) },
                                 onRequestPermissions = { showPermissionOnboardingDialog = true }
@@ -524,11 +593,27 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
             shopProfile = shopProfile,
             branches = branches,
             allUsers = allUsers,
+            currentUser = currentUser,
+            paymentRequests = paymentVerificationRequests,
             language = currentLanguage,
             onActivateVoucher = { code -> viewModel.activateSubscriptionVoucher(code) },
             onProcessDirectPayment = { provider, phone, durationMonths, onSuccess ->
-                viewModel.processDirectSubscriptionPayment(provider, phone, durationMonths, onSuccess)
+                viewModel.processDirectSubscriptionPayment(provider, phone, durationMonths, onResult = onSuccess)
             },
+            onSubmitPaymentVerification = { provider, payerPhone, username, regPhone, months, branchCount, workerCount, telcoRef, onDone ->
+                viewModel.submitUssdPaymentProof(
+                    provider = provider,
+                    payerPhone = payerPhone,
+                    username = username,
+                    registeredPhone = regPhone,
+                    durationMonths = months,
+                    branchCount = branchCount,
+                    workerCount = workerCount,
+                    telcoReference = telcoRef,
+                    onSubmitted = onDone
+                )
+            },
+            onCheckCloudApproval = { viewModel.checkCloudUnlockApprovals() },
             onGrantEmergencyGrace = { viewModel.grantEmergencyGracePeriod() }
         )
     }

@@ -1,8 +1,13 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -13,12 +18,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -26,24 +36,21 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
-import com.example.R
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AddBusiness
-import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Backspace
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Checkroom
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Inventory2
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.LocalPharmacy
 import androidx.compose.material.icons.filled.Lock
@@ -56,17 +63,16 @@ import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -82,10 +88,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -93,6 +103,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.data.model.ShopProfile
 import com.example.data.model.User
 import com.example.data.model.UserRole
@@ -101,8 +112,10 @@ import com.example.ui.theme.GopherFontFamily
 import com.example.ui.theme.LossRed
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
+import com.example.ui.theme.WarningAmber
 import com.example.util.AppLanguage
 import com.example.util.Localization
+import com.example.util.SecurityUtils
 import kotlin.random.Random
 
 @Composable
@@ -131,19 +144,18 @@ fun AuthLockScreen(
     val activeUser = currentUser ?: allUsers.firstOrNull()
     val haptic = LocalHapticFeedback.current
 
-    // Adaptive Theme Palette for Auth
     val bgColors = if (isDarkTheme) {
-        listOf(DarkNavy, Color(0xFF0F172A), Color(0xFF020617))
+        listOf(Color(0xFF0A1020), DarkNavy, Color(0xFF060B16))
     } else {
-        listOf(Color(0xFFF8FAFC), Color(0xFFF1F5F9), Color(0xFFE2E8F0))
+        listOf(Color(0xFFFFFBF7), Color(0xFFF4F6FA), Color(0xFFE8EEF7))
     }
-    val cardBg = if (isDarkTheme) Color(0xFF1E293B) else Color.White
-    val cardBorder = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)
+    val cardBg = if (isDarkTheme) Color(0xFF172033) else Color.White
+    val cardBorder = if (isDarkTheme) Color(0xFF2B3A55) else Color(0xFFE2E8F0)
     val fieldBg = if (isDarkTheme) Color(0xFF0F172A) else Color(0xFFF8FAFC)
     val textPrimary = if (isDarkTheme) Color.White else Color(0xFF0F172A)
     val textSecondary = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF64748B)
-    val topPillBg = if (isDarkTheme) Color(0x22FFFFFF) else Color.White
-    val topPillBorder = if (isDarkTheme) Color(0x33FFFFFF) else Color(0xFFCBD5E1)
+    val topPillBg = if (isDarkTheme) Color(0x26FFFFFF) else Color.White
+    val topPillBorder = if (isDarkTheme) Color(0x38FFFFFF) else Color(0xFFCBD5E1)
     val topPillText = if (isDarkTheme) Color.White else Color(0xFF0F172A)
     val tabContainerBg = if (isDarkTheme) Color(0xFF0F172A) else Color(0xFFF1F5F9)
 
@@ -151,39 +163,40 @@ fun AuthLockScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Brush.verticalGradient(colors = bgColors))
+            .windowInsetsPadding(WindowInsets.safeDrawing),
+        contentAlignment = Alignment.TopCenter
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 20.dp, vertical = 20.dp)
+                .widthIn(max = 520.dp)
+                .padding(horizontal = 20.dp, vertical = 14.dp)
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // 1. Top Header Actions
+            // 1. Top Bar Controls
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Language Switcher Badge
                 Surface(
                     onClick = onToggleLanguage,
                     shape = RoundedCornerShape(16.dp),
                     color = topPillBg,
                     border = BorderStroke(1.dp, topPillBorder),
-                    shadowElevation = if (isDarkTheme) 0.dp else 2.dp
+                    shadowElevation = if (isDarkTheme) 0.dp else 2.dp,
+                    modifier = Modifier.heightIn(min = 48.dp)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(Icons.Default.Translate, contentDescription = "Language", tint = topPillText, modifier = Modifier.size(15.dp))
+                        Icon(Icons.Default.Translate, contentDescription = "Toggle Language", tint = topPillText, modifier = Modifier.size(16.dp))
                         Text(
-                            text = if (language == AppLanguage.ENGLISH) "EN" else "RW",
+                            text = if (language == AppLanguage.ENGLISH) "EN • English" else "RW • Ikinyarwanda",
                             fontFamily = GopherFontFamily,
                             color = topPillText,
                             fontSize = 12.sp,
@@ -192,23 +205,20 @@ fun AuthLockScreen(
                     }
                 }
 
-                // Theme Switcher Button
                 Surface(
                     onClick = onToggleTheme,
                     shape = CircleShape,
                     color = topPillBg,
                     border = BorderStroke(1.dp, topPillBorder),
-                    shadowElevation = if (isDarkTheme) 0.dp else 2.dp
+                    shadowElevation = if (isDarkTheme) 0.dp else 2.dp,
+                    modifier = Modifier.size(48.dp)
                 ) {
-                    Box(
-                        modifier = Modifier.size(36.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
+                    Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
-                            contentDescription = "Theme",
+                            contentDescription = "Toggle Theme",
                             tint = if (isDarkTheme) Color(0xFFFFD166) else OrangePrimary,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
@@ -216,13 +226,10 @@ fun AuthLockScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // 2. Official Brand Logo & Shop Header
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(vertical = 4.dp)
-            ) {
+            // 2. Store Identity & Live Branch / Offline Security Badge
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Surface(
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(22.dp),
                     color = if (isDarkTheme) Color(0xFF0F172A) else Color.White,
                     border = BorderStroke(2.dp, Brush.linearGradient(listOf(OrangePrimary, Color(0xFFFFB74D)))),
                     modifier = Modifier.size(72.dp),
@@ -230,10 +237,10 @@ fun AuthLockScreen(
                 ) {
                     Image(
                         painter = painterResource(id = R.drawable.beboss_app_logo_1787833759468),
-                        contentDescription = "BeBoss Logo",
+                        contentDescription = "BeBoss Store Logo",
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(RoundedCornerShape(20.dp)),
+                            .clip(RoundedCornerShape(22.dp)),
                         contentScale = ContentScale.Crop
                     )
                 }
@@ -241,12 +248,11 @@ fun AuthLockScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = shopProfile.shopName.ifBlank { "BeBoss Store" },
+                    text = shopProfile.shopName.ifBlank { "BeBoss Terminal" },
                     fontFamily = GopherFontFamily,
-                    fontSize = 22.sp,
+                    fontSize = 23.sp,
                     fontWeight = FontWeight.Black,
                     color = textPrimary,
-                    letterSpacing = 0.5.sp,
                     textAlign = TextAlign.Center
                 )
 
@@ -254,22 +260,26 @@ fun AuthLockScreen(
 
                 Surface(
                     shape = RoundedCornerShape(20.dp),
-                    color = OrangePrimary.copy(alpha = if (isDarkTheme) 0.15f else 0.12f),
-                    border = BorderStroke(1.dp, OrangePrimary.copy(alpha = if (isDarkTheme) 0.3f else 0.4f))
+                    color = OrangePrimary.copy(alpha = if (isDarkTheme) 0.16f else 0.12f),
+                    border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.35f))
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Box(modifier = Modifier.size(6.dp).background(ProfitGreen, CircleShape))
+                        Box(modifier = Modifier.size(7.dp).background(ProfitGreen, CircleShape))
                         Text(
-                            text = "SECURE POS TERMINAL",
+                            text = if (activeUser != null) {
+                                "${activeUser.assignedBranchName.ifBlank { "HQ" }.uppercase()} • @${activeUser.username}"
+                            } else {
+                                "OFFLINE-FIRST BRANCH POS"
+                            },
                             fontFamily = GopherFontFamily,
-                            fontSize = 9.5.sp,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = OrangePrimary,
-                            letterSpacing = 0.8.sp
+                            letterSpacing = 0.7.sp
                         )
                     }
                 }
@@ -277,39 +287,46 @@ fun AuthLockScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 3. Quick Cashier / Operator Selection Row
+            // 3. Branch-Aware Operator Carousel
             if (allUsers.isNotEmpty()) {
                 Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                    horizontalAlignment = Alignment.Start,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = if (language == AppLanguage.KINYARWANDA) "HITAMO UMUKOZI WO KWINJIRA" else "SELECT CASHIER / OPERATOR",
+                        text = if (language == AppLanguage.KINYARWANDA) "HITAMO UMUKOZI WO KWINJIRA" else "OPERATOR TERMINAL",
                         fontFamily = GopherFontFamily,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = textSecondary,
-                        letterSpacing = 1.sp
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.padding(start = 4.dp)
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         items(allUsers) { user ->
                             val isSelected = activeUser?.id == user.id
+                            val badgeColor = when (user.role) {
+                                UserRole.OWNER -> OrangePrimary
+                                UserRole.MANAGER -> Color(0xFF2563EB)
+                                UserRole.CASHIER -> ProfitGreen
+                            }
                             Surface(
                                 shape = RoundedCornerShape(14.dp),
                                 color = if (isSelected) OrangePrimary.copy(alpha = 0.18f) else cardBg,
                                 border = if (isSelected) BorderStroke(1.8.dp, OrangePrimary) else BorderStroke(1.dp, cardBorder),
-                                shadowElevation = if (isDarkTheme) 0.dp else 1.dp,
-                                modifier = Modifier.clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    onSelectUser(user)
-                                    pinInput = ""
-                                    usernameInput = user.username
-                                    onClearError()
-                                }
+                                modifier = Modifier
+                                    .heightIn(min = 52.dp)
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onSelectUser(user)
+                                        pinInput = ""
+                                        usernameInput = user.username
+                                        onClearError()
+                                    }
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -317,21 +334,14 @@ fun AuthLockScreen(
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .size(28.dp)
-                                            .background(
-                                                when (user.role) {
-                                                    UserRole.OWNER -> OrangePrimary
-                                                    UserRole.MANAGER -> Color(0xFF2563EB)
-                                                    UserRole.CASHIER -> ProfitGreen
-                                                },
-                                                CircleShape
-                                            ),
-                                            contentAlignment = Alignment.Center
+                                            .size(32.dp)
+                                            .background(badgeColor, CircleShape),
+                                        contentAlignment = Alignment.Center
                                     ) {
                                         Text(
                                             text = user.name.take(1).uppercase(),
                                             fontFamily = GopherFontFamily,
-                                            fontSize = 13.sp,
+                                            fontSize = 14.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = Color.White
                                         )
@@ -341,12 +351,12 @@ fun AuthLockScreen(
                                         Text(
                                             text = user.name.split(" ").firstOrNull() ?: user.name,
                                             fontFamily = GopherFontFamily,
-                                            fontSize = 12.sp,
+                                            fontSize = 12.5.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = textPrimary
                                         )
                                         Text(
-                                            text = user.role.displayName.split(" ").first(),
+                                            text = "${user.role.name} • ${user.assignedBranchName.ifBlank { "HQ" }}",
                                             fontFamily = GopherFontFamily,
                                             fontSize = 9.5.sp,
                                             color = if (isSelected) OrangePrimary else textSecondary
@@ -357,14 +367,13 @@ fun AuthLockScreen(
                         }
                     }
                 }
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // 4. Interactive PIN / Password Card
+            // 4. Interactive Unlock Card (PIN Pad + Biometric / Password Auth)
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
+                shape = RoundedCornerShape(24.dp),
                 colors = CardDefaults.cardColors(containerColor = cardBg),
                 border = BorderStroke(1.dp, cardBorder),
                 elevation = CardDefaults.cardElevation(if (isDarkTheme) 8.dp else 4.dp)
@@ -386,7 +395,7 @@ fun AuthLockScreen(
                             onClick = { selectedTab = 0; onClearError() },
                             text = {
                                 Text(
-                                    if (language == AppLanguage.KINYARWANDA) "PIN Y'Ibanga" else "Quick 4-Digit PIN",
+                                    text = if (language == AppLanguage.KINYARWANDA) "PIN (4)" else "Fast 4-Digit PIN",
                                     fontFamily = GopherFontFamily,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
@@ -399,7 +408,7 @@ fun AuthLockScreen(
                             onClick = { selectedTab = 1; onClearError() },
                             text = {
                                 Text(
-                                    if (language == AppLanguage.KINYARWANDA) "Ijambobanga" else "Staff Password",
+                                    text = if (language == AppLanguage.KINYARWANDA) "Ijambobanga" else "Username & Password",
                                     fontFamily = GopherFontFamily,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
@@ -411,28 +420,30 @@ fun AuthLockScreen(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    if (authError != null) {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = LossRed.copy(alpha = 0.15f),
-                            border = BorderStroke(1.dp, LossRed.copy(alpha = 0.4f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = authError,
-                                fontFamily = GopherFontFamily,
-                                fontSize = 12.sp,
-                                color = LossRed,
-                                fontWeight = FontWeight.Bold,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(8.dp)
-                            )
+                    AnimatedVisibility(visible = authError != null) {
+                        if (authError != null) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = LossRed.copy(alpha = 0.14f),
+                                border = BorderStroke(1.dp, LossRed.copy(alpha = 0.4f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 10.dp)
+                            ) {
+                                Text(
+                                    text = authError,
+                                    fontFamily = GopherFontFamily,
+                                    fontSize = 12.sp,
+                                    color = LossRed,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
                         }
-                        Spacer(modifier = Modifier.height(10.dp))
                     }
 
                     if (selectedTab == 0) {
-                        // PIN Dots Indicator
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -440,13 +451,19 @@ fun AuthLockScreen(
                         ) {
                             for (i in 0 until 4) {
                                 val filled = i < pinInput.length
+                                val dotSize by animateDpAsState(
+                                    targetValue = if (filled) 18.dp else 14.dp,
+                                    animationSpec = spring(),
+                                    label = "pinDot"
+                                )
+                                val dotColor by animateColorAsState(
+                                    targetValue = if (filled) OrangePrimary else if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0),
+                                    label = "pinColor"
+                                )
                                 Box(
                                     modifier = Modifier
-                                        .size(16.dp)
-                                        .background(
-                                            if (filled) OrangePrimary else if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0),
-                                            CircleShape
-                                        )
+                                        .size(dotSize)
+                                        .background(dotColor, CircleShape)
                                         .border(
                                             1.5.dp,
                                             if (filled) OrangePrimary else if (isDarkTheme) Color(0xFF475569) else Color(0xFFCBD5E1),
@@ -458,7 +475,6 @@ fun AuthLockScreen(
 
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Interactive Numeric Keypad with Haptics & Biometrics
                         PinKeypad(
                             isDarkTheme = isDarkTheme,
                             onDigit = { digit ->
@@ -477,19 +493,18 @@ fun AuthLockScreen(
                                     onClearError()
                                 }
                             },
-                            onInstantUnlock = {
-                                onBiometricUnlock()
-                            }
+                            onInstantUnlock = onBiometricUnlock
                         )
                     } else {
-                        // Password Form Mode
                         OutlinedTextField(
                             value = usernameInput,
                             onValueChange = { usernameInput = it },
                             label = { Text(Localization.get("username_or_phone", language), fontFamily = GopherFontFamily) },
                             leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = OrangePrimary) },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("login_username_input"),
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedContainerColor = fieldBg,
@@ -519,7 +534,9 @@ fun AuthLockScreen(
                             },
                             visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("login_password_input"),
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedContainerColor = fieldBg,
@@ -541,7 +558,8 @@ fun AuthLockScreen(
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(48.dp),
+                                .heightIn(min = 50.dp)
+                                .testTag("login_submit_button"),
                             colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
                             shape = RoundedCornerShape(12.dp)
                         ) {
@@ -553,9 +571,9 @@ fun AuthLockScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // 5. Register New Store / Business Setup Button
+            // 5. Register New Store CTA
             OutlinedButton(
                 onClick = onOpenRegister,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = OrangePrimary),
@@ -563,7 +581,8 @@ fun AuthLockScreen(
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
+                    .heightIn(min = 50.dp)
+                    .testTag("open_register_button")
             ) {
                 Icon(Icons.Default.AddBusiness, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
@@ -579,8 +598,10 @@ fun AuthLockScreen(
 }
 
 /**
- * Interactive, Step-Wizard Shop Registration with Gopher Font,
- * Category Presets, Currency Badges, and Instant PIN Generation
+ * 3-Step Interactive Shop Registration Wizard:
+ * Step 1: Business Name, Category & Currency
+ * Step 2: Owner Registered Phone (Bound to USSD/WhatsApp Unlock Codes) & HQ Address
+ * Step 3: Owner @username, 4-Digit Fast PIN, Password Strength Meter & Launch
  */
 @Composable
 fun ShopRegistrationScreen(
@@ -591,6 +612,7 @@ fun ShopRegistrationScreen(
     onToggleLanguage: () -> Unit,
     onToggleTheme: () -> Unit
 ) {
+    var step by remember { mutableIntStateOf(0) } // 0, 1, 2
     var shopName by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("Retail & Grocery") }
     var currencySymbol by remember { mutableStateOf("FRw") }
@@ -617,41 +639,50 @@ fun ShopRegistrationScreen(
 
     val currencies = listOf(
         Triple("FRw", "RWF", "Rwanda"),
-        Triple("$", "USD", "US Dollar"),
+        Triple("$", "USD", "USD"),
         Triple("KSh", "KES", "Kenya"),
         Triple("USh", "UGX", "Uganda"),
         Triple("€", "EUR", "Euro")
     )
 
     val bgColors = if (isDarkTheme) {
-        listOf(DarkNavy, Color(0xFF0F172A), Color(0xFF020617))
+        listOf(Color(0xFF0A1020), DarkNavy, Color(0xFF060B16))
     } else {
-        listOf(Color(0xFFF8FAFC), Color(0xFFF1F5F9), Color(0xFFE2E8F0))
+        listOf(Color(0xFFFFFBF7), Color(0xFFF4F6FA), Color(0xFFE8EEF7))
     }
-    val cardBg = if (isDarkTheme) Color(0xFF1E293B) else Color.White
-    val cardBorder = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)
+    val cardBg = if (isDarkTheme) Color(0xFF172033) else Color.White
+    val cardBorder = if (isDarkTheme) Color(0xFF2B3A55) else Color(0xFFE2E8F0)
     val fieldBg = if (isDarkTheme) Color(0xFF0F172A) else Color(0xFFF8FAFC)
     val textPrimary = if (isDarkTheme) Color.White else Color(0xFF0F172A)
     val textSecondary = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF64748B)
-    val topPillBg = if (isDarkTheme) Color(0x22FFFFFF) else Color.White
-    val topPillBorder = if (isDarkTheme) Color(0x33FFFFFF) else Color(0xFFCBD5E1)
+    val topPillBg = if (isDarkTheme) Color(0x26FFFFFF) else Color.White
+    val topPillBorder = if (isDarkTheme) Color(0x38FFFFFF) else Color(0xFFCBD5E1)
     val topPillText = if (isDarkTheme) Color.White else Color(0xFF0F172A)
     val chipBg = if (isDarkTheme) Color(0xFF0F172A) else Color(0xFFF8FAFC)
     val chipBorder = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)
+
+    val stepTitles = if (language == AppLanguage.KINYARWANDA) {
+        listOf("1. Ububiko", "2. Aho Bukorera", "3. Umutekano")
+    } else {
+        listOf("1. Store", "2. Contact & HQ", "3. Credentials")
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Brush.verticalGradient(colors = bgColors))
+            .windowInsetsPadding(WindowInsets.safeDrawing),
+        contentAlignment = Alignment.TopCenter
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 20.dp, vertical = 20.dp)
+                .widthIn(max = 560.dp)
+                .padding(horizontal = 20.dp, vertical = 14.dp)
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Header Top Actions
+            // Top Controls
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -662,14 +693,14 @@ fun ShopRegistrationScreen(
                     shape = RoundedCornerShape(16.dp),
                     color = topPillBg,
                     border = BorderStroke(1.dp, topPillBorder),
-                    shadowElevation = if (isDarkTheme) 0.dp else 2.dp
+                    modifier = Modifier.heightIn(min = 48.dp)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        Icon(Icons.Default.Translate, contentDescription = "Language", tint = topPillText, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.Translate, contentDescription = "Language", tint = topPillText, modifier = Modifier.size(15.dp))
                         Text(if (language == AppLanguage.ENGLISH) "EN" else "RW", fontFamily = GopherFontFamily, color = topPillText, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -679,22 +710,26 @@ fun ShopRegistrationScreen(
                     shape = CircleShape,
                     color = topPillBg,
                     border = BorderStroke(1.dp, topPillBorder),
-                    shadowElevation = if (isDarkTheme) 0.dp else 2.dp
+                    modifier = Modifier.size(48.dp)
                 ) {
-                    Box(modifier = Modifier.size(34.dp), contentAlignment = Alignment.Center) {
-                        Icon(if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode, contentDescription = null, tint = if (isDarkTheme) Color(0xFFFFD166) else OrangePrimary, modifier = Modifier.size(16.dp))
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
+                            contentDescription = "Theme",
+                            tint = if (isDarkTheme) Color(0xFFFFD166) else OrangePrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Title & Official Brand Logo
             Surface(
-                shape = RoundedCornerShape(18.dp),
+                shape = RoundedCornerShape(20.dp),
                 color = if (isDarkTheme) Color(0xFF0F172A) else Color.White,
                 border = BorderStroke(2.dp, Brush.linearGradient(listOf(OrangePrimary, Color(0xFFFFB74D)))),
-                modifier = Modifier.size(68.dp),
+                modifier = Modifier.size(64.dp),
                 shadowElevation = if (isDarkTheme) 8.dp else 4.dp
             ) {
                 Image(
@@ -702,53 +737,105 @@ fun ShopRegistrationScreen(
                     contentDescription = "BeBoss Logo",
                     modifier = Modifier
                         .fillMaxSize()
-                        .clip(RoundedCornerShape(18.dp)),
+                        .clip(RoundedCornerShape(20.dp)),
                     contentScale = ContentScale.Crop
                 )
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Text(
                 text = Localization.get("create_store_account", language),
                 fontFamily = GopherFontFamily,
-                fontSize = 22.sp,
+                fontSize = 21.sp,
                 fontWeight = FontWeight.Black,
                 color = textPrimary,
                 textAlign = TextAlign.Center
             )
-
             Text(
-                text = if (language == AppLanguage.KINYARWANDA)
-                    "Kora ububiko bwawe utangire gucuruza byihuse no kwakira raporo."
-                    else "Register your shop profile & master owner credentials to launch.",
+                text = "Offline-First SQLite • Auto Branch Sync • Monthly Licensing",
                 fontFamily = GopherFontFamily,
-                fontSize = 12.5.sp,
+                fontSize = 11.sp,
                 color = textSecondary,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            if (errorMessage != null) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = LossRed.copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, LossRed.copy(alpha = 0.4f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = errorMessage!!,
-                        fontFamily = GopherFontFamily,
-                        fontSize = 12.sp,
-                        color = LossRed,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(8.dp)
-                    )
+            // 3-Step Interactive Stepper Bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                stepTitles.forEachIndexed { idx, label ->
+                    val isCurrent = step == idx
+                    val isCompleted = idx < step
+                    Surface(
+                        onClick = {
+                            if (idx <= step) {
+                                errorMessage = null
+                                step = idx
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = when {
+                            isCurrent -> OrangePrimary
+                            isCompleted -> ProfitGreen.copy(alpha = 0.16f)
+                            else -> cardBg
+                        },
+                        border = BorderStroke(
+                            1.dp,
+                            when {
+                                isCurrent -> OrangePrimary
+                                isCompleted -> ProfitGreen
+                                else -> cardBorder
+                            }
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 42.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 6.dp)) {
+                            Text(
+                                text = label,
+                                fontFamily = GopherFontFamily,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = when {
+                                    isCurrent -> Color.White
+                                    isCompleted -> ProfitGreen
+                                    else -> textSecondary
+                                },
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
                 }
-                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            AnimatedVisibility(visible = errorMessage != null) {
+                if (errorMessage != null) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = LossRed.copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, LossRed.copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp)
+                    ) {
+                        Text(
+                            text = errorMessage!!,
+                            fontFamily = GopherFontFamily,
+                            fontSize = 12.sp,
+                            color = LossRed,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
             }
 
             Card(
@@ -762,375 +849,450 @@ fun ShopRegistrationScreen(
                     modifier = Modifier.padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    // SECTION 1: SHOP INFORMATION
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            shape = CircleShape,
-                            color = OrangePrimary.copy(alpha = 0.2f),
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text("1", fontFamily = GopherFontFamily, fontWeight = FontWeight.Bold, color = OrangePrimary, fontSize = 12.sp)
+                    AnimatedContent(
+                        targetState = step,
+                        transitionSpec = { fadeIn() togetherWith fadeOut() },
+                        label = "RegistrationStep"
+                    ) { currentStep ->
+                        when (currentStep) {
+                            0 -> {
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    OutlinedTextField(
+                                        value = shopName,
+                                        onValueChange = { shopName = it; errorMessage = null },
+                                        label = { Text(if (language == AppLanguage.KINYARWANDA) "Izina ry'Ububiko *" else "Shop / Business Name *", fontFamily = GopherFontFamily) },
+                                        placeholder = { Text("e.g. Kigali Smart Groceries") },
+                                        leadingIcon = { Icon(Icons.Default.Store, contentDescription = null, tint = OrangePrimary) },
+                                        singleLine = true,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("register_shop_name_input"),
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = fieldBg,
+                                            unfocusedContainerColor = fieldBg,
+                                            focusedTextColor = textPrimary,
+                                            unfocusedTextColor = textPrimary,
+                                            focusedBorderColor = OrangePrimary,
+                                            unfocusedBorderColor = cardBorder
+                                        )
+                                    )
+
+                                    Column {
+                                        Text("Business Sector:", fontFamily = GopherFontFamily, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = textSecondary)
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            items(categories) { (catName, catIcon) ->
+                                                val selected = selectedCategory == catName
+                                                Surface(
+                                                    onClick = { selectedCategory = catName },
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = if (selected) OrangePrimary.copy(alpha = 0.2f) else chipBg,
+                                                    border = if (selected) BorderStroke(1.5.dp, OrangePrimary) else BorderStroke(1.dp, chipBorder),
+                                                    modifier = Modifier.heightIn(min = 42.dp)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                    ) {
+                                                        Icon(catIcon, contentDescription = catName, tint = if (selected) OrangePrimary else textSecondary, modifier = Modifier.size(16.dp))
+                                                        Text(
+                                                            text = catName,
+                                                            fontFamily = GopherFontFamily,
+                                                            fontSize = 11.5.sp,
+                                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                                            color = if (selected) textPrimary else textSecondary
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Column {
+                                        Text("Primary Currency:", fontFamily = GopherFontFamily, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = textSecondary)
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            currencies.forEach { (sym, code, _) ->
+                                                val isSelected = currencyCode == code
+                                                Surface(
+                                                    onClick = {
+                                                        currencySymbol = sym
+                                                        currencyCode = code
+                                                    },
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = if (isSelected) OrangePrimary else chipBg,
+                                                    border = BorderStroke(1.dp, if (isSelected) OrangePrimary else chipBorder),
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .heightIn(min = 48.dp)
+                                                ) {
+                                                    Column(modifier = Modifier.padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                                        Text(sym, fontFamily = GopherFontFamily, fontSize = 13.sp, fontWeight = FontWeight.Black, color = if (isSelected) Color.White else OrangePrimary)
+                                                        Text(code, fontFamily = GopherFontFamily, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = if (isSelected) Color.White.copy(alpha = 0.9f) else textSecondary)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (language == AppLanguage.KINYARWANDA) "AMAKURU Y'UBUBIKO" else "SHOP INFORMATION",
-                            fontFamily = GopherFontFamily,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = OrangePrimary,
-                            letterSpacing = 1.sp
-                        )
-                    }
 
-                    OutlinedTextField(
-                        value = shopName,
-                        onValueChange = { shopName = it },
-                        label = { Text(if (language == AppLanguage.KINYARWANDA) "Izina ry'Ububiko / Isoko *" else "Shop / Business Name *", fontFamily = GopherFontFamily) },
-                        placeholder = { Text("e.g. Kigali Smart Groceries") },
-                        leadingIcon = { Icon(Icons.Default.Store, contentDescription = null, tint = OrangePrimary) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = fieldBg,
-                            unfocusedContainerColor = fieldBg,
-                            focusedTextColor = textPrimary,
-                            unfocusedTextColor = textPrimary,
-                            focusedBorderColor = OrangePrimary,
-                            unfocusedBorderColor = cardBorder
-                        )
-                    )
+                            1 -> {
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    OutlinedTextField(
+                                        value = phone,
+                                        onValueChange = { phone = it; errorMessage = null },
+                                        label = { Text("Owner Registered Phone (MoMo & WhatsApp) *", fontFamily = GopherFontFamily) },
+                                        placeholder = { Text("+250 788 123 456") },
+                                        leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null, tint = OrangePrimary) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                        singleLine = true,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("register_phone_input"),
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = fieldBg,
+                                            unfocusedContainerColor = fieldBg,
+                                            focusedTextColor = textPrimary,
+                                            unfocusedTextColor = textPrimary,
+                                            focusedBorderColor = OrangePrimary,
+                                            unfocusedBorderColor = cardBorder
+                                        )
+                                    )
 
-                    // Business Category Chips
-                    Column {
-                        Text(
-                            text = "Business Type / Category:",
-                            fontFamily = GopherFontFamily,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = textSecondary
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(categories) { (catName, catIcon) ->
-                                val selected = selectedCategory == catName
-                                Surface(
-                                    onClick = { selectedCategory = catName },
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = if (selected) OrangePrimary.copy(alpha = 0.2f) else chipBg,
-                                    border = if (selected) BorderStroke(1.5.dp, OrangePrimary) else BorderStroke(1.dp, chipBorder)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    OutlinedTextField(
+                                        value = address,
+                                        onValueChange = { address = it },
+                                        label = { Text(Localization.get("address", language), fontFamily = GopherFontFamily) },
+                                        placeholder = { Text("e.g. Kigali, Nyarugenge Market #12") },
+                                        leadingIcon = { Icon(Icons.Default.Place, contentDescription = null, tint = OrangePrimary) },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = fieldBg,
+                                            unfocusedContainerColor = fieldBg,
+                                            focusedTextColor = textPrimary,
+                                            unfocusedTextColor = textPrimary,
+                                            focusedBorderColor = OrangePrimary,
+                                            unfocusedBorderColor = cardBorder
+                                        )
+                                    )
+
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = ProfitGreen.copy(alpha = 0.1f),
+                                        border = BorderStroke(1.dp, ProfitGreen.copy(alpha = 0.35f)),
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Icon(
-                                            imageVector = catIcon,
-                                            contentDescription = catName,
-                                            tint = if (selected) OrangePrimary else textSecondary,
-                                            modifier = Modifier.size(15.dp)
+                                        Row(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Icon(Icons.Default.CloudSync, contentDescription = null, tint = ProfitGreen)
+                                            Column {
+                                                Text(
+                                                    text = "Starter HQ Plan: 5,000 FRw / month",
+                                                    fontFamily = GopherFontFamily,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = ProfitGreen
+                                                )
+                                                Text(
+                                                    text = "Monthly USSD payments & admin unlock codes bind securely to this registered phone number.",
+                                                    fontFamily = GopherFontFamily,
+                                                    fontSize = 10.5.sp,
+                                                    color = textSecondary
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            else -> {
+                                val normalizedUsername = username.trim().lowercase().replace(" ", "")
+                                val strengthScore = remember(password) {
+                                    var s = 0
+                                    if (password.length >= 6) s++
+                                    if (password.any { it.isDigit() }) s++
+                                    if (password.any { it.isUpperCase() } || password.any { !it.isLetterOrDigit() }) s++
+                                    s
+                                }
+                                val strengthColor = when (strengthScore) {
+                                    0, 1 -> LossRed
+                                    2 -> WarningAmber
+                                    else -> ProfitGreen
+                                }
+                                val strengthLabel = when (strengthScore) {
+                                    0 -> "Too short"
+                                    1 -> "Basic"
+                                    2 -> "Good"
+                                    else -> "Strong"
+                                }
+
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    OutlinedTextField(
+                                        value = ownerName,
+                                        onValueChange = { ownerName = it; errorMessage = null },
+                                        label = { Text(if (language == AppLanguage.KINYARWANDA) "Amazina ya Nyir'ububiko *" else "Owner Full Name *", fontFamily = GopherFontFamily) },
+                                        placeholder = { Text("Jean Paul Mugisha") },
+                                        leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = OrangePrimary) },
+                                        singleLine = true,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("register_owner_name_input"),
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = fieldBg,
+                                            unfocusedContainerColor = fieldBg,
+                                            focusedTextColor = textPrimary,
+                                            unfocusedTextColor = textPrimary,
+                                            focusedBorderColor = OrangePrimary,
+                                            unfocusedBorderColor = cardBorder
                                         )
-                                        Text(
-                                            text = catName,
-                                            fontFamily = GopherFontFamily,
-                                            fontSize = 11.5.sp,
-                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (selected) textPrimary else textSecondary
+                                    )
+
+                                    OutlinedTextField(
+                                        value = username,
+                                        onValueChange = { username = it; errorMessage = null },
+                                        label = { Text("Owner Username (Used for Unlock Codes) *", fontFamily = GopherFontFamily) },
+                                        placeholder = { Text("e.g. jeanpaul") },
+                                        leadingIcon = { Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = OrangePrimary) },
+                                        supportingText = {
+                                            if (normalizedUsername.isNotEmpty()) {
+                                                Text("Account handle: @$normalizedUsername", fontSize = 10.5.sp, color = OrangePrimary)
+                                            }
+                                        },
+                                        singleLine = true,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("register_username_input"),
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = fieldBg,
+                                            unfocusedContainerColor = fieldBg,
+                                            focusedTextColor = textPrimary,
+                                            unfocusedTextColor = textPrimary,
+                                            focusedBorderColor = OrangePrimary,
+                                            unfocusedBorderColor = cardBorder
                                         )
+                                    )
+
+                                    Column {
+                                        OutlinedTextField(
+                                            value = pin,
+                                            onValueChange = { if (it.length <= 4 && it.all { c -> c.isDigit() }) pin = it; errorMessage = null },
+                                            label = { Text("4-Digit Fast PIN *", fontFamily = GopherFontFamily) },
+                                            placeholder = { Text("e.g. 2580") },
+                                            leadingIcon = { Icon(Icons.Default.Shield, contentDescription = null, tint = OrangePrimary) },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                                            visualTransformation = PasswordVisualTransformation(),
+                                            singleLine = true,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("register_pin_input"),
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedContainerColor = fieldBg,
+                                                unfocusedContainerColor = fieldBg,
+                                                focusedTextColor = textPrimary,
+                                                unfocusedTextColor = textPrimary,
+                                                focusedBorderColor = OrangePrimary,
+                                                unfocusedBorderColor = cardBorder
+                                            )
+                                        )
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 6.dp),
+                                            horizontalArrangement = Arrangement.End
+                                        ) {
+                                            Surface(
+                                                onClick = { pin = SecurityUtils.generateStrongRandomPin() },
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = OrangePrimary.copy(alpha = 0.15f),
+                                                border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.35f)),
+                                                modifier = Modifier.heightIn(min = 36.dp)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(14.dp))
+                                                    Text(
+                                                        text = if (language == AppLanguage.KINYARWANDA) "Kora PIN mu buryo bwikora" else "Generate Strong PIN",
+                                                        fontFamily = GopherFontFamily,
+                                                        fontSize = 11.sp,
+                                                        color = OrangePrimary,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Column {
+                                        OutlinedTextField(
+                                            value = password,
+                                            onValueChange = { password = it; errorMessage = null },
+                                            label = { Text(Localization.get("password", language) + " *", fontFamily = GopherFontFamily) },
+                                            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = OrangePrimary) },
+                                            trailingIcon = {
+                                                IconButton(onClick = { showPassword = !showPassword }) {
+                                                    Icon(
+                                                        imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                                        contentDescription = "Toggle password",
+                                                        tint = textSecondary
+                                                    )
+                                                }
+                                            },
+                                            visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                                            singleLine = true,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("register_password_input"),
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedContainerColor = fieldBg,
+                                                unfocusedContainerColor = fieldBg,
+                                                focusedTextColor = textPrimary,
+                                                unfocusedTextColor = textPrimary,
+                                                focusedBorderColor = OrangePrimary,
+                                                unfocusedBorderColor = cardBorder
+                                            )
+                                        )
+                                        if (password.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                LinearProgressIndicator(
+                                                    progress = { ((strengthScore + 0.5f) / 3.5f).coerceIn(0.15f, 1f) },
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .height(6.dp)
+                                                        .clip(RoundedCornerShape(3.dp)),
+                                                    color = strengthColor,
+                                                    trackColor = cardBorder
+                                                )
+                                                Text(strengthLabel, fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = strengthColor)
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-
-                    // Currency Selector Row
-                    Column {
-                        Text(
-                            text = "Default Currency Denomination:",
-                            fontFamily = GopherFontFamily,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = textSecondary
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            currencies.forEach { (sym, code, _) ->
-                                val isSelected = currencyCode == code
-                                Surface(
-                                    onClick = {
-                                        currencySymbol = sym
-                                        currencyCode = code
-                                    },
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = if (isSelected) OrangePrimary else chipBg,
-                                    border = BorderStroke(1.dp, if (isSelected) OrangePrimary else chipBorder),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(vertical = 8.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        Text(
-                                            text = sym,
-                                            fontFamily = GopherFontFamily,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Black,
-                                            color = if (isSelected) Color.White else OrangePrimary
-                                        )
-                                        Text(
-                                            text = code,
-                                            fontFamily = GopherFontFamily,
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (isSelected) Color.White.copy(alpha = 0.9f) else textSecondary
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = phone,
-                        onValueChange = { phone = it },
-                        label = { Text(Localization.get("phone_number", language), fontFamily = GopherFontFamily) },
-                        placeholder = { Text("+250 788 123 456") },
-                        leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null, tint = OrangePrimary) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = fieldBg,
-                            unfocusedContainerColor = fieldBg,
-                            focusedTextColor = textPrimary,
-                            unfocusedTextColor = textPrimary,
-                            focusedBorderColor = OrangePrimary,
-                            unfocusedBorderColor = cardBorder
-                        )
-                    )
-
-                    OutlinedTextField(
-                        value = address,
-                        onValueChange = { address = it },
-                        label = { Text(Localization.get("address", language), fontFamily = GopherFontFamily) },
-                        placeholder = { Text("e.g. Kigali, Nyarugenge Market #12") },
-                        leadingIcon = { Icon(Icons.Default.Place, contentDescription = null, tint = OrangePrimary) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = fieldBg,
-                            unfocusedContainerColor = fieldBg,
-                            focusedTextColor = textPrimary,
-                            unfocusedTextColor = textPrimary,
-                            focusedBorderColor = OrangePrimary,
-                            unfocusedBorderColor = cardBorder
-                        )
-                    )
 
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    // SECTION 2: MASTER OWNER CREDENTIALS
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            shape = CircleShape,
-                            color = OrangePrimary.copy(alpha = 0.2f),
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text("2", fontFamily = GopherFontFamily, fontWeight = FontWeight.Bold, color = OrangePrimary, fontSize = 12.sp)
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (language == AppLanguage.KINYARWANDA) "KONTI YA NYIR'UBUBIKO" else "MASTER OWNER ACCOUNT",
-                            fontFamily = GopherFontFamily,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = OrangePrimary,
-                            letterSpacing = 1.sp
-                        )
-                    }
-
-                    OutlinedTextField(
-                        value = ownerName,
-                        onValueChange = { ownerName = it },
-                        label = { Text(if (language == AppLanguage.KINYARWANDA) "Amazina ya Nyir'ububiko *" else "Owner Full Name *", fontFamily = GopherFontFamily) },
-                        placeholder = { Text("Jean Paul Mugisha") },
-                        leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = OrangePrimary) },
-                        singleLine = true,
+                    // Wizard Navigation Buttons
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = fieldBg,
-                            unfocusedContainerColor = fieldBg,
-                            focusedTextColor = textPrimary,
-                            unfocusedTextColor = textPrimary,
-                            focusedBorderColor = OrangePrimary,
-                            unfocusedBorderColor = cardBorder
-                        )
-                    )
-
-                    OutlinedTextField(
-                        value = username,
-                        onValueChange = { username = it },
-                        label = { Text(Localization.get("username_or_phone", language) + " *", fontFamily = GopherFontFamily) },
-                        placeholder = { Text("admin") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = fieldBg,
-                            unfocusedContainerColor = fieldBg,
-                            focusedTextColor = textPrimary,
-                            unfocusedTextColor = textPrimary,
-                            focusedBorderColor = OrangePrimary,
-                            unfocusedBorderColor = cardBorder
-                        )
-                    )
-
-                    // 4-Digit Fast PIN with Auto-Generator
-                    Column {
-                        OutlinedTextField(
-                            value = pin,
-                            onValueChange = { if (it.length <= 4 && it.all { c -> c.isDigit() }) pin = it },
-                            label = { Text("4-Digit Fast PIN *", fontFamily = GopherFontFamily) },
-                            placeholder = { Text("1234") },
-                            leadingIcon = { Icon(Icons.Default.Shield, contentDescription = null, tint = OrangePrimary) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                            visualTransformation = PasswordVisualTransformation(),
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = fieldBg,
-                                unfocusedContainerColor = fieldBg,
-                                focusedTextColor = textPrimary,
-                                unfocusedTextColor = textPrimary,
-                                focusedBorderColor = OrangePrimary,
-                                unfocusedBorderColor = cardBorder
-                            )
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 6.dp),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            Surface(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        if (step > 0) {
+                            OutlinedButton(
                                 onClick = {
-                                    pin = (1000 + Random.nextInt(9000)).toString()
+                                    errorMessage = null
+                                    step--
                                 },
-                                shape = RoundedCornerShape(8.dp),
-                                color = OrangePrimary.copy(alpha = 0.15f),
-                                border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.3f))
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 50.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, cardBorder)
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(13.dp))
-                                    Text(
-                                        text = if (language == AppLanguage.KINYARWANDA) "Kora PIN mu buryo bwikora" else "Auto-Generate PIN",
-                                        fontFamily = GopherFontFamily,
-                                        fontSize = 11.sp,
-                                        color = OrangePrimary,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Back", fontFamily = GopherFontFamily, fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = onCancel,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 50.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, cardBorder)
+                            ) {
+                                Text(Localization.get("cancel", language), fontFamily = GopherFontFamily, color = textSecondary)
                             }
                         }
-                    }
 
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = { password = it },
-                        label = { Text(Localization.get("password", language) + " *", fontFamily = GopherFontFamily) },
-                        leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = OrangePrimary) },
-                        trailingIcon = {
-                            IconButton(onClick = { showPassword = !showPassword }) {
-                                Icon(
-                                    imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                    contentDescription = "Toggle password",
-                                    tint = textSecondary
+                        if (step < 2) {
+                            Button(
+                                onClick = {
+                                    if (step == 0 && shopName.isBlank()) {
+                                        errorMessage = if (language == AppLanguage.KINYARWANDA) "Injiza izina ry'ububiko" else "Please enter your shop name."
+                                    } else if (step == 1 && phone.filter { it.isDigit() }.length < 9) {
+                                        errorMessage = "Please enter a valid owner phone number (for USSD & unlock code binding)."
+                                    } else {
+                                        errorMessage = null
+                                        step++
+                                    }
+                                },
+                                modifier = Modifier
+                                    .weight(1.4f)
+                                    .heightIn(min = 50.dp)
+                                    .testTag("register_next_step_btn"),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary)
+                            ) {
+                                Text("Continue", fontFamily = GopherFontFamily, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
+                        } else {
+                            Button(
+                                onClick = {
+                                    if (ownerName.isBlank()) {
+                                        errorMessage = if (language == AppLanguage.KINYARWANDA) "Injiza amazina ya nyir'ububiko" else "Please enter owner full name."
+                                    } else if (username.isBlank()) {
+                                        errorMessage = if (language == AppLanguage.KINYARWANDA) "Injiza username" else "Please enter a username."
+                                    } else if (pin.length != 4) {
+                                        errorMessage = if (language == AppLanguage.KINYARWANDA) "PIN igomba kuba imibare 4" else "PIN must be exactly 4 digits."
+                                    } else if (password.length < 4) {
+                                        errorMessage = if (language == AppLanguage.KINYARWANDA) "Ijambobanga rigomba kuba nibura inyuguti 4" else "Password must be at least 4 characters."
+                                    } else {
+                                        errorMessage = null
+                                        onRegister(
+                                            shopName.trim(),
+                                            currencyCode.trim(),
+                                            currencySymbol.trim(),
+                                            address.trim(),
+                                            phone.trim(),
+                                            ownerName.trim(),
+                                            username.trim().lowercase().replace(" ", ""),
+                                            pin.trim(),
+                                            password.trim()
+                                        )
+                                    }
+                                },
+                                modifier = Modifier
+                                    .weight(1.6f)
+                                    .heightIn(min = 50.dp)
+                                    .testTag("register_launch_button"),
+                                colors = ButtonDefaults.buttonColors(containerColor = ProfitGreen),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (language == AppLanguage.KINYARWANDA) "Kora Ububiko" else "Create & Launch",
+                                    fontFamily = GopherFontFamily,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
-                        },
-                        visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = fieldBg,
-                            unfocusedContainerColor = fieldBg,
-                            focusedTextColor = textPrimary,
-                            unfocusedTextColor = textPrimary,
-                            focusedBorderColor = OrangePrimary,
-                            unfocusedBorderColor = cardBorder
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Button(
-                        onClick = {
-                            if (shopName.isBlank()) {
-                                errorMessage = if (language == AppLanguage.KINYARWANDA) "Injiza izina ry'ububiko" else "Please enter your shop name."
-                            } else if (ownerName.isBlank()) {
-                                errorMessage = if (language == AppLanguage.KINYARWANDA) "Injiza amazina ya nyir'ububiko" else "Please enter owner full name."
-                            } else if (username.isBlank()) {
-                                errorMessage = if (language == AppLanguage.KINYARWANDA) "Injiza username" else "Please enter a username."
-                            } else if (pin.length != 4) {
-                                errorMessage = if (language == AppLanguage.KINYARWANDA) "PIN igomba kuba imibare 4" else "PIN must be exactly 4 digits."
-                            } else if (password.length < 4) {
-                                errorMessage = if (language == AppLanguage.KINYARWANDA) "Ijambobanga rigomba kuba nibura inyuguti 4" else "Password must be at least 4 characters."
-                            } else {
-                                errorMessage = null
-                                onRegister(
-                                    shopName.trim(),
-                                    currencyCode.trim(),
-                                    currencySymbol.trim(),
-                                    address.trim(),
-                                    phone.trim(),
-                                    ownerName.trim(),
-                                    username.trim().lowercase(),
-                                    pin.trim(),
-                                    password.trim()
-                                )
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (language == AppLanguage.KINYARWANDA) "Kora Ububiko & Tangira" else "Create Shop & Launch",
-                            fontFamily = GopherFontFamily,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    OutlinedButton(
-                        onClick = onCancel,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = textSecondary),
-                        border = BorderStroke(1.dp, cardBorder)
-                    ) {
-                        Text(Localization.get("cancel", language), fontFamily = GopherFontFamily)
+                        }
                     }
                 }
             }
@@ -1175,9 +1337,9 @@ private fun PinKeypad(
                                 shape = CircleShape,
                                 color = delBg,
                                 border = BorderStroke(1.dp, keyBorder),
-                                shadowElevation = if (isDarkTheme) 0.dp else 1.dp,
                                 modifier = Modifier
-                                    .size(56.dp)
+                                    .size(58.dp)
+                                    .testTag("pin_backspace_button")
                                     .clickable {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         onBackspace()
@@ -1198,9 +1360,9 @@ private fun PinKeypad(
                                 shape = CircleShape,
                                 color = Color(0xFF10B981).copy(alpha = if (isDarkTheme) 0.22f else 0.15f),
                                 border = BorderStroke(1.5.dp, ProfitGreen),
-                                shadowElevation = if (isDarkTheme) 0.dp else 1.dp,
                                 modifier = Modifier
-                                    .size(56.dp)
+                                    .size(58.dp)
+                                    .testTag("biometric_unlock_button")
                                     .clickable {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         onInstantUnlock()
@@ -1209,7 +1371,7 @@ private fun PinKeypad(
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = Icons.Default.Fingerprint,
-                                        contentDescription = "Quick Unlock",
+                                        contentDescription = "Biometric Unlock",
                                         tint = ProfitGreen,
                                         modifier = Modifier.size(28.dp)
                                     )
@@ -1223,7 +1385,8 @@ private fun PinKeypad(
                                 border = BorderStroke(1.2.dp, keyBorder),
                                 shadowElevation = if (isDarkTheme) 0.dp else 2.dp,
                                 modifier = Modifier
-                                    .size(56.dp)
+                                    .size(58.dp)
+                                    .testTag("pin_keypad_$key")
                                     .clickable {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         onDigit(key)

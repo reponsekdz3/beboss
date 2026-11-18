@@ -2,14 +2,10 @@ package com.example.util
 
 import android.util.Log
 import com.example.data.db.AppDatabase
-import com.example.data.model.Branch
-import com.example.data.model.Customer
-import com.example.data.model.CustomerPayment
 import com.example.data.model.Product
-import com.example.data.model.Sale
-import com.example.data.model.SaleItem
 import com.example.data.model.ShopProfile
-import com.example.data.model.User
+import com.example.data.model.UserRole
+import com.example.data.repository.BranchMergeResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,8 +16,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
-import java.nio.charset.StandardCharsets
-import java.util.Locale
 import java.util.UUID
 import javax.crypto.Mac
 import kotlin.random.Random
@@ -58,7 +52,7 @@ data class EndpointPingResult(
 data class SyncAuditLog(
     val id: String = UUID.randomUUID().toString(),
     val timestamp: Long = System.currentTimeMillis(),
-    val type: String, // "CLOUD_PUSH", "CLOUD_PULL", "P2P_WIFI", "IMPORT_MERGE", "CONFLICT"
+    val type: String, // "BRANCH_AUTO_SYNC", "CLOUD_PUSH", "P2P_WIFI", "IMPORT_MERGE", "CONFLICT"
     val status: String, // "SUCCESS", "FAILED", "OFFLINE", "RESOLVED"
     val summary: String,
     val latencyMs: Long = 0L,
@@ -90,7 +84,7 @@ class CloudSyncManager(private val database: AppDatabase) {
                 reachable = false,
                 latencyMs = 0L,
                 statusCode = 0,
-                message = "Invalid URL protocol (must start with https:// or http:// for local network)"
+                message = "Invalid URL protocol (must start with https:// or http://)"
             )
         }
 
@@ -104,11 +98,8 @@ class CloudSyncManager(private val database: AppDatabase) {
                 readTimeout = 5000
                 instanceFollowRedirects = true
             }
-
             val code = conn.responseCode
             val latency = System.currentTimeMillis() - startTime
-            val isSuccess = code in 200..399 || code == 404
-
             EndpointPingResult(
                 reachable = true,
                 latencyMs = latency,
@@ -127,11 +118,19 @@ class CloudSyncManager(private val database: AppDatabase) {
     }
 
     /**
-     * Executes real 2-way Cloud Synchronization (Push + Pull delta changes).
-     * Includes HMAC authentication, exponential backoff, HTTPS enforcement,
-     * and Last-Write-Wins conflict resolution.
+     * Synchronous 2-Way Multi-Branch Cloud Sync Engine:
+     * 1. Encodes all offline-first Room data (branches, products, customers, payments, sales, purchases, stock transfers, staff)
+     *    into a compressed HMAC-signed `BBSHARE1:` snapshot and pushes + pulls peer branch snapshots via Supabase `branch_sync_snapshots`.
+     * 2. Updates `shop_accounts` licensing metadata in Supabase.
+     * 3. Optionally syncs to any custom `serverEndpoint` configured by the business.
+     * 4. Resolves cross-branch edits cleanly via Last-Write-Wins (`mergeRemoteSummary`).
      */
-    suspend fun syncAllDataToCloud(serverEndpoint: String? = null): CloudSyncReport = withContext(Dispatchers.IO) {
+    suspend fun syncAllDataToCloud(
+        serverEndpoint: String? = null,
+        activeBranchId: String = "main_branch",
+        deviceId: String = "DEV-LOCAL",
+        mergeRemoteSummary: (suspend (ShopImportSummary) -> BranchMergeResult)? = null
+    ): CloudSyncReport = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
         try {
             val now = System.currentTimeMillis()
@@ -140,6 +139,8 @@ class CloudSyncManager(private val database: AppDatabase) {
             val customerDao = database.customerDao()
             val customerPaymentDao = database.customerPaymentDao()
             val saleDao = database.saleDao()
+            val purchaseDao = database.purchaseDao()
+            val stockTransferDao = database.stockTransferDao()
             val userDao = database.userDao()
             val shopProfileDao = database.shopProfileDao()
             val syncQueueDao = database.syncQueueDao()
@@ -149,152 +150,100 @@ class CloudSyncManager(private val database: AppDatabase) {
             val customers = customerDao.getAllCustomersList()
             val payments = customerPaymentDao.getAllPaymentsList()
             val sales = saleDao.getAllSalesList()
+            val saleItems = saleDao.getAllSaleItemsList()
+            val purchases = purchaseDao.getAllPurchasesList()
+            val transfers = stockTransferDao.getAllTransfersList()
             val users = userDao.getAllActiveUsersList()
             val profile = shopProfileDao.getShopProfileDirect() ?: ShopProfile()
 
-            // Build Comprehensive Cloud Payload
-            val payload = JSONObject().apply {
-                put("shopId", profile.id)
-                put("shopName", profile.shopName)
-                put("ownerPhone", profile.phone)
-                put("syncTimestamp", now)
-                put("currency", profile.currencyCode)
-                put("deviceChallenge", SubscriptionSecurityManager.computeDeviceChallenge(profile))
+            val ownerUser = users.firstOrNull { it.role == UserRole.OWNER } ?: users.firstOrNull()
+            val activeBranch = branches.firstOrNull { it.id == activeBranchId }
+                ?: branches.firstOrNull { it.isMainBranch }
+                ?: branches.firstOrNull()
 
-                // Branches
-                val branchArray = JSONArray()
-                branches.forEach { b ->
-                    branchArray.put(JSONObject().apply {
-                        put("id", b.id)
-                        put("name", b.name)
-                        put("code", b.code)
-                        put("address", b.address)
-                        put("phone", b.phone)
-                        put("isMainBranch", b.isMainBranch)
-                    })
-                }
-                put("branches", branchArray)
+            val exportJson = ShopDataTransferManager.createExportJson(
+                profile = profile,
+                users = users,
+                products = products,
+                customers = customers,
+                sales = sales,
+                saleItems = saleItems,
+                payments = payments,
+                exportedByUser = ownerUser,
+                branches = branches,
+                stockTransfers = transfers,
+                purchases = purchases,
+                branchIdFilter = null
+            )
+            val shareToken = ShopDataTransferManager.createCompressedSyncToken(exportJson)
+            val payloadKb = shareToken.toByteArray(Charsets.UTF_8).size / 1024.0
+            val totalPushedCount = branches.size + products.size + customers.size + payments.size +
+                sales.size + purchases.size + transfers.size
 
-                // Products & Stock per branch
-                val prodArray = JSONArray()
-                products.forEach { p ->
-                    prodArray.put(JSONObject().apply {
-                        put("id", p.id)
-                        put("name", p.name)
-                        put("category", p.category)
-                        put("costPrice", p.costPrice)
-                        put("sellingPrice", p.sellingPrice)
-                        put("quantityInStock", p.quantityInStock)
-                        put("lowStockThreshold", p.lowStockThreshold)
-                        put("unit", p.unit)
-                        put("barcode", p.barcode)
-                        put("branchId", p.branchId)
-                        put("updatedAt", p.updatedAt)
-                    })
-                }
-                put("products", prodArray)
-
-                // Customers & Live Debt Ledger
-                val custArray = JSONArray()
-                customers.forEach { c ->
-                    custArray.put(JSONObject().apply {
-                        put("id", c.id)
-                        put("name", c.name)
-                        put("phone", c.phone)
-                        put("category", c.category)
-                        put("debtBalance", c.debtBalance)
-                        put("creditLimit", c.creditLimit)
-                        put("address", c.address)
-                        put("updatedAt", c.updatedAt)
-                    })
-                }
-                put("customers", custArray)
-
-                // Debt Installments & Payments
-                val payArray = JSONArray()
-                payments.forEach { pay ->
-                    payArray.put(JSONObject().apply {
-                        put("id", pay.id)
-                        put("customerId", pay.customerId)
-                        put("customerName", pay.customerName)
-                        put("amount", pay.amount)
-                        put("previousDebt", pay.previousDebt)
-                        put("remainingDebt", pay.remainingDebt)
-                        put("paymentMethod", pay.paymentMethod)
-                        put("paymentDate", pay.paymentDate)
-                        put("receiptNumber", pay.receiptNumber)
-                        put("recordedBy", pay.recordedBy)
-                        put("branchId", pay.branchId)
-                    })
-                }
-                put("debtPayments", payArray)
-
-                // Sales & Invoices
-                val salesArray = JSONArray()
-                sales.forEach { s ->
-                    salesArray.put(JSONObject().apply {
-                        put("id", s.id)
-                        put("receiptNumber", s.receiptNumber)
-                        put("customerId", s.customerId)
-                        put("customerName", s.customerName)
-                        put("totalAmount", s.totalAmount)
-                        put("totalCost", s.totalCost)
-                        put("totalProfit", s.totalProfit)
-                        put("amountPaid", s.amountPaid)
-                        put("paymentMethod", s.paymentMethod)
-                        put("paymentStatus", s.paymentStatus)
-                        put("saleDate", s.saleDate)
-                        put("branchId", s.branchId)
-                        put("cashierName", s.cashierName)
-                    })
-                }
-                put("sales", salesArray)
-
-                // Users & Branch Staff Permissions
-                val userArray = JSONArray()
-                users.forEach { u ->
-                    userArray.put(JSONObject().apply {
-                        put("id", u.id)
-                        put("name", u.name)
-                        put("username", u.username)
-                        put("role", u.role.name)
-                        put("assignedBranchId", u.assignedBranchId)
-                        put("phone", u.phone)
-                    })
-                }
-                put("staff", userArray)
-            }
-
-            val totalPushedCount = products.size + customers.size + payments.size + sales.size + branches.size
-            val payloadString = payload.toString()
-            val payloadBytes = payloadString.toByteArray(Charsets.UTF_8)
-            val payloadKb = payloadBytes.size / 1024.0
             var itemsPulledCount = 0
             var conflictsResolvedCount = 0
-            var networkSyncSucceeded = false
+            var supabaseSyncOk = false
+            var customServerSyncOk = false
 
-            val endpoint = serverEndpoint ?: profile.backendServerUrl
-            val hasConfiguredEndpoint = !endpoint.isNullOrBlank() && (endpoint.startsWith("http://") || endpoint.startsWith("https://"))
+            // 1. Primary Cross-Branch Internet Sync via Supabase `branch_sync_snapshots`
+            if (SupabaseAdminClient.isConfigured()) {
+                val ownerUsername = ownerUser?.username ?: "owner"
+                val ownerPhone = ownerUser?.phone?.ifBlank { profile.phone } ?: profile.phone
+                val shopSyncKey = SupabaseAdminClient.computeShopSyncKey(ownerUsername, ownerPhone)
+                val recordsSummary = "${branches.size} branches • ${products.size} items • ${sales.size} sales • ${customers.size} clients"
 
-            if (hasConfiguredEndpoint) {
-                val cleanEp = endpoint!!.trim().removeSuffix("/")
-                val isHttps = cleanEp.startsWith("https://")
-                val isLocalDev = cleanEp.contains("192.168.") || cleanEp.contains("10.0.") || cleanEp.contains("localhost")
+                val pushedSnapshot = SupabaseAdminClient.upsertBranchSyncSnapshot(
+                    shopSyncKey = shopSyncKey,
+                    deviceId = deviceId,
+                    branchId = activeBranch?.id ?: activeBranchId,
+                    branchName = activeBranch?.name ?: "Main Store",
+                    shopName = profile.shopName,
+                    ownerUsername = ownerUsername,
+                    payloadToken = shareToken,
+                    recordsSummary = recordsSummary
+                )
 
-                if (!isHttps && !isLocalDev) {
-                    Log.w(TAG, "Sync warning: Plain HTTP used for non-local endpoint. HTTPS is strongly recommended for production.")
+                SupabaseAdminClient.upsertShopAccount(
+                    shopProfile = profile,
+                    ownerUser = ownerUser,
+                    branchCount = branches.size,
+                    workerCount = users.size
+                )
+
+                val peerSnapshots = SupabaseAdminClient.fetchShopBranchSnapshots(
+                    shopSyncKey = shopSyncKey,
+                    excludingDeviceId = deviceId
+                )
+
+                for (snap in peerSnapshots) {
+                    try {
+                        val decoded = ShopDataTransferManager.parseShopPackageString(snap.payloadToken)
+                        if (mergeRemoteSummary != null) {
+                            val mergeRes = mergeRemoteSummary(decoded)
+                            itemsPulledCount += mergeRes.totalMergedCount
+                            conflictsResolvedCount += mergeRes.conflictsResolved
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Skipped corrupt branch snapshot ${snap.id}: ${e.message}")
+                    }
                 }
+                supabaseSyncOk = pushedSnapshot
+            }
 
-                // Compute HMAC-SHA256 signature of the payload for authenticity
+            // 2. Optional Custom Business Relay Server (if explicitly set beyond default)
+            val endpoint = serverEndpoint ?: profile.backendServerUrl
+            val hasCustomEndpoint = !endpoint.isNullOrBlank() &&
+                endpoint != "https://api.beboss.app/v1" &&
+                (endpoint.startsWith("http://") || endpoint.startsWith("https://"))
+
+            if (hasCustomEndpoint) {
+                val cleanEp = endpoint!!.trim().removeSuffix("/")
+                val payloadBytes = exportJson.toString().toByteArray(Charsets.UTF_8)
                 val hmacKey = SubscriptionSecurityManager.getOrCreateIsolatedHmacKey(profile)
                 val mac = Mac.getInstance("HmacSHA256").apply { init(hmacKey) }
                 val hmacSignature = SecurityUtils.bytesToHex(mac.doFinal(payloadBytes))
 
-                // Exponential backoff retry loop (up to 3 attempts with jitter)
-                var lastException: Exception? = null
-                val maxAttempts = 3
-
-                for (attempt in 1..maxAttempts) {
+                for (attempt in 1..2) {
                     try {
                         val url = URL("$cleanEp/sync/cloud-push")
                         val conn = (url.openConnection() as HttpURLConnection).apply {
@@ -303,38 +252,27 @@ class CloudSyncManager(private val database: AppDatabase) {
                             setRequestProperty("X-Shop-Id", profile.id.toString())
                             setRequestProperty("X-Shop-Device", SubscriptionSecurityManager.computeDeviceChallenge(profile))
                             setRequestProperty("X-Shop-Signature", hmacSignature)
-                            if (profile.lastPaymentRef.isNotBlank()) {
-                                setRequestProperty("Authorization", "Bearer ${profile.lastPaymentRef}")
-                            }
                             doOutput = true
-                            connectTimeout = 10000
-                            readTimeout = 12000
+                            connectTimeout = 8000
+                            readTimeout = 10000
                         }
-
-                        conn.outputStream.use { os ->
-                            os.write(payloadBytes, 0, payloadBytes.size)
-                        }
-
+                        conn.outputStream.use { os -> os.write(payloadBytes, 0, payloadBytes.size) }
                         val respCode = conn.responseCode
                         if (respCode in 200..299) {
-                            networkSyncSucceeded = true
+                            customServerSyncOk = true
                             val responseText = conn.inputStream.bufferedReader().use { it.readText() }
-
-                            // Conflict Resolution & Remote Ingestion (Last-Write-Wins)
                             if (responseText.isNotBlank()) {
-                                try {
-                                    val respJson = JSONObject(responseText)
-                                    if (respJson.has("remoteProducts")) {
-                                        val rProducts = respJson.getJSONArray("remoteProducts")
-                                        for (i in 0 until rProducts.length()) {
-                                            val rp = rProducts.getJSONObject(i)
-                                            val pId = rp.optLong("id", 0L)
-                                            val remoteUpdated = rp.optLong("updatedAt", 0L)
-                                            val existingProd = productDao.getProductById(pId)
-
-                                            if (existingProd == null || remoteUpdated >= existingProd.updatedAt) {
-                                                // Remote is newer or new: merge
-                                                val merged = Product(
+                                val respJson = JSONObject(responseText)
+                                if (respJson.has("remoteProducts")) {
+                                    val rProducts = respJson.getJSONArray("remoteProducts")
+                                    for (i in 0 until rProducts.length()) {
+                                        val rp = rProducts.getJSONObject(i)
+                                        val pId = rp.optString("id", "").ifBlank { UUID.randomUUID().toString() }
+                                        val remoteUpdated = rp.optLong("updatedAt", 0L)
+                                        val existingProd = productDao.getProductById(pId)
+                                        if (existingProd == null || remoteUpdated > existingProd.updatedAt) {
+                                            productDao.insertProduct(
+                                                Product(
                                                     id = pId,
                                                     name = rp.optString("name", "Product"),
                                                     category = rp.optString("category", "General"),
@@ -343,77 +281,91 @@ class CloudSyncManager(private val database: AppDatabase) {
                                                     quantityInStock = rp.optDouble("quantityInStock", 0.0),
                                                     unit = rp.optString("unit", "pcs"),
                                                     barcode = rp.optString("barcode", ""),
-                                                    branchId = rp.optLong("branchId", 1L),
+                                                    branchId = rp.optString("branchId", "main_branch").ifBlank { "main_branch" },
                                                     updatedAt = remoteUpdated
                                                 )
-                                                productDao.insertProduct(merged)
-                                                itemsPulledCount++
-                                                if (existingProd != null) conflictsResolvedCount++
-                                            }
+                                            )
+                                            itemsPulledCount++
+                                            if (existingProd != null) conflictsResolvedCount++
                                         }
                                     }
-                                } catch (parseErr: Exception) {
-                                    Log.w(TAG, "Failed parsing remote delta sync updates: ${parseErr.message}")
                                 }
                             }
-                            break // Success! Exit retry loop
+                            break
                         } else if (respCode in 500..599) {
-                            // Server error: retry with backoff
-                            val backoffMs = (500L * (1 shl (attempt - 1))) + Random.nextLong(100, 300)
-                            Log.w(TAG, "Server returned $respCode on attempt $attempt, retrying in ${backoffMs}ms...")
-                            delay(backoffMs)
+                            delay(400L * attempt + Random.nextLong(50, 200))
                         } else {
-                            // Client error (4xx): do not retry
-                            Log.e(TAG, "Server rejected sync payload with code $respCode")
                             break
                         }
                     } catch (e: Exception) {
-                        lastException = e
-                        val backoffMs = (600L * (1 shl (attempt - 1))) + Random.nextLong(100, 300)
-                        Log.w(TAG, "Network attempt $attempt failed (${e.message}), retrying in ${backoffMs}ms...")
-                        delay(backoffMs)
+                        Log.w(TAG, "Custom server sync attempt $attempt failed: ${e.message}")
                     }
-                }
-
-                if (!networkSyncSucceeded) {
-                    val latency = System.currentTimeMillis() - startTime
-                    val errMsg = lastException?.localizedMessage ?: "Remote server unreachable"
-                    addAuditLog(
-                        type = "CLOUD_SYNC",
-                        status = "FAILED",
-                        summary = "Sync failed: $errMsg",
-                        latencyMs = latency
-                    )
-                    return@withContext CloudSyncReport(
-                        state = CloudSyncState.ERROR,
-                        itemsPushed = 0,
-                        itemsPulled = 0,
-                        lastSyncTimestamp = profile.lastSyncedAt,
-                        message = "Cloud sync connection failed: $errMsg",
-                        latencyMs = latency
-                    )
                 }
             }
 
-            // Only mark local sync queue as synced if network push actually succeeded or if running local snapshot
+            val anyCloudSuccess = supabaseSyncOk || customServerSyncOk
+            if (!SupabaseAdminClient.isConfigured() && !hasCustomEndpoint) {
+                val latency = System.currentTimeMillis() - startTime
+                addAuditLog(
+                    type = "BRANCH_AUTO_SYNC",
+                    status = "OFFLINE",
+                    summary = "Offline mode: Supabase secrets not configured; data persisted safely in local SQLite.",
+                    latencyMs = latency,
+                    payloadSizeKb = payloadKb
+                )
+                return@withContext CloudSyncReport(
+                    state = CloudSyncState.SYNCED,
+                    itemsPushed = totalPushedCount,
+                    itemsPulled = 0,
+                    lastSyncTimestamp = now,
+                    message = "Local SQLite Snapshot Ready (${branches.size} branch(es), $totalPushedCount records). Configure SUPABASE_URL in Secrets for multi-device auto-sync.",
+                    branchesCount = branches.size,
+                    productsCount = products.size,
+                    salesCount = sales.size,
+                    debtsCount = customers.count { it.debtBalance > 0 },
+                    latencyMs = latency
+                )
+            }
+
+            if (!anyCloudSuccess) {
+                val latency = System.currentTimeMillis() - startTime
+                addAuditLog(
+                    type = "BRANCH_AUTO_SYNC",
+                    status = "FAILED",
+                    summary = "Cloud branch sync queued — waiting for reachable connection.",
+                    latencyMs = latency
+                )
+                return@withContext CloudSyncReport(
+                    state = CloudSyncState.ERROR,
+                    itemsPushed = 0,
+                    itemsPulled = 0,
+                    lastSyncTimestamp = profile.lastSyncedAt,
+                    message = "Branch auto-sync retry queued (network/Supabase unreachable).",
+                    branchesCount = branches.size,
+                    productsCount = products.size,
+                    salesCount = sales.size,
+                    debtsCount = customers.count { it.debtBalance > 0 },
+                    latencyMs = latency
+                )
+            }
+
             val pendingQueue = syncQueueDao.getPendingQueueDirect()
-            if (pendingQueue.isNotEmpty() && (networkSyncSucceeded || !hasConfiguredEndpoint)) {
+            if (pendingQueue.isNotEmpty()) {
                 syncQueueDao.markAllSynced(pendingQueue.map { it.id }, now)
             }
             val unsyncedSales = saleDao.getUnsyncedSales()
-            if (networkSyncSucceeded || !hasConfiguredEndpoint) {
-                for (s in unsyncedSales) {
-                    saleDao.markSaleSynced(s.id, now)
-                }
+            for (s in unsyncedSales) {
+                saleDao.markSaleSynced(s.id, now)
             }
 
             shopProfileDao.updateLastSyncedAt(now)
             val latency = System.currentTimeMillis() - startTime
 
+            val summaryText = "Branch Auto-Sync: pushed $totalPushedCount records (${"%.1f".format(payloadKb)} KB), merged $itemsPulledCount updates, resolved $conflictsResolvedCount conflicts"
             addAuditLog(
-                type = "CLOUD_SYNC",
+                type = "BRANCH_AUTO_SYNC",
                 status = "SUCCESS",
-                summary = "Pushed $totalPushedCount items, pulled $itemsPulledCount, resolved $conflictsResolvedCount conflicts",
+                summary = summaryText,
                 latencyMs = latency,
                 payloadSizeKb = payloadKb
             )
@@ -423,7 +375,7 @@ class CloudSyncManager(private val database: AppDatabase) {
                 itemsPushed = totalPushedCount,
                 itemsPulled = itemsPulledCount,
                 lastSyncTimestamp = now,
-                message = "Cloud Sync Complete: $totalPushedCount pushed, $itemsPulledCount pulled, $conflictsResolvedCount resolved",
+                message = summaryText,
                 branchesCount = branches.size,
                 productsCount = products.size,
                 salesCount = sales.size,
@@ -433,19 +385,18 @@ class CloudSyncManager(private val database: AppDatabase) {
             )
         } catch (e: Exception) {
             val latency = System.currentTimeMillis() - startTime
-            Log.e(TAG, "Cloud sync failed", e)
+            Log.e(TAG, "Cloud branch sync failed", e)
             addAuditLog(
-                type = "CLOUD_SYNC",
+                type = "BRANCH_AUTO_SYNC",
                 status = "FAILED",
                 summary = "Error: ${e.localizedMessage ?: "Unknown"}",
                 latencyMs = latency
             )
             CloudSyncReport(
                 state = CloudSyncState.ERROR,
-                message = "Cloud sync error: ${e.localizedMessage ?: "Unknown"}",
+                message = "Branch sync error: ${e.localizedMessage ?: "Unknown"}",
                 latencyMs = latency
             )
         }
     }
 }
-

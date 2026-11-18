@@ -12,6 +12,7 @@ import com.example.data.model.DailyAnalyticsPoint
 import com.example.data.model.DatabaseEngineStats
 import com.example.data.model.DatabaseMaintenanceResult
 import com.example.data.model.InventoryValuation
+import com.example.data.model.PaymentVerificationRequest
 import com.example.data.model.Product
 import com.example.data.model.ProfitLossSummary
 import com.example.data.model.PurchaseRecord
@@ -39,6 +40,8 @@ import com.example.util.EndpointPingResult
 import com.example.util.PaymentProcessingResult
 import com.example.util.SecurityUtils
 import com.example.util.ShopImportSummary
+import com.example.util.SupabaseAdminClient
+import com.example.util.SupabaseSyncResult
 import com.example.util.SyncAuditLog
 import com.example.util.VoucherValidationResult
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +51,23 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
+
+data class BranchMergeResult(
+    val mergedBranches: Int = 0,
+    val mergedUsers: Int = 0,
+    val mergedProducts: Int = 0,
+    val mergedCustomers: Int = 0,
+    val mergedSales: Int = 0,
+    val mergedSaleItems: Int = 0,
+    val mergedPayments: Int = 0,
+    val mergedPurchases: Int = 0,
+    val mergedTransfers: Int = 0,
+    val conflictsResolved: Int = 0
+) {
+    val totalMergedCount: Int
+        get() = mergedBranches + mergedUsers + mergedProducts + mergedCustomers +
+            mergedSales + mergedSaleItems + mergedPayments + mergedPurchases + mergedTransfers
+}
 
 /**
  * Enterprise Repository Facade coordinating Domain Managers, Room DAOs, Cloud Sync, and Local Storage.
@@ -66,6 +86,7 @@ class BeBossRepository(private val database: AppDatabase) {
     private val purchaseDao = database.purchaseDao()
     private val stockTransferDao = database.stockTransferDao()
     private val redeemedVoucherDao = database.redeemedVoucherDao()
+    private val paymentVerificationDao = database.paymentVerificationDao()
 
     // Domain Managers
     val salesManager = SalesManager(saleDao, productDao, customerDao, syncQueueDao)
@@ -88,8 +109,15 @@ class BeBossRepository(private val database: AppDatabase) {
     suspend fun testServerPing(endpoint: String): EndpointPingResult =
         cloudSyncManager.testEndpointConnection(endpoint)
 
-    suspend fun performSync(): CloudSyncReport =
-        cloudSyncManager.syncAllDataToCloud()
+    suspend fun performSync(
+        activeBranchId: String = "main_branch",
+        deviceId: String = "DEV-LOCAL"
+    ): CloudSyncReport =
+        cloudSyncManager.syncAllDataToCloud(
+            activeBranchId = activeBranchId,
+            deviceId = deviceId,
+            mergeRemoteSummary = { summary -> mergeShopDataPackageLww(summary) }
+        )
 
     // -------------------------------------------------------------
     // PURCHASES & STOCK INFLOW
@@ -322,18 +350,172 @@ class BeBossRepository(private val database: AppDatabase) {
     suspend fun deleteStockTransfer(transferId: String) = branchTransferManager.deleteStockTransfer(transferId)
 
     // -------------------------------------------------------------
-    // SUBSCRIPTION & VOUCHERS
+    // SUBSCRIPTION, VOUCHERS & SUPABASE ADMIN LICENSING
     // -------------------------------------------------------------
     val redeemedVouchers: Flow<List<RedeemedVoucher>> = subscriptionManager.redeemedVouchers
+    val allPaymentRequests: Flow<List<PaymentVerificationRequest>> = paymentVerificationDao.getAllRequests()
 
     suspend fun redeemVoucher(
         voucherCode: String,
         shopProfile: ShopProfile,
         branchCount: Int,
+        workerCount: Int,
+        ownerUsername: String = "",
+        ownerPhoneOverride: String = "",
+        ownerUser: User? = null
+    ): VoucherValidationResult {
+        val cleanUpper = voucherCode.trim().uppercase()
+        val effectiveUser = ownerUsername.ifBlank { ownerUser?.username.orEmpty() }
+        val effectivePhone = ownerPhoneOverride.ifBlank { shopProfile.phone }
+
+        val cloudRecord = if (SupabaseAdminClient.isConfigured()) {
+            SupabaseAdminClient.verifyAndMarkCodeRedeemedInCloud(
+                unlockCode = cleanUpper,
+                username = effectiveUser,
+                phone = effectivePhone
+            )
+        } else null
+
+        if (cloudRecord?.status == "REVOKED") {
+            return VoucherValidationResult(
+                isValid = false,
+                daysToAdd = 0,
+                message = "This unlock code was revoked by BeBoss Admin and cannot be activated.",
+                planName = ""
+            )
+        }
+
+        val res = subscriptionManager.redeemVoucher(
+            voucherCode = voucherCode,
+            shopProfile = shopProfile,
+            branchCount = branchCount,
+            workerCount = workerCount,
+            ownerUsername = effectiveUser,
+            ownerPhoneOverride = effectivePhone
+        )
+        if (res.isValid) {
+            val existingReqs = paymentVerificationDao.getAllRequestsList()
+            existingReqs.filter { it.generatedUnlockCode.equals(cleanUpper, ignoreCase = true) }.forEach { req ->
+                paymentVerificationDao.updateCloudApproval(req.id, "REDEEMED", cleanUpper)
+            }
+            if (SupabaseAdminClient.isConfigured()) {
+                val updatedProf = shopProfileDao.getShopProfileDirect() ?: shopProfile
+                SupabaseAdminClient.upsertShopAccount(
+                    shopProfile = updatedProf,
+                    ownerUser = ownerUser,
+                    branchCount = branchCount,
+                    workerCount = workerCount
+                )
+            }
+        }
+        return res
+    }
+
+    suspend fun submitPaymentVerificationRequest(
+        request: PaymentVerificationRequest,
+        shopProfile: ShopProfile,
+        ownerUser: User?
+    ): Boolean = withContext(Dispatchers.IO) {
+        // 1. Always persist offline-first in Room
+        paymentVerificationDao.insertOrUpdate(request)
+
+        // 2. Sync to Supabase if configured & reachable
+        if (SupabaseAdminClient.isConfigured()) {
+            val uploaded = SupabaseAdminClient.submitPaymentRequest(request)
+            SupabaseAdminClient.upsertShopAccount(
+                shopProfile = shopProfile,
+                ownerUser = ownerUser,
+                branchCount = request.branchCount,
+                workerCount = request.workerCount
+            )
+            if (uploaded) {
+                paymentVerificationDao.markSynced(request.id)
+            }
+            return@withContext uploaded
+        }
+        false
+    }
+
+    suspend fun syncPendingAdminDataWithSupabase(
+        shopProfile: ShopProfile,
+        ownerUser: User?,
+        branchCount: Int,
         workerCount: Int
-    ): VoucherValidationResult = subscriptionManager.redeemVoucher(
-        voucherCode, shopProfile, branchCount, workerCount
-    )
+    ): SupabaseSyncResult = withContext(Dispatchers.IO) {
+        if (!SupabaseAdminClient.isConfigured()) {
+            return@withContext SupabaseSyncResult(
+                success = false,
+                message = "Supabase credentials not set in AI Studio Secrets. Verification saved offline."
+            )
+        }
+        try {
+            val username = ownerUser?.username?.trim().orEmpty().ifBlank { "owner" }
+            val phone = ownerUser?.phone?.ifBlank { shopProfile.phone } ?: shopProfile.phone
+
+            SupabaseAdminClient.upsertShopAccount(
+                shopProfile = shopProfile,
+                ownerUser = ownerUser,
+                branchCount = branchCount,
+                workerCount = workerCount
+            )
+
+            // Push all unsynced offline requests
+            val unsynced = paymentVerificationDao.getUnsyncedRequests()
+            var pushed = 0
+            for (req in unsynced) {
+                if (SupabaseAdminClient.submitPaymentRequest(req)) {
+                    paymentVerificationDao.markSynced(req.id)
+                    pushed++
+                }
+            }
+
+            // Pull approved unlock codes from Supabase for this account
+            val approvedDtos = SupabaseAdminClient.fetchApprovedRequestsForUser(username, phone)
+            for (dto in approvedDtos) {
+                val local = paymentVerificationDao.getRequestById(dto.id)
+                if (local != null) {
+                    paymentVerificationDao.updateCloudApproval(
+                        id = dto.id,
+                        status = dto.status,
+                        unlockCode = dto.generatedUnlockCode,
+                        updatedAt = dto.updatedAt
+                    )
+                } else {
+                    paymentVerificationDao.insertOrUpdate(
+                        PaymentVerificationRequest(
+                            id = dto.id,
+                            shopName = dto.shopName,
+                            ownerUsername = dto.ownerUsername,
+                            ownerPhone = dto.ownerPhone,
+                            deviceChallenge = dto.deviceChallenge,
+                            provider = dto.provider,
+                            ussdCode = dto.ussdCode,
+                            payerPhone = dto.payerPhone,
+                            amountRwf = dto.amountRwf,
+                            durationMonths = dto.durationMonths,
+                            branchCount = dto.branchCount,
+                            workerCount = dto.workerCount,
+                            telcoReference = dto.telcoReference,
+                            status = dto.status,
+                            generatedUnlockCode = dto.generatedUnlockCode,
+                            syncedToSupabase = true,
+                            createdAt = dto.createdAt,
+                            updatedAt = dto.updatedAt
+                        )
+                    )
+                }
+            }
+
+            val msg = if (approvedDtos.isNotEmpty()) {
+                "Synced $pushed request(s). ${approvedDtos.size} approved unlock code(s) ready from Admin!"
+            } else {
+                "Synced $pushed pending verification(s) with Supabase Admin Cloud."
+            }
+            SupabaseSyncResult(success = true, message = msg, approvedCodesFound = approvedDtos)
+        } catch (e: Exception) {
+            SupabaseSyncResult(success = false, message = "Supabase sync pending: ${e.message}")
+        }
+    }
 
     suspend fun recordDirectMoMoPayment(
         shopProfile: ShopProfile,
@@ -347,16 +529,174 @@ class BeBossRepository(private val database: AppDatabase) {
     )
 
     // -------------------------------------------------------------
-    // DATA RESTORE & SAMPLE SEEDING
+    // DATA RESTORE & COMPLETE BRANCH SNAPSHOT HELPERS
     // -------------------------------------------------------------
+    suspend fun getAllSaleItemsList(): List<SaleItem> = withContext(Dispatchers.IO) {
+        saleDao.getAllSaleItemsList()
+    }
+
+    suspend fun getAllPurchasesList(): List<PurchaseRecord> = withContext(Dispatchers.IO) {
+        purchaseDao.getAllPurchasesList()
+    }
+
+    suspend fun getAllTransfersList(): List<StockTransfer> = withContext(Dispatchers.IO) {
+        stockTransferDao.getAllTransfersList()
+    }
+
     suspend fun importShopDataPackage(summary: ShopImportSummary) = withContext(Dispatchers.IO) {
-        summary.shopProfile?.let { shopProfileDao.insertOrUpdateProfile(it) }
-        if (summary.users.isNotEmpty()) userDao.insertAllUsers(summary.users)
-        if (summary.products.isNotEmpty()) productDao.insertAll(summary.products)
-        if (summary.customers.isNotEmpty()) customerDao.insertAll(summary.customers)
-        if (summary.sales.isNotEmpty()) saleDao.insertSales(summary.sales)
-        if (summary.saleItems.isNotEmpty()) saleDao.insertSaleItems(summary.saleItems)
-        if (summary.payments.isNotEmpty()) customerPaymentDao.insertPayments(summary.payments)
+        mergeShopDataPackageLww(summary)
+    }
+
+    /**
+     * Last-Write-Wins conflict-resolving merge across branches & devices.
+     * Ensures newer local edits are never overwritten by stale remote snapshots,
+     * while preserving active subscription validity and merging missing immutable logs.
+     */
+    suspend fun mergeShopDataPackageLww(summary: ShopImportSummary): BranchMergeResult = withContext(Dispatchers.IO) {
+        var mergedBranches = 0
+        var mergedUsers = 0
+        var mergedProducts = 0
+        var mergedCustomers = 0
+        var mergedSales = 0
+        var mergedSaleItems = 0
+        var mergedPayments = 0
+        var mergedPurchases = 0
+        var mergedTransfers = 0
+        var conflicts = 0
+
+        summary.shopProfile?.let { remoteProf ->
+            val localProf = shopProfileDao.getShopProfileDirect()
+            if (localProf == null) {
+                shopProfileDao.insertOrUpdateProfile(remoteProf)
+            } else {
+                val bestExpiry = maxOf(localProf.subscriptionExpiresAt, remoteProf.subscriptionExpiresAt)
+                val bestStatus = if (bestExpiry > System.currentTimeMillis()) "ACTIVE" else localProf.subscriptionStatus
+                val mergedProf = if (remoteProf.updatedAt > localProf.updatedAt) {
+                    remoteProf.copy(
+                        id = 1L,
+                        subscriptionExpiresAt = bestExpiry,
+                        subscriptionStatus = bestStatus,
+                        lastPaymentRef = if (localProf.lastPaymentDate >= remoteProf.lastPaymentDate) localProf.lastPaymentRef else remoteProf.lastPaymentRef,
+                        lastPaymentAmount = if (localProf.lastPaymentDate >= remoteProf.lastPaymentDate) localProf.lastPaymentAmount else remoteProf.lastPaymentAmount,
+                        lastPaymentDate = maxOf(localProf.lastPaymentDate, remoteProf.lastPaymentDate),
+                        isOnlineSyncEnabled = localProf.isOnlineSyncEnabled
+                    )
+                } else {
+                    localProf.copy(
+                        subscriptionExpiresAt = bestExpiry,
+                        subscriptionStatus = bestStatus
+                    )
+                }
+                shopProfileDao.insertOrUpdateProfile(mergedProf)
+            }
+        }
+
+        for (remoteBranch in summary.branches) {
+            val local = branchDao.getBranchById(remoteBranch.id)
+            if (local == null) {
+                branchDao.insertBranch(remoteBranch)
+                mergedBranches++
+            } else if (remoteBranch.updatedAt > local.updatedAt) {
+                branchDao.insertBranch(remoteBranch)
+                mergedBranches++
+                conflicts++
+            }
+        }
+
+        for (remoteUser in summary.users) {
+            val local = userDao.getUserById(remoteUser.id)
+            if (local == null) {
+                userDao.insertUser(remoteUser)
+                mergedUsers++
+            } else if (remoteUser.updatedAt > local.updatedAt) {
+                userDao.insertUser(remoteUser)
+                mergedUsers++
+                conflicts++
+            }
+        }
+
+        for (remoteProd in summary.products) {
+            val local = productDao.getProductById(remoteProd.id)
+            if (local == null) {
+                productDao.insertProduct(remoteProd)
+                mergedProducts++
+            } else if (remoteProd.updatedAt > local.updatedAt) {
+                productDao.insertProduct(remoteProd)
+                mergedProducts++
+                conflicts++
+            }
+        }
+
+        for (remoteCust in summary.customers) {
+            val local = customerDao.getCustomerById(remoteCust.id)
+            if (local == null) {
+                customerDao.insertCustomer(remoteCust)
+                mergedCustomers++
+            } else if (remoteCust.updatedAt > local.updatedAt) {
+                customerDao.insertCustomer(remoteCust)
+                mergedCustomers++
+                conflicts++
+            }
+        }
+
+        val existingSaleIds = saleDao.getAllSalesList().map { it.id }.toSet()
+        val newSales = mutableListOf<Sale>()
+        for (remoteSale in summary.sales) {
+            if (!existingSaleIds.contains(remoteSale.id)) {
+                newSales.add(remoteSale)
+            } else {
+                val localSale = saleDao.getSaleById(remoteSale.id)
+                if (localSale != null && remoteSale.updatedAt > localSale.updatedAt) {
+                    newSales.add(remoteSale)
+                    conflicts++
+                }
+            }
+        }
+        if (newSales.isNotEmpty()) {
+            saleDao.insertSales(newSales)
+            mergedSales = newSales.size
+        }
+
+        val existingItemIds = saleDao.getAllSaleItemsList().map { it.id }.toSet()
+        val missingItems = summary.saleItems.filterNot { existingItemIds.contains(it.id) }
+        if (missingItems.isNotEmpty()) {
+            saleDao.insertSaleItems(missingItems)
+            mergedSaleItems = missingItems.size
+        }
+
+        val existingPaymentIds = customerPaymentDao.getAllPaymentsList().map { it.id }.toSet()
+        val missingPayments = summary.payments.filterNot { existingPaymentIds.contains(it.id) }
+        if (missingPayments.isNotEmpty()) {
+            customerPaymentDao.insertPayments(missingPayments)
+            mergedPayments = missingPayments.size
+        }
+
+        val existingPurchaseIds = purchaseDao.getAllPurchasesList().map { it.id }.toSet()
+        val missingPurchases = summary.purchases.filterNot { existingPurchaseIds.contains(it.id) }
+        if (missingPurchases.isNotEmpty()) {
+            purchaseDao.insertPurchases(missingPurchases)
+            mergedPurchases = missingPurchases.size
+        }
+
+        val existingTransferIds = stockTransferDao.getAllTransfersList().map { it.id }.toSet()
+        val missingTransfers = summary.stockTransfers.filterNot { existingTransferIds.contains(it.id) }
+        if (missingTransfers.isNotEmpty()) {
+            stockTransferDao.insertTransfers(missingTransfers)
+            mergedTransfers = missingTransfers.size
+        }
+
+        BranchMergeResult(
+            mergedBranches = mergedBranches,
+            mergedUsers = mergedUsers,
+            mergedProducts = mergedProducts,
+            mergedCustomers = mergedCustomers,
+            mergedSales = mergedSales,
+            mergedSaleItems = mergedSaleItems,
+            mergedPayments = mergedPayments,
+            mergedPurchases = mergedPurchases,
+            mergedTransfers = mergedTransfers,
+            conflictsResolved = conflicts
+        )
     }
 
     suspend fun seedSampleShopData() = withContext(Dispatchers.IO) {
@@ -399,7 +739,7 @@ class BeBossRepository(private val database: AppDatabase) {
 
         val totalRecords = prodCount + sCount + siCount + cCount + pCount + purCount + bCount + uCount + syncCount
 
-        val dbFile = context.getDatabasePath("beboss_database")
+        val dbFile = context.getDatabasePath("beboss_database.db")
         val sizeBytes = if (dbFile.exists()) dbFile.length() else 0L
         val formattedSize = if (sizeBytes > 1024 * 1024) {
             String.format("%.2f MB", sizeBytes / (1024.0 * 1024.0))

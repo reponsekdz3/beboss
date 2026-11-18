@@ -30,7 +30,9 @@ class SubscriptionManager(
         voucherCode: String,
         shopProfile: ShopProfile,
         branchCount: Int,
-        workerCount: Int
+        workerCount: Int,
+        ownerUsername: String = "",
+        ownerPhoneOverride: String = ""
     ): VoucherValidationResult = withContext(Dispatchers.IO) {
         val redeemedHashes = redeemedVoucherDao.getAllRedeemedHashes().toSet()
 
@@ -39,7 +41,9 @@ class SubscriptionManager(
             shopProfile = shopProfile,
             branchCount = branchCount,
             workerCount = workerCount,
-            alreadyRedeemedHashes = redeemedHashes
+            alreadyRedeemedHashes = redeemedHashes,
+            ownerUsername = ownerUsername,
+            ownerPhoneOverride = ownerPhoneOverride
         )
 
         if (validation.isValid) {

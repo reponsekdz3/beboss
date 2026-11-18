@@ -49,11 +49,16 @@ data class PaymentProcessingResult(
 
 object OfflineSubscriptionManager {
 
-    // Dynamic defaults (can be overridden via ShopProfile settings)
     var defaultMomoMerchantCode = "054321"
     var defaultMomoPhoneNumber = "0788765432"
     var defaultAirtelPhoneNumber = "0738765432"
-    var defaultSupportWhatsApp = "+250788765432"
+    var defaultSupportWhatsApp: String
+        get() = try {
+            com.example.BuildConfig.BEBOSS_ADMIN_WHATSAPP.ifBlank { "+250788765432" }
+        } catch (_: Throwable) {
+            "+250788765432"
+        }
+        set(_) {}
 
     /**
      * Dynamic Pricing Calculator based on active Branches and registered Shop Workers:
@@ -152,13 +157,17 @@ object OfflineSubscriptionManager {
         inputCode: String,
         shopProfile: ShopProfile,
         branchCount: Int = 1,
-        workerCount: Int = 1
+        workerCount: Int = 1,
+        ownerUsername: String = "",
+        ownerPhoneOverride: String = ""
     ): VoucherValidationResult {
         return SubscriptionSecurityManager.verifyVoucherToken(
             voucherInput = inputCode,
             shopProfile = shopProfile,
             branchCount = branchCount,
-            workerCount = workerCount
+            workerCount = workerCount,
+            ownerUsername = ownerUsername,
+            ownerPhoneOverride = ownerPhoneOverride
         )
     }
 
@@ -238,7 +247,7 @@ object OfflineSubscriptionManager {
             provider = provider,
             payerPhone = normalizedPhone,
             timestamp = timestamp,
-            message = "USSD Prompt sent for $provider. Dial $ussdCode or approve the prompt on $normalizedPhone, then enter the SMS reference ID."
+            message = "USSD Prompt ready for $provider. Dial $ussdCode on $normalizedPhone, then send your username & phone on WhatsApp to get your Admin Unlock Code."
         )
     }
 
@@ -286,6 +295,103 @@ object OfflineSubscriptionManager {
     }
 
     /**
+     * Builds the WhatsApp payment proof message containing the shop owner's
+     * created account username, registered phone, USSD amount, and device code.
+     */
+    fun buildPaymentProofWhatsAppMessage(
+        shopProfile: ShopProfile,
+        ownerUsername: String,
+        registeredPhone: String,
+        provider: String,
+        ussdCode: String,
+        amountRwf: Int,
+        durationMonths: Int,
+        branchCount: Int,
+        workerCount: Int,
+        telcoReference: String = "",
+        requestId: String = ""
+    ): String {
+        val deviceCode = getDeviceChallengeCode(shopProfile)
+        return buildString {
+            append("*BEBOSS SUBSCRIPTION PAYMENT VERIFICATION*\n")
+            append("━━━━━━━━━━━━━━━━━━━━\n")
+            append("• *Shop Name:* ${shopProfile.shopName}\n")
+            append("• *Account Username:* ${ownerUsername.ifBlank { "owner" }}\n")
+            append("• *Registered Phone:* ${registeredPhone.ifBlank { shopProfile.phone }}\n")
+            append("• *Device Code:* $deviceCode\n")
+            append("━━━━━━━━━━━━━━━━━━━━\n")
+            append("• *Provider:* $provider\n")
+            append("• *USSD Dialed:* $ussdCode\n")
+            append("• *Amount Paid:* $amountRwf FRw\n")
+            append("• *Plan:* $branchCount Branch(es), $workerCount Staff ($durationMonths Month(s))\n")
+            if (telcoReference.isNotBlank()) {
+                append("• *MoMo SMS Ref:* ${telcoReference.trim().uppercase()}\n")
+            }
+            if (requestId.isNotBlank()) {
+                append("• *Request ID:* ${requestId.take(8).uppercase()}\n")
+            }
+            append("━━━━━━━━━━━━━━━━━━━━\n")
+            append("Please verify my real MoMo payment and generate my BeBoss Unlock Code in Admin Dashboard. Murakoze!")
+        }
+    }
+
+    fun sendPaymentProofViaWhatsApp(
+        context: Context,
+        shopProfile: ShopProfile,
+        ownerUsername: String,
+        registeredPhone: String,
+        provider: String,
+        ussdCode: String,
+        amountRwf: Int,
+        durationMonths: Int,
+        branchCount: Int,
+        workerCount: Int,
+        telcoReference: String = "",
+        requestId: String = "",
+        adminWhatsAppNumber: String = defaultSupportWhatsApp
+    ) {
+        val msg = buildPaymentProofWhatsAppMessage(
+            shopProfile = shopProfile,
+            ownerUsername = ownerUsername,
+            registeredPhone = registeredPhone,
+            provider = provider,
+            ussdCode = ussdCode,
+            amountRwf = amountRwf,
+            durationMonths = durationMonths,
+            branchCount = branchCount,
+            workerCount = workerCount,
+            telcoReference = telcoReference,
+            requestId = requestId
+        )
+        PdfReportGenerator.sendWhatsAppDirect(context, adminWhatsAppNumber, msg)
+    }
+
+    fun buildAdminUnlockReplyWhatsAppMessage(
+        shopName: String,
+        username: String,
+        unlockCode: String,
+        daysAdded: Int,
+        tierName: String
+    ): String {
+        return """
+            *BEBOSS SUBSCRIPTION APPROVED!*
+            ━━━━━━━━━━━━━━━━━━━━
+            Hello *@$username* ($shopName),
+            Your Mobile Money payment has been verified!
+
+            *Your Unlock Code:*
+            `$unlockCode`
+
+            • *Plan:* $tierName
+            • *Duration Added:* +$daysAdded Days
+
+            *How to Activate:*
+            Open BeBoss App -> *Settings* -> *Insert Unlock Code* -> Paste the code above and tap *Verify & Activate*.
+            Murakoze gukoresha BeBoss!
+        """.trimIndent()
+    }
+
+    /**
      * Opens WhatsApp support chat with pre-filled subscription assistance message itemizing branches and staff.
      */
     fun contactSupportViaWhatsApp(
@@ -296,6 +402,7 @@ object OfflineSubscriptionManager {
         customMsg: String? = null
     ) {
         val deviceCode = getDeviceChallengeCode(shopProfile)
+        val ownerUser = allUsers.firstOrNull { it.role.name == "OWNER" } ?: allUsers.firstOrNull()
         val pricing = calculateSubscriptionPrice(branches.size, allUsers.size, 1)
 
         val defaultText = """
@@ -303,13 +410,14 @@ object OfflineSubscriptionManager {
             I want to activate / renew my shop's subscription:
 
             • Shop Name: ${shopProfile.shopName}
+            • Account Username: ${ownerUser?.username ?: "owner"}
             • Owner: ${shopProfile.name} (${shopProfile.phone})
             • Active Branches: ${branches.size} (${pricing.branchTierName})
             • Registered Staff: ${allUsers.size} (${pricing.workerTierName})
             • Monthly Calculated Fee: ${pricing.totalPayable} FRw
             • Device Challenge Code: $deviceCode
 
-            Please send my cryptographic voucher activation code or verify my payment. Murakoze!
+            Please send my unlock activation code or verify my payment. Murakoze!
         """.trimIndent()
 
         val textToSend = customMsg ?: defaultText

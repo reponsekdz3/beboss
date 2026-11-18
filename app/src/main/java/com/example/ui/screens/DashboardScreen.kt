@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,40 +23,55 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddShoppingCart
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.AttachMoney
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Inventory
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Receipt
+import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.Branch
 import com.example.data.model.InventoryValuation
 import com.example.data.model.Product
 import com.example.data.model.ProfitLossSummary
 import com.example.data.model.Sale
 import com.example.data.model.ShopProfile
 import com.example.data.model.User
+import com.example.ui.theme.LossRed
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
 import com.example.ui.theme.ProfitGreenLight
@@ -62,6 +79,9 @@ import com.example.ui.theme.WarningAmber
 import com.example.ui.theme.WarningAmberLight
 import com.example.ui.viewmodel.AppScreen
 import com.example.util.AppLanguage
+import com.example.util.CloudSyncReport
+import com.example.util.CloudSyncState
+import com.example.util.ConnectivityStatus
 import com.example.util.Localization
 import com.example.util.ReceiptGenerator
 
@@ -74,18 +94,167 @@ fun DashboardScreen(
     recentSales: List<Sale>,
     currentUser: User?,
     language: AppLanguage,
+    branches: List<Branch> = emptyList(),
+    selectedBranchId: String = "ALL",
+    connectivityStatus: ConnectivityStatus = ConnectivityStatus.AVAILABLE,
+    isSyncing: Boolean = false,
+    cloudSyncReport: CloudSyncReport? = null,
+    onSelectBranch: (String) -> Unit = {},
     onNavigate: (AppScreen) -> Unit,
     onOpenReceipt: (String) -> Unit,
     onRestockClick: (Product) -> Unit,
     onAddProductClick: () -> Unit
 ) {
+    var branchMenuExpanded by remember { mutableStateOf(false) }
+    val activeBranchLabel = remember(branches, selectedBranchId) {
+        if (selectedBranchId == "ALL") {
+            "All Branches (${branches.size.coerceAtLeast(1)})"
+        } else {
+            branches.firstOrNull { it.id == selectedBranchId }?.name ?: "HQ Branch"
+        }
+    }
+    val daysRemaining = shopProfile.daysRemaining
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // Operational Branch, Auto-Sync & Monthly License Bar
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    Surface(
+                        onClick = { if (branches.isNotEmpty()) branchMenuExpanded = true },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 42.dp)
+                            .testTag("dashboard_branch_selector")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Default.Store, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = activeBranchLabel,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (branches.isNotEmpty()) {
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = "Switch branch", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+
+                    DropdownMenu(
+                        expanded = branchMenuExpanded,
+                        onDismissRequest = { branchMenuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("All Branches (${branches.size})") },
+                            onClick = {
+                                onSelectBranch("ALL")
+                                branchMenuExpanded = false
+                            }
+                        )
+                        branches.forEach { branch ->
+                            DropdownMenuItem(
+                                text = { Text("${branch.name} (${branch.code})") },
+                                onClick = {
+                                    onSelectBranch(branch.id)
+                                    branchMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Auto Branch Sync Status Pill
+                val syncIcon = when {
+                    isSyncing -> Icons.Default.CloudSync
+                    connectivityStatus == ConnectivityStatus.AVAILABLE -> Icons.Default.CloudDone
+                    else -> Icons.Default.CloudOff
+                }
+                val syncColor = when {
+                    isSyncing -> OrangePrimary
+                    connectivityStatus == ConnectivityStatus.AVAILABLE -> ProfitGreen
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                val syncLabel = when {
+                    isSyncing -> "Syncing..."
+                    connectivityStatus == ConnectivityStatus.AVAILABLE && cloudSyncReport?.state == CloudSyncState.SYNCED -> "Synced"
+                    connectivityStatus == ConnectivityStatus.AVAILABLE -> "Auto-Sync"
+                    else -> "Offline"
+                }
+
+                Surface(
+                    onClick = { onNavigate(AppScreen.SETTINGS) },
+                    shape = RoundedCornerShape(12.dp),
+                    color = syncColor.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, syncColor.copy(alpha = 0.35f)),
+                    modifier = Modifier
+                        .heightIn(min = 42.dp)
+                        .testTag("dashboard_sync_status_pill")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Icon(syncIcon, contentDescription = "Sync status", tint = syncColor, modifier = Modifier.size(15.dp))
+                        Text(syncLabel, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = syncColor)
+                    }
+                }
+
+                // Monthly Subscription Countdown Pill
+                val subColor = when {
+                    daysRemaining <= 0 -> LossRed
+                    daysRemaining <= 5 -> WarningAmber
+                    else -> ProfitGreen
+                }
+                Surface(
+                    onClick = { onNavigate(AppScreen.SETTINGS) },
+                    shape = RoundedCornerShape(12.dp),
+                    color = subColor.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, subColor.copy(alpha = 0.35f)),
+                    modifier = Modifier
+                        .heightIn(min = 42.dp)
+                        .testTag("dashboard_license_pill")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(Icons.Default.VerifiedUser, contentDescription = "License status", tint = subColor, modifier = Modifier.size(14.dp))
+                        Text(
+                            text = if (daysRemaining > 0) "${daysRemaining}d" else "Renew",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = subColor
+                        )
+                    }
+                }
+            }
+        }
+
         // Hero Today Sales Card
         item {
             Card(

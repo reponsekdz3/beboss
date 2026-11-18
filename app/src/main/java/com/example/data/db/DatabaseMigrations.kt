@@ -140,6 +140,33 @@ object DatabaseMigrations {
         }
     }
 
+    val MIGRATION_8_9 = object : Migration(8, 9) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS payment_verification_requests (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    shopName TEXT NOT NULL,
+                    ownerUsername TEXT NOT NULL,
+                    ownerPhone TEXT NOT NULL,
+                    deviceChallenge TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    ussdCode TEXT NOT NULL,
+                    payerPhone TEXT NOT NULL,
+                    amountRwf INTEGER NOT NULL,
+                    durationMonths INTEGER NOT NULL,
+                    branchCount INTEGER NOT NULL,
+                    workerCount INTEGER NOT NULL,
+                    telcoReference TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    generatedUnlockCode TEXT NOT NULL,
+                    syncedToSupabase INTEGER NOT NULL DEFAULT 0,
+                    createdAt INTEGER NOT NULL,
+                    updatedAt INTEGER NOT NULL
+                )
+            """.trimIndent())
+        }
+    }
+
     val ALL_MIGRATIONS = arrayOf(
         MIGRATION_1_2,
         MIGRATION_2_3,
@@ -147,6 +174,7 @@ object DatabaseMigrations {
         MIGRATION_4_5,
         MIGRATION_5_6,
         MIGRATION_6_7,
-        MIGRATION_7_8
+        MIGRATION_7_8,
+        MIGRATION_8_9
     )
 }

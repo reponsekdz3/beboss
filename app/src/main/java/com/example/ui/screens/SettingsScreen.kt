@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -14,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,11 +37,13 @@ import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DataObject
 import androidx.compose.material.icons.filled.Delete
@@ -45,19 +51,23 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Flag
@@ -77,6 +87,7 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.SettingsSuggest
 import com.example.data.model.DatabaseEngineStats
 import com.example.data.model.DatabaseMaintenanceResult
+import com.example.data.model.PaymentVerificationRequest
 import androidx.compose.ui.text.font.FontFamily
 import com.example.ui.components.PermissionRequestDialog
 import com.example.util.PermissionManager
@@ -85,6 +96,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -98,10 +110,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -109,9 +125,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.Customer
 import com.example.data.model.CustomerPayment
 import com.example.data.model.Product
@@ -127,11 +146,24 @@ import com.example.ui.theme.OrangeLight
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
 import com.example.util.AppLanguage
+import com.example.util.BranchPeerSyncEvent
+import com.example.util.DiscoveredBranchHub
 import com.example.util.Localization
 import com.example.util.OfflineSubscriptionManager
+import com.example.util.PdfReportGenerator
 import com.example.util.ReceiptGenerator
 import com.example.util.ShopDataTransferManager
 import com.example.util.ShopImportSummary
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import com.example.util.SupabaseAdminSession
+import com.example.util.SupabaseAuditLogDto
+import com.example.util.SupabasePaymentRequestDto
+import com.example.util.SupabaseShopAccountDto
+import com.example.util.SupabaseUnlockCodeDto
+import java.io.File
 import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -192,6 +224,33 @@ fun SettingsScreen(
     onActivateVoucher: (String) -> Unit = {},
     onProcessDirectPayment: ((provider: String, phone: String, durationMonths: Int, onSuccess: (com.example.util.PaymentProcessingResult, com.example.util.SubscriptionPriceBreakdown) -> Unit) -> Unit)? = null,
     onGrantEmergencyGrace: () -> Unit = {},
+    paymentVerificationRequests: List<PaymentVerificationRequest> = emptyList(),
+    discoveredHubs: List<DiscoveredBranchHub> = emptyList(),
+    isDiscoveringHubs: Boolean = false,
+    peerSyncEvents: List<BranchPeerSyncEvent> = emptyList(),
+    onStartLanDiscovery: () -> Unit = {},
+    onStopLanDiscovery: () -> Unit = {},
+    onGenerateBranchShareToken: ((String?, (String) -> Unit) -> Unit)? = null,
+    onExportFullBranchPackage: ((String?, (File) -> Unit) -> Unit)? = null,
+    onSubmitPaymentVerification: ((provider: String, payerPhone: String, username: String, registeredPhone: String, durationMonths: Int, branchCount: Int, workerCount: Int, telcoRef: String, onDone: (PaymentVerificationRequest, Boolean) -> Unit) -> Unit)? = null,
+    onCheckCloudApproval: () -> Unit = {},
+    adminSession: SupabaseAdminSession? = null,
+    adminAuthError: String? = null,
+    isAdminAuthenticating: Boolean = false,
+    adminPaymentRequests: List<SupabasePaymentRequestDto> = emptyList(),
+    adminShopAccounts: List<SupabaseShopAccountDto> = emptyList(),
+    adminUnlockCodes: List<SupabaseUnlockCodeDto> = emptyList(),
+    adminAuditLogs: List<SupabaseAuditLogDto> = emptyList(),
+    isAdminLoading: Boolean = false,
+    onAdminSignIn: (String, String) -> Unit = { _, _ -> },
+    onAdminSignUp: (String, String, String) -> Unit = { _, _, _ -> },
+    onAdminSignOut: () -> Unit = {},
+    onRefreshAdminDashboard: () -> Unit = {},
+    onAdminApprovePayment: ((SupabasePaymentRequestDto, (Boolean, String) -> Unit) -> Unit)? = null,
+    onAdminRejectPayment: (SupabasePaymentRequestDto, String) -> Unit = { _, _ -> },
+    onAdminIssueManualCode: ((username: String, registeredPhone: String, tierCode: String, days: Int, amountRwf: Int, onDone: (Boolean, String) -> Unit) -> Unit)? = null,
+    onAdminRevokeCode: (SupabaseUnlockCodeDto) -> Unit = {},
+    onShareAdminWebPortal: () -> Unit = {},
     onShowSplashScreen: () -> Unit = {},
     onTestNotification: (String) -> Unit = {},
     onRequestPermissions: () -> Unit = {}
@@ -226,6 +285,8 @@ fun SettingsScreen(
     var showSyncHubDialog by remember { mutableStateOf(false) }
     var showDataTransferDialog by remember { mutableStateOf(false) }
     var showSubscriptionDialog by remember { mutableStateOf(false) }
+    var showAdminConsoleDialog by remember { mutableStateOf(false) }
+    var settingsUnlockCodeInput by remember { mutableStateOf("") }
     var showPermissionsDialog by remember { mutableStateOf(false) }
     var showThermalPreviewDialog by remember { mutableStateOf(false) }
     var showResetTransactionsDialog by remember { mutableStateOf(false) }
@@ -711,7 +772,7 @@ fun SettingsScreen(
             }
         }
 
-        // 3. Monthly Shop Subscription Card (Dynamic Multi-Branch & Worker Pricing)
+        // 3. Monthly Shop Subscription, USSD WhatsApp Verification & Direct Settings Unlock Code Entry
         item {
             val isActive = shopProfile.isSubscriptionActive
             val daysRemaining = shopProfile.daysRemaining
@@ -722,6 +783,12 @@ fun SettingsScreen(
                 workerCount = activeWorkerCount,
                 durationMonths = 1
             )
+            val ownerAccount = remember(currentUser, allUsers) {
+                currentUser ?: allUsers.firstOrNull { it.role == UserRole.OWNER } ?: allUsers.firstOrNull()
+            }
+            val deviceCode = remember(shopProfile) {
+                OfflineSubscriptionManager.getDeviceChallengeCode(shopProfile)
+            }
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -735,11 +802,11 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                             Surface(
                                 shape = CircleShape,
                                 color = if (isActive) ProfitGreen.copy(alpha = 0.15f) else LossRed.copy(alpha = 0.15f),
-                                modifier = Modifier.size(36.dp)
+                                modifier = Modifier.size(38.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
@@ -783,14 +850,30 @@ fun SettingsScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Text(
-                        text = "Calculated for $activeBranchCount Branch(es) & $activeWorkerCount Registered Worker(s). Auto-syncs to cloud.",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    // Account Binding Summary (sent to Admin on WhatsApp after USSD payment)
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "Account: @${ownerAccount?.username?.ifBlank { "owner" } ?: "owner"} • Phone: ${ownerAccount?.phone?.ifBlank { shopProfile.phone } ?: shopProfile.phone}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Device ID: $deviceCode • Admin WhatsApp: ${OfflineSubscriptionManager.defaultSupportWhatsApp}",
+                                fontSize = 10.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
+                    // Step 1: Real USSD Dialers
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -799,35 +882,257 @@ fun SettingsScreen(
                             onClick = {
                                 OfflineSubscriptionManager.dialMtnMoMo(context, currentPricing.totalPayable)
                             },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp)
+                                .testTag("settings_ussd_mtn_btn"),
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFCC00))
                         ) {
-                            Text("MTN MoMo (${currentPricing.totalPayable} FRw)", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text("Dial MTN *182# (${currentPricing.totalPayable} FRw)", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
 
                         Button(
                             onClick = {
                                 OfflineSubscriptionManager.dialAirtelMoney(context, currentPricing.totalPayable)
                             },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp)
+                                .testTag("settings_ussd_airtel_btn"),
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
                         ) {
-                            Text("Airtel (${currentPricing.totalPayable} FRw)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text("Dial Airtel *500# (${currentPricing.totalPayable} FRw)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Step 2: Pay & Submit WhatsApp Proof + Open Full Licensing Wizard
+                    Button(
+                        onClick = { showSubscriptionDialog = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag("settings_open_subscription_wizard_btn"),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary)
+                    ) {
+                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (language == AppLanguage.KINYARWANDA) "Ishyura USSD & Ohereza Gihamya kuri WhatsApp" else "Pay USSD & Send WhatsApp Verification",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.5.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Step 3: Insert Admin Unlock Code right inside Settings
+                    Text(
+                        text = if (language == AppLanguage.KINYARWANDA) "Injiza Kode yo Gufungura yoherejwe na Admin" else "Insert Admin Unlock Code (via Settings)",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "After Admin verifies your real USSD payment & account (@${ownerAccount?.username ?: "owner"}), paste the BB2-... unlock code received from Admin:",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    OutlinedButton(
-                        onClick = { showSubscriptionDialog = true },
-                        modifier = Modifier.fillMaxWidth(),
+                    OutlinedTextField(
+                        value = settingsUnlockCodeInput,
+                        onValueChange = { settingsUnlockCodeInput = it },
+                        label = { Text("Unlock Code (BB2-... or BB-...)") },
+                        placeholder = { Text("BB2-SINGLE-030D-...") },
+                        leadingIcon = { Icon(Icons.Default.Key, contentDescription = null, tint = OrangePrimary) },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("settings_unlock_code_input"),
                         shape = RoundedCornerShape(10.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(16.dp), tint = OrangePrimary)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(Localization.get("renew_subscription", language), color = OrangePrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Button(
+                            onClick = {
+                                if (settingsUnlockCodeInput.isNotBlank()) {
+                                    onActivateVoucher(settingsUnlockCodeInput.trim())
+                                    settingsUnlockCodeInput = ""
+                                }
+                            },
+                            enabled = settingsUnlockCodeInput.isNotBlank(),
+                            modifier = Modifier
+                                .weight(1.3f)
+                                .heightIn(min = 48.dp)
+                                .testTag("settings_activate_unlock_code_btn"),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = ProfitGreen)
+                        ) {
+                            Icon(Icons.Default.VerifiedUser, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Verify & Activate", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = onCheckCloudApproval,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp)
+                                .testTag("settings_sync_cloud_approvals_btn"),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(16.dp), tint = OrangePrimary)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Cloud Sync", fontSize = 11.5.sp, color = OrangePrimary, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // Show Recent Payment Verification Requests & 1-tap apply when cloud approved
+                    if (paymentVerificationRequests.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Recent Payment Requests (${paymentVerificationRequests.size}):",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        paymentVerificationRequests.take(2).forEach { req ->
+                            val isApproved = req.status == "APPROVED" && req.generatedUnlockCode.isNotBlank()
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isApproved) ProfitGreen.copy(alpha = 0.1f) else Color(0xFFFFF7ED),
+                                border = BorderStroke(1.dp, if (isApproved) ProfitGreen.copy(alpha = 0.4f) else OrangePrimary.copy(alpha = 0.35f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "${req.provider} • ${req.amountRwf} FRw (${req.status})",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isApproved) ProfitGreen else DarkNavy
+                                        )
+                                        Text(
+                                            text = if (isApproved) "Code: ${req.generatedUnlockCode}"
+                                            else "@${req.ownerUsername} • ${if (req.syncedToSupabase) "In Supabase Queue" else "Queued Offline"}",
+                                            fontSize = 10.sp,
+                                            color = InkMedium
+                                        )
+                                    }
+                                    if (isApproved) {
+                                        Button(
+                                            onClick = { onActivateVoucher(req.generatedUnlockCode) },
+                                            modifier = Modifier.heightIn(min = 48.dp),
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = ProfitGreen)
+                                        ) {
+                                            Text("Apply", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3.5 Admin Licensing & Supabase Web Platform Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, DarkNavy.copy(alpha = 0.25f)),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            shape = CircleShape,
+                            color = DarkNavy.copy(alpha = 0.12f),
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.AdminPanelSettings, contentDescription = null, tint = DarkNavy, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Admin Verification & Web Platform",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.5.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (adminSession != null) {
+                                    "Signed in as ${adminSession.email} • Verify payments & issue BB2 codes"
+                                } else {
+                                    "Supabase Auth licensing portal for payment verification & BB2 unlock codes"
+                                },
+                                fontSize = 11.sp,
+                                color = if (adminSession != null) ProfitGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                onRefreshAdminDashboard()
+                                showAdminConsoleDialog = true
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp)
+                                .testTag("open_admin_console_btn"),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkNavy)
+                        ) {
+                            Icon(Icons.Default.VerifiedUser, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Admin Console", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = onShareAdminWebPortal,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp)
+                                .testTag("share_admin_web_portal_btn"),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(16.dp), tint = OrangePrimary)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Web Admin Portal", fontSize = 12.sp, color = OrangePrimary, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -1376,7 +1681,7 @@ fun SettingsScreen(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "Room SQLite v6 • WAL Journal Active",
+                                    text = "Room SQLite v9 • WAL Journal Active",
                                     fontSize = 11.sp,
                                     color = Color(0xFF0284C7),
                                     fontWeight = FontWeight.Medium
@@ -2265,6 +2570,7 @@ fun SettingsScreen(
             products = products,
             customers = customers,
             customerPayments = customerPayments,
+            stockTransfers = stockTransfers,
             cloudSyncReport = cloudSyncReport,
             isSyncing = isSyncing,
             language = language,
@@ -2272,8 +2578,15 @@ fun SettingsScreen(
             localServerIp = localServerIp,
             localConnectedClients = localConnectedClients,
             localLastReceivedPacket = localLastReceivedPacket,
+            discoveredHubs = discoveredHubs,
+            isDiscoveringHubs = isDiscoveringHubs,
+            peerSyncEvents = peerSyncEvents,
             isP2pSyncing = isP2pSyncing,
             syncAuditLogs = syncAuditLogs,
+            onStartLanDiscovery = onStartLanDiscovery,
+            onStopLanDiscovery = onStopLanDiscovery,
+            onGenerateBranchShareToken = onGenerateBranchShareToken,
+            onExportFullBranchPackage = onExportFullBranchPackage,
             onSyncToCloudNow = onSyncToCloudNow,
             onSyncCloudWithEndpoint = onSyncCloudWithEndpoint,
             onTestPing = onTestPing,
@@ -2284,40 +2597,96 @@ fun SettingsScreen(
         )
     }
 
-    // Subscription & Offline Paywall Dialog
+    // Subscription & USSD + WhatsApp Verification Full-Width Dialog
     if (showSubscriptionDialog) {
-        AlertDialog(
+        Dialog(
             onDismissRequest = { showSubscriptionDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Security, contentDescription = null, tint = OrangePrimary)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = Localization.get("subscription_title", language),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth(0.95f)
+                    .widthIn(max = 640.dp)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(vertical = 10.dp),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Security, contentDescription = null, tint = OrangePrimary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = Localization.get("subscription_title", language),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        IconButton(
+                            onClick = { showSubscriptionDialog = false },
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = Localization.get("close", language))
+                        }
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+                    SubscriptionScreen(
+                        shopProfile = shopProfile,
+                        branches = branches,
+                        allUsers = allUsers,
+                        currentUser = currentUser,
+                        paymentRequests = paymentVerificationRequests,
+                        language = language,
+                        onActivateVoucher = { code ->
+                            onActivateVoucher(code)
+                        },
+                        onProcessDirectPayment = onProcessDirectPayment,
+                        onSubmitPaymentVerification = onSubmitPaymentVerification,
+                        onCheckCloudApproval = onCheckCloudApproval,
+                        onGrantEmergencyGrace = onGrantEmergencyGrace,
+                        onClose = { showSubscriptionDialog = false }
                     )
                 }
-            },
-            text = {
-                SubscriptionScreen(
-                    shopProfile = shopProfile,
-                    branches = branches,
-                    allUsers = allUsers,
-                    language = language,
-                    onActivateVoucher = { code ->
-                        onActivateVoucher(code)
-                    },
-                    onProcessDirectPayment = onProcessDirectPayment,
-                    onGrantEmergencyGrace = onGrantEmergencyGrace,
-                    onClose = { showSubscriptionDialog = false }
-                )
-            },
-            confirmButton = {
-                OutlinedButton(onClick = { showSubscriptionDialog = false }) {
-                    Text(Localization.get("close", language))
-                }
             }
+        }
+    }
+
+    // In-App Supabase Admin Verification & Unlock Code Generator Console
+    if (showAdminConsoleDialog) {
+        AdminVerificationConsoleDialog(
+            shopProfile = shopProfile,
+            adminSession = adminSession,
+            adminAuthError = adminAuthError,
+            isAdminAuthenticating = isAdminAuthenticating,
+            paymentRequests = adminPaymentRequests,
+            shopAccounts = adminShopAccounts,
+            unlockCodes = adminUnlockCodes,
+            auditLogs = adminAuditLogs,
+            isLoading = isAdminLoading,
+            onSignInAdmin = onAdminSignIn,
+            onSignUpAdmin = onAdminSignUp,
+            onSignOutAdmin = onAdminSignOut,
+            onRefresh = onRefreshAdminDashboard,
+            onApprovePayment = { req, onDone ->
+                if (onAdminApprovePayment != null) {
+                    onAdminApprovePayment(req, onDone)
+                }
+            },
+            onRejectPayment = onAdminRejectPayment,
+            onIssueManualCode = { username, regPhone, tierCode, days, amountRwf, onDone ->
+                if (onAdminIssueManualCode != null) {
+                    onAdminIssueManualCode(username, regPhone, tierCode, days, amountRwf, onDone)
+                }
+            },
+            onRevokeCode = onAdminRevokeCode,
+            onShareWebPortal = onShareAdminWebPortal,
+            onDismiss = { showAdminConsoleDialog = false }
         )
     }
 
@@ -2358,143 +2727,24 @@ fun SettingsScreen(
         )
     }
 
-    // Data Transfer Dialog
+    // Data Transfer Dialog (Full Branch Ledger & Signed Token Support)
     if (showDataTransferDialog) {
         DataTransferDialog(
             shopProfile = shopProfile,
-            users = allUsers,
+            allUsers = allUsers,
             products = products,
             customers = customers,
             sales = sales,
             customerPayments = customerPayments,
-            language = language,
-            onDismiss = { showDataTransferDialog = false },
-            onImportPackage = onImportPackage
+            currentUser = currentUser,
+            onImportPackage = onImportPackage,
+            onExportFullPackage = onExportFullBranchPackage?.let { exporter ->
+                { onReady -> exporter("ALL", onReady) }
+            },
+            onCreateShareToken = onGenerateBranchShareToken?.let { tokenGen ->
+                { onReady -> tokenGen("ALL", onReady) }
+            },
+            onDismiss = { showDataTransferDialog = false }
         )
     }
-}
-
-@Composable
-private fun DataTransferDialog(
-    shopProfile: ShopProfile,
-    users: List<User>,
-    products: List<Product>,
-    customers: List<Customer>,
-    sales: List<Sale>,
-    customerPayments: List<CustomerPayment>,
-    language: AppLanguage,
-    onDismiss: () -> Unit,
-    onImportPackage: (ShopImportSummary) -> Unit
-) {
-    val context = LocalContext.current
-    var importJsonText by remember { mutableStateOf("") }
-    var importError by remember { mutableStateOf<String?>(null) }
-    var importSuccess by remember { mutableStateOf<String?>(null) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Storage, contentDescription = null, tint = OrangePrimary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(Localization.get("data_backup", language), fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = Localization.get("backup_description", language),
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                // Export Button
-                Button(
-                    onClick = {
-                        val exportedFile = ShopDataTransferManager.exportShopPackage(
-                            context = context,
-                            profile = shopProfile,
-                            users = users,
-                            products = products,
-                            customers = customers,
-                            sales = sales,
-                            saleItems = emptyList(),
-                            payments = customerPayments,
-                            exportedByUser = users.firstOrNull()
-                        )
-                        ShopDataTransferManager.shareBackupFile(context, exportedFile, shopProfile.shopName)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(Localization.get("export_json_backup", language))
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-                Text(
-                    text = Localization.get("restore_database", language),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-
-                OutlinedTextField(
-                    value = importJsonText,
-                    onValueChange = { importJsonText = it },
-                    label = { Text("Paste JSON Backup Data") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(100.dp),
-                    shape = RoundedCornerShape(8.dp)
-                )
-
-                if (importError != null) {
-                    Text(importError!!, color = Color(0xFFDC2626), fontSize = 11.sp)
-                }
-
-                if (importSuccess != null) {
-                    Text(importSuccess!!, color = ProfitGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-
-                Button(
-                    onClick = {
-                        if (importJsonText.isBlank()) {
-                            importError = "Please paste valid JSON backup text."
-                        } else {
-                            try {
-                                val summary = ShopDataTransferManager.parseShopPackageString(importJsonText)
-                                onImportPackage(summary)
-                                importError = null
-                                importSuccess = "Successfully restored ${summary.products.size} products & ${summary.sales.size} sales!"
-                                importJsonText = ""
-                            } catch (e: Exception) {
-                                importError = "JSON Parsing failed: ${e.message}"
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = DarkNavy),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(Localization.get("restore_database", language))
-                }
-            }
-        },
-        confirmButton = {
-            OutlinedButton(onClick = onDismiss) {
-                Text(Localization.get("close", language))
-            }
-        }
-    )
 }

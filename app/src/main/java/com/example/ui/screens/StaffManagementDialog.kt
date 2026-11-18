@@ -250,7 +250,7 @@ fun StaffManagementDialog(
                                             Text(
                                                 text = "${user.role.displayName} • @${user.username}",
                                                 fontSize = 11.5.sp,
-                                                color = InkMedium
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
                                     }
@@ -292,21 +292,21 @@ fun StaffManagementDialog(
                                             text = assignedBranch?.name ?: (if (user.role == UserRole.OWNER) "All Branches (HQ)" else "Main Store"),
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Medium,
-                                            color = DarkNavy
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                     }
 
                                     if (user.phone.isNotBlank()) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(Icons.Default.Phone, contentDescription = null, tint = InkMedium, modifier = Modifier.size(13.dp))
+                                            Icon(Icons.Default.Phone, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(13.dp))
                                             Spacer(modifier = Modifier.width(4.dp))
-                                            Text(user.phone, fontSize = 11.sp, color = InkMedium)
+                                            Text(user.phone, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
                                 }
 
                                 Spacer(modifier = Modifier.height(8.dp))
-                                HorizontalDivider(color = Color(0xFFE5E7EB), thickness = 0.5.dp)
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
                                 Spacer(modifier = Modifier.height(6.dp))
 
                                 // Quick Action Buttons
@@ -360,16 +360,16 @@ fun StaffManagementDialog(
                                     Row {
                                         IconButton(
                                             onClick = { userToEdit = user },
-                                            modifier = Modifier.size(30.dp)
+                                            modifier = Modifier.size(48.dp)
                                         ) {
-                                            Icon(Icons.Default.Edit, contentDescription = "Edit", tint = DarkNavy, modifier = Modifier.size(16.dp))
+                                            Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(18.dp))
                                         }
                                         if (!isSelf) {
                                             IconButton(
                                                 onClick = { onDeleteUser(user.id) },
-                                                modifier = Modifier.size(30.dp)
+                                                modifier = Modifier.size(48.dp)
                                             ) {
-                                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = LossRed, modifier = Modifier.size(16.dp))
+                                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = LossRed, modifier = Modifier.size(18.dp))
                                             }
                                         }
                                     }

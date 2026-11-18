@@ -97,6 +97,8 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     private val db = AppDatabase.getDatabase(application)
     val repository = BeBossRepository(db)
     private val connectivityObserver = com.example.util.NetworkConnectivityObserver(application)
+    private val deviceId: String = com.example.util.SupabaseAdminClient.getOrCreateDeviceId(application)
+    private var autoBranchSyncJob: kotlinx.coroutines.Job? = null
 
     // Network Connectivity & Cloud Sync State
     val connectivityStatus: StateFlow<com.example.util.ConnectivityStatus> = connectivityObserver.networkStatus
@@ -104,6 +106,21 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _cloudSyncReport = MutableStateFlow<com.example.util.CloudSyncReport?>(null)
     val cloudSyncReport: StateFlow<com.example.util.CloudSyncReport?> = _cloudSyncReport.asStateFlow()
+
+    fun scheduleAutoBranchSync(delayMs: Long = 1600L) {
+        if (connectivityStatus.value != com.example.util.ConnectivityStatus.AVAILABLE) return
+        autoBranchSyncJob?.cancel()
+        autoBranchSyncJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(delayMs)
+            if (connectivityStatus.value == com.example.util.ConnectivityStatus.AVAILABLE && !_isSyncing.value) {
+                val report = repository.performSync(
+                    activeBranchId = _selectedBranchId.value,
+                    deviceId = deviceId
+                )
+                _cloudSyncReport.value = report
+            }
+        }
+    }
 
     // Multi-Branch Management & Logistics
     val branches: StateFlow<List<com.example.data.model.Branch>> = repository.allBranches.stateIn(
@@ -138,6 +155,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 )
                 // Real system notification trigger
                 BeBossNotificationManager.sendStockTransferNotification(getApplication(), transfer)
+                scheduleAutoBranchSync()
 
                 val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
                     "Kwohereza ibicuruzwa (${quantity.toInt()} ${transfer.productName}) muri $toBranchName byakozwe neza!"
@@ -152,16 +170,20 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun deleteStockTransfer(id: String) {
         viewModelScope.launch {
             repository.deleteStockTransfer(id)
+            scheduleAutoBranchSync()
             _snackbarMessage.emit("Stock transfer log removed.")
         }
     }
 
-    // Local P2P WiFi / Hotspot Sync Hub
+    // Local P2P WiFi / Hotspot Sync Hub + LAN Auto-Discovery
     val localNetworkSyncServer = com.example.util.LocalNetworkSyncServer(application, db)
     val localServerStatus = localNetworkSyncServer.serverStatus
     val localServerIp = localNetworkSyncServer.serverIpAddress
     val localConnectedClients = localNetworkSyncServer.connectedClientsCount
     val localLastReceivedPacket = localNetworkSyncServer.lastReceivedPacketSummary
+    val discoveredHubs = localNetworkSyncServer.discoveredHubs
+    val isDiscoveringHubs = localNetworkSyncServer.isDiscoveringHubs
+    val peerSyncEvents = localNetworkSyncServer.peerSyncEvents
     val syncAuditLogs = repository.syncAuditLogs
 
     private val _isP2pSyncing = MutableStateFlow(false)
@@ -179,6 +201,14 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun startLanDiscovery() {
+        localNetworkSyncServer.startDiscovery()
+    }
+
+    fun stopLanDiscovery() {
+        localNetworkSyncServer.stopDiscovery()
+    }
+
     fun syncWithLocalMasterHub(hubIp: String) {
         viewModelScope.launch {
             _isP2pSyncing.value = true
@@ -194,6 +224,75 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun createBranchShareToken(branchIdFilter: String? = null, onReady: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val json = com.example.util.ShopDataTransferManager.createExportJson(
+                    profile = shopProfile.value,
+                    users = allUsers.value,
+                    products = allProducts.value,
+                    customers = customers.value,
+                    sales = allSales.value,
+                    saleItems = repository.getAllSaleItemsList(),
+                    payments = allCustomerPayments.value,
+                    exportedByUser = _currentUser.value,
+                    branches = branches.value,
+                    stockTransfers = allStockTransfers.value,
+                    purchases = repository.getAllPurchasesList(),
+                    branchIdFilter = branchIdFilter
+                )
+                val token = com.example.util.ShopDataTransferManager.createCompressedSyncToken(json)
+                repository.logSyncEvent("BRANCH_TOKEN", "SUCCESS", "Generated signed BBSHARE1 token (${token.length} chars)")
+                onReady(token)
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Failed to build branch share token: ${e.message}")
+            }
+        }
+    }
+
+    fun exportFullBranchPackage(context: Context, branchIdFilter: String? = null, onReady: (java.io.File) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val file = com.example.util.ShopDataTransferManager.exportShopPackage(
+                    context = context,
+                    profile = shopProfile.value,
+                    users = allUsers.value,
+                    products = allProducts.value,
+                    customers = customers.value,
+                    sales = allSales.value,
+                    saleItems = repository.getAllSaleItemsList(),
+                    payments = allCustomerPayments.value,
+                    exportedByUser = _currentUser.value,
+                    branches = branches.value,
+                    stockTransfers = allStockTransfers.value,
+                    purchases = repository.getAllPurchasesList(),
+                    branchIdFilter = branchIdFilter
+                )
+                repository.logSyncEvent("FILE_EXPORT", "SUCCESS", "Exported ${file.name} with full branch ledger")
+                onReady(file)
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Export error: ${e.message}")
+            }
+        }
+    }
+
+    fun importBranchShareToken(tokenOrJson: String, onDone: (Boolean, String) -> Unit = { _, _ -> }) {
+        viewModelScope.launch {
+            try {
+                val summary = com.example.util.ShopDataTransferManager.parseShopPackageString(tokenOrJson)
+                repository.importShopDataPackage(summary)
+                val msg = "Merged ${summary.branches.size} branches, ${summary.productCount} products, ${summary.saleCount} sales & ${summary.stockTransfers.size} transfers!"
+                repository.logSyncEvent("BRANCH_IMPORT", "SUCCESS", msg)
+                _snackbarMessage.emit(msg)
+                onDone(true, msg)
+            } catch (e: Exception) {
+                val err = "Branch DataShare import failed: ${e.message}"
+                _snackbarMessage.emit(err)
+                onDone(false, err)
+            }
+        }
+    }
+
     fun testEndpointPing(endpoint: String, onResult: (com.example.util.EndpointPingResult) -> Unit) {
         viewModelScope.launch {
             val res = repository.testServerPing(endpoint)
@@ -204,7 +303,12 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun syncToCloudWithEndpoint(endpoint: String? = null) {
         viewModelScope.launch {
             _isSyncing.value = true
-            val report = repository.cloudSyncManager.syncAllDataToCloud(endpoint)
+            val report = repository.cloudSyncManager.syncAllDataToCloud(
+                serverEndpoint = endpoint,
+                activeBranchId = _selectedBranchId.value,
+                deviceId = deviceId,
+                mergeRemoteSummary = { summary -> repository.mergeShopDataPackageLww(summary) }
+            )
             _cloudSyncReport.value = report
             _isSyncing.value = false
             _snackbarMessage.emit(report.message)
@@ -233,8 +337,9 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                     updatedAt = System.currentTimeMillis()
                 )
             )
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                "Ishami '${branch.name}' ryabitswe neza (${newPricing.monthlySubtotal} FRw/mo)." 
+            scheduleAutoBranchSync()
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                "Ishami '${branch.name}' ryabitswe neza (${newPricing.monthlySubtotal} FRw/mo)."
                 else "Branch '${branch.name}' saved (${newPricing.monthlySubtotal} FRw/mo)."
             _snackbarMessage.emit(msg)
         }
@@ -255,8 +360,9 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                     updatedAt = System.currentTimeMillis()
                 )
             )
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                "Ishami ryasibwe." 
+            scheduleAutoBranchSync()
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                "Ishami ryasibwe."
                 else "Branch removed."
             _snackbarMessage.emit(msg)
         }
@@ -429,8 +535,17 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
             repository.ensureDefaultBranches()
             connectivityStatus.collect { status ->
                 if (status == com.example.util.ConnectivityStatus.AVAILABLE) {
-                    val report = repository.cloudSyncManager.syncAllDataToCloud()
-                    _cloudSyncReport.value = report
+                    _isSyncing.value = true
+                    try {
+                        syncAdminDataToSupabase(silent = true)
+                        val report = repository.performSync(
+                            activeBranchId = _selectedBranchId.value,
+                            deviceId = deviceId
+                        )
+                        _cloudSyncReport.value = report
+                    } finally {
+                        _isSyncing.value = false
+                    }
                 }
             }
         }
@@ -439,10 +554,17 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun syncToCloudNow() {
         viewModelScope.launch {
             _isSyncing.value = true
-            val report = repository.cloudSyncManager.syncAllDataToCloud()
-            _cloudSyncReport.value = report
-            _isSyncing.value = false
-            _snackbarMessage.emit(report.message)
+            try {
+                syncAdminDataToSupabase(silent = true)
+                val report = repository.performSync(
+                    activeBranchId = _selectedBranchId.value,
+                    deviceId = deviceId
+                )
+                _cloudSyncReport.value = report
+                _snackbarMessage.emit(report.message)
+            } finally {
+                _isSyncing.value = false
+            }
         }
     }
 
@@ -732,6 +854,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                     updatedAt = System.currentTimeMillis()
                 )
             )
+            scheduleAutoBranchSync()
             _snackbarMessage.emit("Staff member '${user.name}' saved (${newPricing.monthlySubtotal} FRw/mo total plan).")
         }
     }
@@ -755,28 +878,285 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                     updatedAt = System.currentTimeMillis()
                 )
             )
+            scheduleAutoBranchSync()
             _snackbarMessage.emit("Staff account removed.")
         }
     }
 
     // ------------------------------------------------------------------------
-    // SUBSCRIPTION & MULTI-BRANCH / WORKER BILLING
+    // SUBSCRIPTION, USSD VERIFICATION & SUPABASE ADMIN LICENSING
     // ------------------------------------------------------------------------
+    val paymentVerificationRequests: StateFlow<List<com.example.data.model.PaymentVerificationRequest>> =
+        repository.allPaymentRequests.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _adminSession = MutableStateFlow<com.example.util.SupabaseAdminSession?>(
+        com.example.util.SupabaseAdminClient.getCurrentAdminSession()
+    )
+    val adminSession: StateFlow<com.example.util.SupabaseAdminSession?> = _adminSession.asStateFlow()
+
+    private val _adminAuthError = MutableStateFlow<String?>(null)
+    val adminAuthError: StateFlow<String?> = _adminAuthError.asStateFlow()
+
+    private val _isAdminAuthenticating = MutableStateFlow(false)
+    val isAdminAuthenticating: StateFlow<Boolean> = _isAdminAuthenticating.asStateFlow()
+
+    private val _adminPaymentRequests = MutableStateFlow<List<com.example.util.SupabasePaymentRequestDto>>(emptyList())
+    val adminPaymentRequests: StateFlow<List<com.example.util.SupabasePaymentRequestDto>> = _adminPaymentRequests.asStateFlow()
+
+    private val _adminShopAccounts = MutableStateFlow<List<com.example.util.SupabaseShopAccountDto>>(emptyList())
+    val adminShopAccounts: StateFlow<List<com.example.util.SupabaseShopAccountDto>> = _adminShopAccounts.asStateFlow()
+
+    private val _adminUnlockCodes = MutableStateFlow<List<com.example.util.SupabaseUnlockCodeDto>>(emptyList())
+    val adminUnlockCodes: StateFlow<List<com.example.util.SupabaseUnlockCodeDto>> = _adminUnlockCodes.asStateFlow()
+
+    private val _adminAuditLogs = MutableStateFlow<List<com.example.util.SupabaseAuditLogDto>>(emptyList())
+    val adminAuditLogs: StateFlow<List<com.example.util.SupabaseAuditLogDto>> = _adminAuditLogs.asStateFlow()
+
+    private val _isAdminLoading = MutableStateFlow(false)
+    val isAdminLoading: StateFlow<Boolean> = _isAdminLoading.asStateFlow()
+
+    private fun resolveOwnerUser(): User? {
+        return _currentUser.value
+            ?: allUsers.value.firstOrNull { it.role == UserRole.OWNER }
+            ?: allUsers.value.firstOrNull()
+    }
+
+    fun signInSupabaseAdmin(email: String, password: String) {
+        viewModelScope.launch {
+            _isAdminAuthenticating.value = true
+            _adminAuthError.value = null
+            val res = com.example.util.SupabaseAdminClient.signInAdmin(email, password)
+            _isAdminAuthenticating.value = false
+            res.onSuccess { sess ->
+                _adminSession.value = sess
+                refreshAdminDashboardData()
+                _snackbarMessage.emit("Authenticated as ${sess.fullName} (${sess.email})")
+            }.onFailure { err ->
+                _adminAuthError.value = err.message ?: "Admin sign-in failed"
+            }
+        }
+    }
+
+    fun signUpSupabaseAdmin(email: String, password: String, fullName: String) {
+        viewModelScope.launch {
+            _isAdminAuthenticating.value = true
+            _adminAuthError.value = null
+            val res = com.example.util.SupabaseAdminClient.signUpAdmin(email, password, fullName)
+            _isAdminAuthenticating.value = false
+            res.onSuccess { sess ->
+                _adminSession.value = sess
+                refreshAdminDashboardData()
+                _snackbarMessage.emit("Admin profile created & authenticated (${sess.email})")
+            }.onFailure { err ->
+                _adminAuthError.value = err.message ?: "Admin registration failed"
+            }
+        }
+    }
+
+    fun signOutSupabaseAdmin() {
+        viewModelScope.launch {
+            com.example.util.SupabaseAdminClient.signOutAdmin()
+            _adminSession.value = null
+            _adminPaymentRequests.value = emptyList()
+            _adminShopAccounts.value = emptyList()
+            _adminUnlockCodes.value = emptyList()
+            _adminAuditLogs.value = emptyList()
+            _adminAuthError.value = null
+        }
+    }
+
     fun activateSubscriptionVoucher(code: String) {
         viewModelScope.launch {
             val currentProf = shopProfile.value
+            val owner = resolveOwnerUser()
             val branchCount = branches.value.size.coerceAtLeast(1)
             val workerCount = allUsers.value.size.coerceAtLeast(1)
             val result = repository.redeemVoucher(
                 voucherCode = code,
                 shopProfile = currentProf,
                 branchCount = branchCount,
-                workerCount = workerCount
+                workerCount = workerCount,
+                ownerUsername = owner?.username.orEmpty(),
+                ownerPhoneOverride = owner?.phone.orEmpty(),
+                ownerUser = owner
             )
             _snackbarMessage.emit(result.message)
             if (result.isValid) {
-                syncToCloudNow()
+                syncAdminDataToSupabase(silent = true)
             }
+        }
+    }
+
+    fun submitUssdPaymentProof(
+        provider: String,
+        payerPhone: String,
+        username: String,
+        registeredPhone: String,
+        durationMonths: Int,
+        branchCount: Int,
+        workerCount: Int,
+        telcoReference: String = "",
+        onSubmitted: (com.example.data.model.PaymentVerificationRequest, Boolean) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            val profile = shopProfile.value
+            val owner = resolveOwnerUser()
+            val breakdown = com.example.util.OfflineSubscriptionManager.calculateSubscriptionPrice(
+                branchCount = branchCount,
+                workerCount = workerCount,
+                durationMonths = durationMonths
+            )
+            val ussd = if (provider.contains("AIRTEL", ignoreCase = true)) breakdown.ussdAirtelCode else breakdown.ussdMtnCode
+            val cleanUsername = username.trim().lowercase().ifBlank { owner?.username ?: "owner" }
+            val cleanRegPhone = registeredPhone.trim().ifBlank { profile.phone }
+            val req = com.example.data.model.PaymentVerificationRequest(
+                shopName = profile.shopName,
+                ownerUsername = cleanUsername,
+                ownerPhone = cleanRegPhone,
+                deviceChallenge = com.example.util.SubscriptionSecurityManager.computeDeviceChallenge(profile),
+                provider = provider,
+                ussdCode = ussd,
+                payerPhone = payerPhone.trim().ifBlank { cleanRegPhone },
+                amountRwf = breakdown.totalPayable,
+                durationMonths = durationMonths,
+                branchCount = branchCount.coerceAtLeast(1),
+                workerCount = workerCount.coerceAtLeast(1),
+                telcoReference = telcoReference.trim().uppercase(),
+                status = "PENDING_VERIFICATION",
+                syncedToSupabase = false
+            )
+            val synced = repository.submitPaymentVerificationRequest(req, profile, owner)
+            repository.logSyncEvent(
+                type = "SUPABASE_ADMIN",
+                status = if (synced) "SUCCESS" else "QUEUED",
+                summary = if (synced) "Payment proof synced to Supabase Admin Queue" else "Saved offline — auto-syncs to Supabase when internet returns"
+            )
+            _snackbarMessage.emit(
+                if (synced) "Payment verification submitted to Admin Cloud! Send WhatsApp proof now."
+                else "Saved offline! Will sync to Supabase automatically when internet returns. Send WhatsApp proof now."
+            )
+            onSubmitted(req, synced)
+        }
+    }
+
+    fun syncAdminDataToSupabase(silent: Boolean = false) {
+        viewModelScope.launch {
+            val profile = shopProfile.value
+            val owner = resolveOwnerUser()
+            val branchCount = branches.value.size.coerceAtLeast(1)
+            val workerCount = allUsers.value.size.coerceAtLeast(1)
+            val res = repository.syncPendingAdminDataWithSupabase(
+                shopProfile = profile,
+                ownerUser = owner,
+                branchCount = branchCount,
+                workerCount = workerCount
+            )
+            if (!silent || res.approvedCodesFound.isNotEmpty()) {
+                _snackbarMessage.emit(res.message)
+            }
+        }
+    }
+
+    fun checkCloudUnlockApprovals() {
+        syncAdminDataToSupabase(silent = false)
+    }
+
+    fun refreshAdminDashboardData() {
+        if (_adminSession.value == null) return
+        viewModelScope.launch {
+            _isAdminLoading.value = true
+            _adminPaymentRequests.value = com.example.util.SupabaseAdminClient.fetchAllPaymentRequests()
+            _adminShopAccounts.value = com.example.util.SupabaseAdminClient.fetchAllShopAccounts()
+            _adminUnlockCodes.value = com.example.util.SupabaseAdminClient.fetchAllUnlockCodes()
+            _adminAuditLogs.value = com.example.util.SupabaseAdminClient.fetchAdminAuditLogs()
+            _isAdminLoading.value = false
+        }
+    }
+
+    fun adminApproveAndGenerateCode(
+        request: com.example.util.SupabasePaymentRequestDto,
+        onGenerated: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            _isAdminLoading.value = true
+            val adminName = _adminSession.value?.fullName ?: _currentUser.value?.name ?: "BeBoss Official Admin"
+            val (ok, code) = com.example.util.SupabaseAdminClient.approvePaymentAndIssueCode(request, adminName)
+            if (ok) {
+                refreshAdminDashboardData()
+                _snackbarMessage.emit("Approved & generated unlock code: $code")
+            } else {
+                _snackbarMessage.emit("Admin Supabase approval failed — sign in as Admin first.")
+            }
+            _isAdminLoading.value = false
+            onGenerated(ok, code)
+        }
+    }
+
+    fun adminRejectPayment(
+        request: com.example.util.SupabasePaymentRequestDto,
+        reason: String,
+        onDone: (Boolean) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            _isAdminLoading.value = true
+            val ok = com.example.util.SupabaseAdminClient.rejectPaymentRequest(request, reason)
+            if (ok) {
+                refreshAdminDashboardData()
+                _snackbarMessage.emit("Payment request marked REJECTED.")
+            } else {
+                _snackbarMessage.emit("Could not reject request in Supabase.")
+            }
+            _isAdminLoading.value = false
+            onDone(ok)
+        }
+    }
+
+    fun adminRevokeCode(codeDto: com.example.util.SupabaseUnlockCodeDto) {
+        viewModelScope.launch {
+            _isAdminLoading.value = true
+            val ok = com.example.util.SupabaseAdminClient.revokeUnlockCode(codeDto)
+            if (ok) {
+                refreshAdminDashboardData()
+                _snackbarMessage.emit("Revoked unlock code ${codeDto.unlockCode}.")
+            } else {
+                _snackbarMessage.emit("Could not revoke code in Supabase.")
+            }
+            _isAdminLoading.value = false
+        }
+    }
+
+    fun adminIssueManualCode(
+        username: String,
+        registeredPhone: String,
+        tierCode: String,
+        days: Int,
+        amountRwf: Int,
+        onGenerated: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            _isAdminLoading.value = true
+            val adminName = _adminSession.value?.fullName ?: _currentUser.value?.name ?: "BeBoss Official Admin"
+            val deviceCode = com.example.util.SubscriptionSecurityManager.computeDeviceChallenge(shopProfile.value)
+            val (ok, code) = com.example.util.SupabaseAdminClient.issueManualUnlockCode(
+                username = username,
+                registeredPhone = registeredPhone,
+                deviceChallenge = deviceCode,
+                tierCode = tierCode,
+                days = days,
+                amountRwf = amountRwf,
+                adminName = adminName
+            )
+            if (ok) refreshAdminDashboardData()
+            _isAdminLoading.value = false
+            onGenerated(ok, code)
+        }
+    }
+
+    fun shareAdminWebPortal(context: Context) {
+        try {
+            com.example.util.ShopDataTransferManager.exportAndShareAdminWebPortal(context)
+        } catch (e: Exception) {
+            viewModelScope.launch { _snackbarMessage.emit("Cannot export Web Portal: ${e.message}") }
         }
     }
 
@@ -825,7 +1205,6 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 )
                 repository.updateShopProfile(updatedProf)
                 _snackbarMessage.emit(result.message)
-                // Auto-sync subscription extension to database & cloud
                 syncToCloudNow()
             } else {
                 _snackbarMessage.emit(result.message)
@@ -961,10 +1340,11 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                     )
                 }
 
-                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                    "Igurisha ryakozwe neza! Inyemezabuguzi irasohotse." 
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Igurisha ryakozwe neza! Inyemezabuguzi irasohotse."
                     else "Sale recorded successfully! Receipt ready."
                 _snackbarMessage.emit(msg)
+                scheduleAutoBranchSync()
             } catch (e: Exception) {
                 _snackbarMessage.emit("Error processing sale: ${e.message}")
             }
@@ -1015,8 +1395,9 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 )
                 val saleWithItems = repository.getSaleWithItems(sale.id)
                 _activeReceiptSale.value = saleWithItems
-                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                    "Igurisha ry'ako kanya (${amount.toInt()} FRw) ryakozwe neza!" 
+                scheduleAutoBranchSync()
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Igurisha ry'ako kanya (${amount.toInt()} FRw) ryakozwe neza!"
                     else "Quick sale (${amount.toInt()} RWF) completed! Receipt ready."
                 _snackbarMessage.emit(msg)
             } catch (e: Exception) {
@@ -1091,8 +1472,9 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun saveProduct(product: Product) {
         viewModelScope.launch {
             repository.saveProduct(product)
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                "Igicuruzwa '${product.name}' cyabitswe neza." 
+            scheduleAutoBranchSync()
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                "Igicuruzwa '${product.name}' cyabitswe neza."
                 else "Product '${product.name}' saved."
             _snackbarMessage.emit(msg)
         }
@@ -1101,8 +1483,9 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun adjustStock(productId: String, delta: Double, reason: String) {
         viewModelScope.launch {
             repository.adjustStock(productId, delta, reason)
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                "Ingano y'ububiko yahinduwe (${if (delta > 0) "+$delta" else "$delta"})." 
+            scheduleAutoBranchSync()
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                "Ingano y'ububiko yahinduwe (${if (delta > 0) "+$delta" else "$delta"})."
                 else "Stock adjusted (${if (delta > 0) "+$delta" else "$delta"})."
             _snackbarMessage.emit(msg)
         }
@@ -1111,8 +1494,9 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun deleteProduct(productId: String) {
         viewModelScope.launch {
             repository.deleteProduct(productId)
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                "Igicuruzwa cyasibwe." 
+            scheduleAutoBranchSync()
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                "Igicuruzwa cyasibwe."
                 else "Product deleted."
             _snackbarMessage.emit(msg)
         }
@@ -1153,6 +1537,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 buyerName = user?.name ?: "Shop Manager",
                 notes = notes
             )
+            scheduleAutoBranchSync()
 
             val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
                 "Kugura ibicuruzwa (${purchase.quantityPurchased.toInt()} ${purchase.productName}) byanditswe neza muri Excel Ledger!"
@@ -1188,6 +1573,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
 
             val updatedProd = repository.getProductById(product.id) ?: product.copy(quantityInStock = product.quantityInStock + quantityToAdd)
             addToCart(updatedProd, 1.0)
+            scheduleAutoBranchSync()
 
             val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
                 "${product.name} yongerewe mu bubiko (+${quantityToAdd.toInt()}) kandi yongerewe muri POS Cart!"
@@ -1199,6 +1585,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun deletePurchaseRecord(purchaseId: String) {
         viewModelScope.launch {
             repository.deletePurchaseRecord(purchaseId)
+            scheduleAutoBranchSync()
             val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
                 "Inyandiko yo kugura yasibwe."
                 else "Purchase order removed from ledger."
@@ -1216,8 +1603,9 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun saveCustomer(customer: Customer) {
         viewModelScope.launch {
             repository.saveCustomer(customer)
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                "Umukiriya '${customer.name}' yanditswe neza." 
+            scheduleAutoBranchSync()
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                "Umukiriya '${customer.name}' yanditswe neza."
                 else "Customer '${customer.name}' saved."
             _snackbarMessage.emit(msg)
         }
@@ -1231,7 +1619,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     ) {
         viewModelScope.launch {
             val user = _currentUser.value
-            val branch = branches.value.firstOrNull { it.id == _selectedBranchId.value } 
+            val branch = branches.value.firstOrNull { it.id == _selectedBranchId.value }
                 ?: branches.value.firstOrNull { it.isMainBranch }
                 ?: com.example.data.model.Branch()
 
@@ -1257,6 +1645,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 remainingDebt = updatedPayment.remainingDebt,
                 currencySymbol = symbol
             )
+            scheduleAutoBranchSync()
 
             val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) {
                 if (updatedPayment.remainingDebt <= 0) {
@@ -1363,19 +1752,15 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun performSync() {
-        viewModelScope.launch {
-            _isSyncing.value = true
-            val result = repository.performSync()
-            _isSyncing.value = false
-            _snackbarMessage.emit(result.message)
-        }
+        syncToCloudNow()
     }
 
     fun updateShopProfile(profile: ShopProfile) {
         viewModelScope.launch {
             repository.updateShopProfile(profile)
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                "Amakuru y'ububiko yavuguruwe." 
+            scheduleAutoBranchSync()
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                "Amakuru y'ububiko yavuguruwe."
                 else "Shop profile updated."
             _snackbarMessage.emit(msg)
         }
@@ -1545,5 +1930,11 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 _snackbarMessage.emit("Failed to reset app: ${e.message}")
             }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        localNetworkSyncServer.stopDiscovery()
+        localNetworkSyncServer.stopServer()
     }
 }

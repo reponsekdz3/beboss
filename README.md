@@ -1,200 +1,110 @@
-# BeBoss Business POS, ERP & Multi-Branch Management Ecosystem 🚀🏢💰
+# BeBoss — Offline-First Multi-Branch POS, Inventory & Licensing System
 
-**BeBoss** is an ultra-fast, offline-first Android Point of Sale (POS), Inventory Control, Multi-Branch, Customer Ledger, and Financial Management ecosystem built specifically for retail stores, supermarkets, wholesalers, boutiques, pharmacies, hardware shops, electronics stores, and multi-location enterprises.
-
----
-
-## 🌟 Table of Contents
-1. [Core Capabilities & Value Proposition](#-core-capabilities--value-proposition)
-2. [How BeBoss Drives Real Profitability & Eliminates Business Losses](#-how-beboss-drives-real-profitability--eliminates-business-losses)
-3. [Key Modules & Operational Functionality](#-key-modules--operational-functionality)
-4. [Dynamic Multi-Branch & Staff Subscription Architecture](#-dynamic-multi-branch--staff-subscription-architecture)
-5. [Step-by-Step Operator & Owner Guide](#-step-by-step-operator--owner-guide)
-6. [Offline-First Resilience & SQLite Room Engine](#-offline-first-resilience--sqlite-room-engine)
-7. [Hardware & Peripheral Integrations](#-hardware--peripheral-integrations)
-8. [Security, Roles & Access Control](#-security-roles--access-control)
-9. [Bilingual & Regional Customization](#-bilingual--regional-customization)
-10. [Technical Specifications & Architecture](#-technical-specifications--architecture)
+**BeBoss** (`com.aistudio.beboss.shopmgmt`) is an offline-first Android Point of Sale (POS), inventory ledger, multi-branch operations, customer credit ledger, and monthly licensing application built with Kotlin, Jetpack Compose (Material 3), and Room SQLite (v9 WAL).
 
 ---
 
-## 💎 Core Capabilities & Value Proposition
+## 1. Architecture Overview
 
-* **Zero Cloud Dependency (100% Offline-First):** Complete on-device database architecture ensures sales, receipt printing, inventory tracking, and ledger entries work seamlessly even in remote regions with zero internet connection.
-* **Multi-Branch Operations:** Real branch tracking with inter-branch stock transfers, separate cash floats, branch-level profit/loss reports, and centralized HQ roll-up.
-* **Instant Native Launch & Fluid UI:** High-performance Jetpack Compose interface with window-level Android launch optimizations, rotating gradient animated loading, and full Light/Dark mode adaptability.
-* **Zero Mock or Demo Data:** Pure business records created and governed by the store owner and staff.
-
----
-
-## 📈 How BeBoss Drives Real Profitability & Eliminates Business Losses
-
-### 1. 🛑 Complete Cash & Stock Shrinkage Elimination
-* **The Challenge:** Small and medium retail enterprises lose between 15% and 25% of annual net revenue due to unrecorded cashier sales, untracked manual discounts, and inventory theft.
-* **How BeBoss Solves It:**
-  * Every transaction stamps the active cashier's ID, timestamp, branch, and payment channel (Cash, Mobile Money, Card, or Debt).
-  * Real-time stock decrements prevent ghost sales; out-of-stock items require an authorized restock before checkout.
-  * Role-based permissions prevent cashier-level edits or deletions of past sales receipts.
-  * **Financial Impact:** 100% of revenue collected at the counter reaches the owner's bank, mobile wallet, or safe.
-
-### 2. ⚡ 3x Faster Customer Debt Collection (*Amadeni*)
-* **The Challenge:** Paper notebooks lead to lost records, customer disputes, uncollected balances, and stagnant working capital.
-* **How BeBoss Solves It:**
-  * Real-time customer debt directory tracks outstanding balances, credit limits, and historical repayments.
-  * One-tap automated WhatsApp and SMS balance statements sent directly to debtors with itemized purchase details.
-  * Partial and full payment processing instantly reflects on the customer's balance and the daily cash register.
-  * **Financial Impact:** Fast liquidity recovery and shortened cash conversion cycles.
-
-### 3. 🎯 Intelligent Margin Protection & Supplier Inflow Tracking
-* **The Challenge:** Changing supplier wholesale costs frequently erode profit margins without the shopkeeper noticing.
-* **How BeBoss Solves It:**
-  * Dynamic Excel-style inventory ledger calculates live unit profit margins (`(Selling - Cost) / Selling * 100%`).
-  * Inflow restock purchase orders automatically flag declining margins and prompt recommended retail pricing adjustments.
-  * Real-time visual margin indicators highlight high-margin vs low-margin items.
-  * **Financial Impact:** Consistently protects and boosts gross profit margins by 20% to 35%.
-
-### 4. 🏢 Low-Overhead Multi-Branch Scaling
-* **The Challenge:** Traditional enterprise software charges steep monthly cloud hosting fees and breaks down during ISP outages.
-* **How BeBoss Solves It:**
-  * Peer-to-peer (P2P) branch synchronization and encrypted offline JSON packet transfers consolidate branch data onto the owner's device without recurring cloud infrastructure costs.
-  * Flexible, transparent monthly subscription tiers scale directly with actual store branches and workforce size.
-  * **Financial Impact:** Eliminates costly server subscriptions and minimizes IT overhead.
+- **Offline-First Core Store Operations:** All POS checkouts, inventory edits, supplier purchases, stock transfers, customer profiles, credit debt repayments, branches, and staff accounts are stored locally in **Room SQLite (`beboss_database.db`, schema v9)** with Write-Ahead Logging (`journal_mode=WAL`) enabled so transactions commit without waiting for network connectivity.
+- **Automatic Synchronous Internet Branch DataShare:** Whenever internet connectivity is detected (`NetworkConnectivityObserver`) or branch mutations occur while online, `BeBossViewModel` schedules a debounced two-way sync via `CloudSyncManager` and `SupabaseAdminClient`:
+  - Pushes GZIP-compressed, HMAC-SHA256-signed `BBSHARE1:` branch snapshots (`ShopDataTransferManager`) to the Supabase `branch_sync_snapshots` table keyed by a deterministic `shop_sync_key`.
+  - Pulls remote snapshots from sibling branch devices (`device_id != localDeviceId`) and merges records using **Last-Write-Wins (LWW)** conflict resolution (`BeBossRepository.mergeShopDataPackageLww`) based on `updatedAt` timestamps while deduplicating immutable sale items, repayments, purchases, and stock transfers by ID and preserving the longest active `subscriptionExpiresAt`.
+- **Zero-Data Local WiFi/Hotspot Mesh & Token Transfer:** Devices on the same local WiFi or mobile hotspot can discover nearby BeBoss hubs via UDP/mDNS (`LocalNetworkSyncServer`) and perform bidirectional HTTP `BBSHARE1:` merges on port `8989`, or export/import `.beboss` files and signed `BBSHARE1:` tokens directly.
+- **Supabase Usage Scope (Admin Licensing & Sync Relay Only):** Supabase holds `admin_profiles`, `shop_accounts`, `payment_requests`, `unlock_codes`, `admin_audit_logs`, and `branch_sync_snapshots`. Primary business workflows remain functional offline in Room SQLite.
 
 ---
 
-## 📦 Key Modules & Operational Functionality
+## 2. Monthly USSD Payment, WhatsApp Verification & Unlock Code Flow
 
-### 1. Point of Sale (POS) & Checkout Engine
-* **Universal Search & Barcode Scanning:** Fast camera-based barcode reader and instant fuzzy keyword search across large SKU catalogs.
-* **Dynamic Cart Management:** Fast quantity adjustments, percentage/flat discounting, and custom tax handling (e.g., standard 18% VAT or tax-exempt).
-* **Multi-Payment Split:** Accept Cash, MTN Mobile Money, Airtel Money, Bank Cards, or Credit (Debt) in a single order.
-* **Instant Thermal Receipt Generation:** Standard 58mm mobile Bluetooth and 80mm countertop USB thermal printing with itemized breakdown, tax calculation, QR validation, and customizable store headers/footers.
-* **Tactile & Audible Confirmation:** Native haptic pulses and checkout chimes to ensure cashier confidence and eliminate double-charging.
+Subscription pricing scales dynamically with active branches, staff accounts, and billing duration (`OfflineSubscriptionManager`):
 
-### 2. Inventory & Stock Master
-* **Excel-Style Spreadsheet Ledger:** Fast in-place editing of stock levels, purchase prices, retail prices, and min-stock alert thresholds.
-* **Stock Transfer System:** Track outgoing and incoming shipments between headquarters and branch depots with complete audit logs.
-* **Supplier Purchases & Restock Inflow:** Document wholesale supplier invoices, payment statuses (Paid/Pending), and automatic stock level increments.
-* **Automated Low-Stock Alerts:** Color-coded badges and dedicated filter views for products reaching depletion limits.
+| Plan Tier | Active Branches | Included Staff | Base Monthly Rate |
+| :--- | :--- | :--- | :--- |
+| **Solo Store** | 1 Branch | 1 User (Owner) | **5,000 FRw / month** |
+| **Dual Store** | 2 Branches | Up to 3 Staff | **10,000 FRw / month** |
+| **Multi-Branch Pro** | 3+ Branches | Up to 5 Staff | **20,000 FRw / month** |
 
-### 3. Customer Ledger & CRM
-* **Credit Limit Safeguards:** Set custom credit limits per client to prevent over-extension of shop credit.
-* **Transaction History:** Complete audit trail of every receipt, return, and debt repayment made by each customer.
-* **Direct Messaging Hub:** One-tap WhatsApp chat and native SMS dispatch for marketing promos and overdue payment reminders.
+Staff add-ons scale beyond tier limits (`+2,000 FRw` for 2–3 workers, `+4,000 FRw` for 4–5 workers, `+1,000 FRw` per additional worker beyond 5), with multi-month discounts (`10%` on 3 months, `20%` on 12 months).
 
-### 4. Financial & Business Analytics
-* **Executive Summary:** Live metrics for Gross Revenue, Cost of Goods Sold (COGS), Net Profit, Total Profit Margin %, and Total Debt Outstanding.
-* **Time-Window Filtering:** Instant analytics breakdown for Today, This Week, This Month, This Year, or All-Time.
-* **Top Performance Insights:** Identifies top 5 best-selling products by quantity and revenue to guide purchasing decisions.
-* **Payment Channel Distribution:** Visual breakdown of revenue across Cash, MoMo, Card, and Credit.
+### End-to-End Renewal Lifecycle
+1. **Dial USSD:** From **Settings** or **Subscription**, the shop owner taps MTN MoMo (`*182*8*1*...#`) or Airtel Money (`*500*...#`) to complete payment on their phone.
+2. **Submit Claim + Account Details:** The user enters their payer phone and optional Mobile Money transaction reference, alongside their created **BeBoss `@username`** and **registered phone number**, then sends the WhatsApp verification message (`wa.me`) to the Admin Support number (`BuildConfig.BEBOSS_ADMIN_WHATSAPP`) and queues the claim into Supabase `payment_requests`.
+3. **Admin Real Payment Audit & Code Generation:** The administrator signs into the **BeBoss Web Admin Platform** (`/admin-web/index.html`) or the **In-App Admin Console** (`Settings -> Admin Console`) using real **Supabase GoTrue Email/Password Authentication** (`admin_profiles` RLS). After checking their phone's Mobile Money receipt against the expected tier fee badge, the admin clicks **Verify & Issue `BB2` Code** (or **Reject** with a reason) and sends the generated `BB2-...` code back to the shop owner on WhatsApp.
+4. **Account-Bound Activation in Settings:** The shop owner pastes the `BB2-...` code in **Settings -> Insert Admin Unlock Code**. `SubscriptionSecurityManager` validates the HMAC-SHA256 signature (`BuildConfig.BEBOSS_UNLOCK_SIGNING_SECRET`), checks account binding (`@username` + normalized 9-digit phone), checks local anti-replay vouchers (`redeemed_vouchers`) and cloud revocation status (`REVOKED` check on `unlock_codes`), extends `subscriptionExpiresAt` for the month, and marks the code `REDEEMED`.
 
 ---
 
-## 💳 Dynamic Multi-Branch & Staff Subscription Architecture
+## 3. Web Admin Platform & In-App Admin Console
 
-BeBoss features an automated, tiered subscription system designed to scale fairly based on the shop's operational complexity:
-
-### Pricing Tiers & Worker Allowances
-| Tier | Branches | Included Staff | Rate / Month | Target Business Profile |
-| :--- | :--- | :--- | :--- | :--- |
-| **Solo / Single Store** | 1 Branch | 1 User (Owner) | **5,000 FRw** | Kiosks, boutiques, single retail shops |
-| **Dual Store Growth** | 2 Branches | Up to 3 Staff | **10,000 FRw** | Growing retail businesses with a depot or 2nd location |
-| **Multi-Branch Enterprise** | 3+ Branches | Up to 5 Staff | **20,000 FRw** | Supermarket chains, wholesalers, multi-outlet networks |
-
-### Team Scale Add-ons
-* **Small Team (2–3 workers):** +2,000 FRw/mo
-* **Medium Team (4–5 workers):** +4,000 FRw/mo
-* **Large Teams (6+ workers):** +1,000 FRw per additional worker/mo
-
-### Billing Frequency Discounts
-* **1 Month:** Standard Monthly Rate
-* **3 Months:** 10% Discount
-* **1 Year VIP Pass:** 20% Discount (Includes dedicated priority business support)
-
-### Automated Offline & Online Verification
-* **Mobile Money USSD & Push:** Quick dialers for MTN MoMo (`*182*8*1*...#`) and Airtel Money (`*500*4*...#`).
-* **Cryptographic Offline Vouchers:** 16-character encrypted voucher keys generated with SHA-256 challenge codes for remote activation without internet.
-* **3-Day Emergency Grace Period:** Automatic soft grace period prevents sudden operational interruption during active business hours.
+- **Standalone Web Dashboard:** `/admin-web/index.html` (and bundled Android asset `/app/src/main/assets/admin_portal.html` for 1-tap export from Settings).
+- **Supabase Auth + RLS Enforcement:** Protected by Supabase GoTrue Email/Password login and `public.is_beboss_admin()` PostgreSQL security-definer policies (`/admin-web/supabase_schema.sql`).
+- **Capabilities:**
+  - Live auto-polling KPI overview (pending queue, monthly revenue volume, verified shops, online branch snapshots, tier breakdown SVG chart).
+  - Fee-audited verification queue (`Verify & Issue BB2`, `Reject` with reason, 1-click WhatsApp `wa.me` reply).
+  - WebCrypto HMAC-SHA256 `BB2` unlock code generator, codes ledger with **Revoke** control, live `branch_sync_snapshots` monitor, and `admin_audit_logs` trail.
 
 ---
 
-## 🛠️ Step-by-Step Operator & Owner Guide
+## 4. Database Schema (Room SQLite v9)
 
-### Step 1: Initial Setup & Profile Configuration
-1. Launch the app to experience the fast launch screen.
-2. Select your language preference (**English** or **Ikinyarwanda**) and theme (**Dark** or **Light**).
-3. On the registration screen, enter your **Shop Name**, **Category**, **Primary Currency** (`FRw`, `$`, `€`, `KSh`, etc.), and **Master Owner PIN/Password**.
-4. The system automatically initializes your **Headquarters Branch** and registers the owner as the primary Administrator.
-
-### Step 2: Product Ingestion & Catalog Setup
-1. Navigate to **Inventory** (📦).
-2. Tap **"Add Product"** to enter the product details (SKU/Barcode, Name, Category, Cost Price, Selling Price, and Initial Stock).
-3. Open the **Excel Ledger** to adjust stock numbers or review profit margins across your entire product list.
-
-### Step 3: Conducting Sales at the Checkout Counter
-1. Navigate to **POS** (🛒).
-2. Select items by tapping product tiles or using the camera barcode scanner.
-3. Tap **Checkout** and select the payment channel (**Cash**, **MoMo**, **Card**, or **Credit**).
-4. Tap **Complete Sale** to instantly commit the sale, update stock, and print or share the receipt.
-
-### Step 4: Tracking Debts & Customer Collections
-1. Navigate to **Customers** (👥).
-2. Review total outstanding balances.
-3. Tap a customer's profile to record a partial or full payment, or tap **Send SMS / WhatsApp Reminder** to request payment.
-
-### Step 5: Database Maintenance & Health Checks
-1. Navigate to **Settings** (⚙️) -> **Database Engine & Health**.
-2. Run **PRAGMA Integrity Check** to verify SQLite B-Tree index consistency.
-3. Tap **WAL Checkpoint & VACUUM Defragmentation** to optimize query performance and compress storage footprint.
-4. Generate a full JSON backup to secure records off-device.
+Defined in `AppDatabase.kt` (`version = 9`) and `DatabaseMigrations.kt` (`MIGRATION_1_2` through `MIGRATION_8_9`):
+- `shop_profile` — Shop identity, currency, targets, thermal printer width, subscription expiry/status, optional custom backup server URL.
+- `branches` — Multi-branch locations with HQ flag and `updatedAt` LWW timestamp.
+- `users` — Role-based staff accounts (`OWNER`, `MANAGER`, `CASHIER`), salted PIN/password hashes (`SecurityUtils`), branch assignment, and granular permission flags.
+- `products` — Branch-scoped SKUs, barcode, wholesale cost price, retail price, stock quantity, minimum threshold, `updatedAt`.
+- `customers` & `customer_payments` — Customer directory, credit limit, debt balance (`updatedAt`), and repayment history.
+- `sales` & `sale_items` — Checkout headers, payment channels (`CASH`, `MOMO`, `CARD`, `CREDIT_DEBT`), branch/cashier attribution, and itemized line items.
+- `purchase_records` — Supplier restock inflows and payment status.
+- `stock_transfers` — Inter-branch stock transfer audit records.
+- `sync_queue` — Pending local sync tracking.
+- `redeemed_vouchers` — Anti-replay ledger storing SHA-256 fingerprints of redeemed unlock codes.
+- `payment_verification_requests` — Offline-first queue of USSD payment proof claims synced to Supabase.
 
 ---
 
-## ⚡ Offline-First Resilience & SQLite Room Engine
+## 5. Configuration & Environment Variables
 
-BeBoss is engineered on a fine-tuned **Android Room SQLite Database Engine (v6)**:
+Sensitive keys and backend configuration live in `.env` (via **Secrets panel in Google AI Studio**), documented in `.env.example`, and are injected via the Secrets Gradle Plugin into `BuildConfig`:
 
-| Optimization | Implementation | Operational Outcome |
-| :--- | :--- | :--- |
-| **Write-Ahead Logging (WAL)** | `PRAGMA journal_mode=WAL` | Cashiers can process sales simultaneously while reports are being generated without UI lockups. |
-| **B-Tree Indexing & Defragmentation** | `PRAGMA optimize; PRAGMA wal_checkpoint(FULL)` | Sub-millisecond query execution across 50,000+ transaction records. |
-| **Selective Transaction Purge** | Clean Financial Year Protocol | Purges past sales/debt records for a new fiscal year while **100% preserving product catalogs and shop settings**. |
-| **RFC 4180 JSON Exchange** | Compressed JSON Export/Import | Simple disaster recovery and manual backup transfer via WhatsApp, SD card, or email. |
+```properties
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_ANON_KEY=your-supabase-anon-key
+SUPABASE_ADMIN_EMAIL=admin@beboss.app
+BEBOSS_UNLOCK_SIGNING_SECRET=your-hmac-signing-secret
+BEBOSS_ADMIN_WHATSAPP=+250788765432
+GEMINI_API_KEY=your-optional-key
+```
 
----
-
-## 🖨️ Hardware & Peripheral Integrations
-
-* **Thermal Receipt Printers:** Seamless connection with 58mm mobile Bluetooth printers and 80mm countertop USB ESC/POS printers.
-* **Camera Barcode Scanning:** Ultra-fast on-device image analysis for 1D barcodes (EAN-13, UPC, Code 128) and 2D QR codes.
-* **Biometric Authentication:** Built-in Android BiometricPrompt for fast, secure fingerprint authentication.
-* **Audio & Haptic Feedback:** Multi-frequency tactile haptic pulses and audible confirmation tones.
-
----
-
-## 🔒 Security, Roles & Access Control
-
-* **Owner / Master Administrator:** Full access to financial analytics, profit margins, branch setup, staff management, and database tools.
-* **Branch Manager:** Access to sales, customer management, inventory adjustments, and branch-specific reports.
-* **Cashier:** Streamlined access restricted strictly to POS checkout, receipt printing, and customer balance lookup. Sensitive cost prices, net profit metrics, and record deletion are strictly locked.
+### Setting Up Supabase
+1. Run `/admin-web/supabase_schema.sql` inside your Supabase SQL Editor.
+2. In Supabase **Authentication -> Providers**, ensure **Email** provider is enabled.
+3. Configure `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_ADMIN_EMAIL`, `BEBOSS_UNLOCK_SIGNING_SECRET`, and `BEBOSS_ADMIN_WHATSAPP` in the **Secrets panel**.
+4. Ensure `BEBOSS_UNLOCK_SIGNING_SECRET` matches the signing secret configured in the Admin Web Portal settings if changed from the default.
 
 ---
 
-## 🌍 Bilingual & Regional Customization
+## 6. Key Implemented Modules & Screens
 
-BeBoss provides 100% native localization:
-* **English:** Standard international commercial terminology.
-* **Ikinyarwanda:** Tailored for local Rwandan retail businesses (*Kugurisha, Amadeni, Ububiko, Raporo y'Inyungu, Ifatabuguzi ry'Ukwezi*).
-* **Multi-Currency:** Native support for Rwandan Francs (`FRw`), US Dollars (`$`), Euros (`€`), Kenyan Shillings (`KSh`), Ugandan Shillings (`USh`), and Tanzanian Shillings (`TSh`).
+- **Authentication & Onboarding (`AuthScreen.kt`):** Edge-to-edge (`WindowInsets.safeDrawing`) 4-digit PIN pad + `BiometricPrompt` fingerprint unlock, staff username/password sign-in, branch-aware operator carousel, and a 3-step Shop Registration Wizard with live PIN/password strength feedback.
+- **Dashboard (`DashboardScreen.kt`):** Active branch switcher pill, live Auto-Sync status indicator, monthly license countdown pill, daily revenue/profit summary, low-stock quick restock list, and recent transactions.
+- **POS & Sales History (`SalesPosScreen.kt`, `SalesHistoryScreen.kt`):** CameraX barcode scanner (`CameraBarcodeScanner.kt`), multi-payment checkout, 58mm/80mm Bluetooth/USB ESC/POS receipt formatting, and WhatsApp receipt sharing.
+- **Inventory & Purchases (`InventoryScreen.kt`, `PurchasesLedgerView.kt`):** Product catalog CRUD, stock adjustments, margin calculation, supplier purchase inflows, and Excel CSV export (`ExcelCsvExporter.kt`).
+- **Customers & Analytics (`CustomersScreen.kt`, `AnalyticsScreen.kt`):** Debt ledger, repayment tracking, WhatsApp/SMS reminders, P&L period reports, charts (`AnalyticsChart.kt`), and Android PDF generation (`PdfReportGenerator.kt`).
+- **Settings, Branches & Admin (`SettingsScreen.kt`, `AdminVerificationConsoleDialog.kt`, `BranchManagementDialog.kt`, `StaffManagementDialog.kt`, `ShopOwnerSyncHubDialog.kt`):** Branch setup & transfers, role permissions & WhatsApp/PDF staff passes, Room database health (`PRAGMA integrity_check`, WAL checkpoint, `VACUUM`), USSD/WhatsApp renewal, Settings unlock code activation, and Supabase-authenticated Admin Console.
 
 ---
 
-## 💻 Technical Specifications & Architecture
+## 7. Verification & Tests
 
-* **Language:** 100% Kotlin (Modern Coroutines & StateFlow)
-* **UI Framework:** Jetpack Compose with Material Design 3 (M3)
-* **Architecture:** Clean MVVM (Model-View-ViewModel) + Repository Pattern
-* **Local Persistence:** Android Room Database (SQLite v6) with WAL Mode
-* **Image Engine:** Coil for asynchronous, cached image loading
-* **Biometrics:** AndroidX BiometricPrompt API
-* **Target Android Version:** Android 8.0 (API 26) through Android 15+ (Edge-to-Edge Enabled)
+Local JVM and Robolectric unit tests reside in `/app/src/test/java/com/example/`:
+- `BranchDataShareTest.kt` — `BBSHARE1:` compressed token round-trip, HMAC tampering rejection, and LWW conflict resolution.
+- `SubscriptionSecurityTest.kt` — `BB` / `BB2` unlock code HMAC verification, anti-replay blocking, username + phone normalization binding.
+- `PricingCalculatorTest.kt` — Branch & worker subscription pricing tier and multi-month discount math.
+- `SecurityUtilsTest.kt` — Salted PIN/password hashing and verification.
+- `ExampleRobolectricTest.kt` & `ExampleUnitTest.kt` — Application & JVM sanity checks.
+
+Run tests with:
+```bash
+gradle :app:testDebugUnitTest
+```

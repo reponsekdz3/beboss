@@ -108,4 +108,53 @@ class SubscriptionSecurityTest {
 
         assertFalse(result.isValid)
     }
+
+    @Test
+    fun testAccountBoundUnlockCodeVerificationAndPhoneNormalization() {
+        // Admin generates BB2 code for created username "jeanpaul" and phone "+250 788 123 456"
+        val unlockCode = SubscriptionSecurityManager.generateAccountBoundUnlockCode(
+            username = "JeanPaul",
+            registeredPhone = "+250 788 123 456",
+            tierCode = "MULTI",
+            days = 30
+        )
+
+        assertTrue(unlockCode.startsWith("BB2-MULTI-30-"))
+
+        // User enters local format "0788123456" on device — last 9 digits must normalize identically
+        val validResult = SubscriptionSecurityManager.verifyVoucherToken(
+            voucherInput = unlockCode,
+            shopProfile = sampleShop.copy(phone = "0788123456"),
+            branchCount = 2,
+            workerCount = 3,
+            ownerUsername = "jeanpaul",
+            ownerPhoneOverride = "0788123456"
+        )
+
+        assertTrue(validResult.isValid)
+        assertTrue(validResult.daysToAdd == 30)
+
+        // Wrong username must be rejected
+        val wrongUserResult = SubscriptionSecurityManager.verifyVoucherToken(
+            voucherInput = unlockCode,
+            shopProfile = sampleShop,
+            branchCount = 2,
+            workerCount = 3,
+            ownerUsername = "other_owner",
+            ownerPhoneOverride = "+250788123456"
+        )
+        assertFalse(wrongUserResult.isValid)
+
+        // Tampered HMAC signature must be rejected
+        val tampered = unlockCode.dropLast(2) + "FF"
+        val tamperedResult = SubscriptionSecurityManager.verifyVoucherToken(
+            voucherInput = tampered,
+            shopProfile = sampleShop,
+            branchCount = 2,
+            workerCount = 3,
+            ownerUsername = "jeanpaul",
+            ownerPhoneOverride = "0788123456"
+        )
+        assertFalse(tamperedResult.isValid)
+    }
 }

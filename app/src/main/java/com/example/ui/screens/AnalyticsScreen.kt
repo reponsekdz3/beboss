@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.content.Context
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,6 +31,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -48,12 +50,11 @@ import com.example.data.model.ProfitLossSummary
 import com.example.data.model.ShopProfile
 import com.example.data.model.TopProductReport
 import com.example.ui.components.AnalyticsChart
-import com.example.ui.theme.BackgroundLight
-import com.example.ui.theme.InkDark
-import com.example.ui.theme.InkMedium
+import com.example.ui.theme.DarkNavy
 import com.example.ui.theme.LossRed
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
+import com.example.util.PdfReportGenerator
 import com.example.util.ReceiptGenerator
 
 @Composable
@@ -77,7 +78,7 @@ fun AnalyticsScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(BackgroundLight),
+            .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -85,7 +86,8 @@ fun AnalyticsScreen(
         item {
             Surface(
                 shape = RoundedCornerShape(14.dp),
-                color = Color.White,
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                 shadowElevation = 1.dp
             ) {
                 Row(
@@ -100,7 +102,7 @@ fun AnalyticsScreen(
                             onClick = { onPeriodSelected(period) },
                             modifier = Modifier
                                 .weight(1f)
-                                .height(40.dp),
+                                .height(42.dp),
                             shape = RoundedCornerShape(10.dp),
                             color = if (isSelected) OrangePrimary else Color.Transparent
                         ) {
@@ -109,7 +111,7 @@ fun AnalyticsScreen(
                                     text = period.displayName,
                                     fontSize = 12.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) Color.White else InkDark
+                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
@@ -123,7 +125,7 @@ fun AnalyticsScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(3.dp)
             ) {
                 Column(modifier = Modifier.padding(18.dp)) {
@@ -136,12 +138,12 @@ fun AnalyticsScreen(
                             text = "NET PROFIT / LOSS",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = InkMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             letterSpacing = 1.sp
                         )
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = if (summary.isProfitable) Color(0xFFDCFCE7) else Color(0xFFFEE2E2)
+                            color = if (summary.isProfitable) ProfitGreen.copy(alpha = 0.14f) else LossRed.copy(alpha = 0.14f)
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -189,13 +191,13 @@ fun AnalyticsScreen(
                         MetricTile(
                             label = "Cost of Goods",
                             value = ReceiptGenerator.formatMoney(summary.totalCost, shopProfile),
-                            color = InkDark,
+                            color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f)
                         )
                         MetricTile(
                             label = "Orders Count",
                             value = "${summary.totalSalesCount}",
-                            color = Color(0xFF2563EB),
+                            color = Color(0xFF3B82F6),
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -216,7 +218,7 @@ fun AnalyticsScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(2.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -232,7 +234,7 @@ fun AnalyticsScreen(
                                 text = "Top Profitable Products",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = InkDark
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
@@ -240,7 +242,7 @@ fun AnalyticsScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     if (topProducts.isEmpty()) {
-                        Text("No sales data in selected period.", fontSize = 13.sp, color = InkMedium)
+                        Text("No sales data in selected period.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
                         topProducts.take(5).forEachIndexed { index, item ->
                             Row(
@@ -256,7 +258,7 @@ fun AnalyticsScreen(
                                 ) {
                                     Surface(
                                         shape = CircleShape,
-                                        color = if (index == 0) OrangePrimary else Color(0xFFF3F4F6),
+                                        color = if (index == 0) OrangePrimary else MaterialTheme.colorScheme.surfaceVariant,
                                         modifier = Modifier.size(26.dp)
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
@@ -264,14 +266,14 @@ fun AnalyticsScreen(
                                                 text = "${index + 1}",
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = if (index == 0) Color.White else InkDark
+                                                color = if (index == 0) Color.White else MaterialTheme.colorScheme.onSurface
                                             )
                                         }
                                     }
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Column {
-                                        Text(item.productName, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = InkDark)
-                                        Text("${item.totalQuantitySold.toInt()} sold • Rev: ${ReceiptGenerator.formatMoney(item.totalRevenue, shopProfile)}", fontSize = 11.sp, color = InkMedium)
+                                        Text(item.productName, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                                        Text("${item.totalQuantitySold.toInt()} sold • Rev: ${ReceiptGenerator.formatMoney(item.totalRevenue, shopProfile)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
 
@@ -283,7 +285,7 @@ fun AnalyticsScreen(
                                 )
                             }
                             if (index < topProducts.take(5).size - 1) {
-                                HorizontalDivider(color = Color(0xFFF3F4F6))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                             }
                         }
                     }
@@ -297,7 +299,7 @@ fun AnalyticsScreen(
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     elevation = CardDefaults.cardElevation(2.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
@@ -308,7 +310,7 @@ fun AnalyticsScreen(
                                 text = "Category Sales Breakdown",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = InkDark
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
 
@@ -320,12 +322,12 @@ fun AnalyticsScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text(cat.category, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = InkDark)
+                                    Text(cat.category, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
                                     Text(
                                         "${ReceiptGenerator.formatMoney(cat.revenue, shopProfile)} (${cat.percentage.toInt()}%)",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = InkDark
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(4.dp))
@@ -335,7 +337,7 @@ fun AnalyticsScreen(
                                         .fillMaxWidth()
                                         .height(6.dp),
                                     color = OrangePrimary,
-                                    trackColor = Color(0xFFF3F4F6)
+                                    trackColor = MaterialTheme.colorScheme.surfaceVariant
                                 )
                             }
                         }
@@ -350,7 +352,7 @@ fun AnalyticsScreen(
                 Button(
                     onClick = {
                         try {
-                            val pdf = com.example.util.PdfReportGenerator.generateSalesReportPdf(
+                            val pdf = PdfReportGenerator.generateSalesReportPdf(
                                 context = context,
                                 periodName = selectedPeriod.displayName,
                                 summary = summary,
@@ -358,7 +360,7 @@ fun AnalyticsScreen(
                                 categoryShares = categoryShares,
                                 shopProfile = shopProfile
                             )
-                            com.example.util.PdfReportGenerator.sharePdf(
+                            PdfReportGenerator.sharePdf(
                                 context = context,
                                 file = pdf,
                                 title = "Share Financial PDF Report (${selectedPeriod.displayName})"
@@ -371,7 +373,7 @@ fun AnalyticsScreen(
                         .fillMaxWidth()
                         .height(52.dp),
                     shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = com.example.ui.theme.DarkNavy)
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkNavy)
                 ) {
                     Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
@@ -420,11 +422,11 @@ private fun MetricTile(
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(10.dp),
-        color = Color(0xFFF9FAFB),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE5E7EB))
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
-            Text(label, fontSize = 10.sp, color = InkMedium)
+            Text(label, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(modifier = Modifier.height(4.dp))
             Text(value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = color)
         }

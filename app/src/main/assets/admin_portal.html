@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BeBoss Admin Command Center — Auth, Licensing &amp; Branch Sync Console</title>
+  <style>
+    :root {
+      --bg: #070b14;
+      --bg-elevated: #0d1424;
+      --surface: #111a2e;
+      --surface-2: #19243d;
+      --border: #273654;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #ff6b1a;
+      --accent-hover: #ea580c;
+      --accent-soft: rgba(255, 107, 26, 0.16);
+      --green: #10b981;
+      --green-soft: rgba(16, 185, 129, 0.16);
+      --amber: #f59e0b;
+      --amber-soft: rgba(245, 158, 11, 0.16);
+      --red: #ef4444;
+      --red-soft: rgba(239, 68, 68, 0.16);
+      --blue: #3b82f6;
+      --blue-soft: rgba(59, 130, 246, 0.16);
+      --purple: #8b5cf6;
+      --purple-soft: rgba(139, 92, 246, 0.16);
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background:
+        radial-gradient(ellipse at 85% 0%, rgba(255, 107, 26, 0.12), transparent 45%),
+        radial-gradient(ellipse at 10% 10%, rgba(59, 130, 246, 0.10), transparent 40%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+    }
+    .hidden { display: none !important; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+      min-height: 40px; padding: 8px 15px; border-radius: 11px; border: 1px solid transparent;
+      font-size: 13px; font-weight: 700; cursor: pointer; text-decoration: none;
+      transition: background 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: linear-gradient(135deg, #ff6b1a, #ea580c); color: #fff; box-shadow: 0 6px 18px rgba(255, 107, 26, 0.25); }
+    .btn-green { background: var(--green); color: #04241a; }
+    .btn-red { background: var(--red-soft); color: #fca5a5; border-color: rgba(239, 68, 68, 0.35); }
+    .btn-dark { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+    .btn-sm { min-height: 34px; padding: 6px 11px; font-size: 12px; border-radius: 9px; }
+    label { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 6px; }
+    input, select, textarea {
+      width: 100%; background: #090e1a; color: var(--text); border: 1px solid var(--border);
+      border-radius: 11px; padding: 10px 12px; font-size: 13px; font-family: inherit; outline: none;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+    .card {
+      background: rgba(17, 26, 46, 0.92); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 18px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px;
+      border-radius: 999px; font-size: 11px; font-weight: 800; letter-spacing: 0.02em; white-space: nowrap;
+    }
+    .b-pending { background: var(--amber-soft); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .b-approved { background: var(--green-soft); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .b-redeemed { background: var(--blue-soft); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); }
+    .b-rejected, .b-expired { background: var(--red-soft); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .b-purple { background: var(--purple-soft); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.3); }
+    .auth-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; }
+    .auth-card { width: 100%; max-width: 960px; display: grid; grid-template-columns: 1.05fr 1fr; overflow: hidden; padding: 0; }
+    .auth-hero {
+      background: linear-gradient(155deg, #171f36 0%, #0d1424 65%, #1c120d 100%);
+      padding: 32px; border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; justify-content: space-between; gap: 20px;
+    }
+    .auth-form-pane { padding: 30px; }
+    .brand-row { display: flex; align-items: center; gap: 12px; }
+    .brand-mark {
+      width: 44px; height: 44px; border-radius: 13px; background: linear-gradient(135deg, #ff6b1a, #ea580c);
+      display: grid; place-items: center; font-weight: 900; font-size: 20px; color: #fff; flex-shrink: 0;
+    }
+    .auth-tabs {
+      display: grid; grid-template-columns: 1fr 1fr; background: #090e1a;
+      border: 1px solid var(--border); border-radius: 12px; padding: 4px; margin-bottom: 18px;
+    }
+    .auth-tab {
+      background: transparent; border: none; color: var(--muted); padding: 9px;
+      border-radius: 9px; font-size: 13px; font-weight: 700; cursor: pointer;
+    }
+    .auth-tab.active { background: var(--surface-2); color: var(--text); }
+    .feature-list { display: grid; gap: 10px; margin: 16px 0; }
+    .feature-item {
+      display: flex; gap: 10px; align-items: flex-start; background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 10px 12px;
+      font-size: 12.5px; color: #cbd5e1;
+    }
+    .app-shell { display: grid; grid-template-columns: 256px 1fr; min-height: 100vh; }
+    .sidebar {
+      background: var(--bg-elevated); border-right: 1px solid var(--border); padding: 18px 14px;
+      display: flex; flex-direction: column; justify-content: space-between;
+      position: sticky; top: 0; height: 100vh; overflow-y: auto;
+    }
+    .nav-list { display: grid; gap: 5px; margin-top: 20px; }
+    .nav-item {
+      width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      background: transparent; color: var(--muted); border: 1px solid transparent;
+      border-radius: 12px; padding: 10px 12px; font-size: 13px; font-weight: 700; cursor: pointer; text-align: left;
+    }
+    .nav-item:hover { background: rgba(255, 255, 255, 0.04); color: var(--text); }
+    .nav-item.active { background: var(--accent-soft); color: #fdba74; border-color: rgba(255, 107, 26, 0.35); }
+    .nav-count { font-size: 11px; padding: 2px 7px; border-radius: 999px; background: var(--surface-2); color: var(--text); }
+    .main-pane { display: flex; flex-direction: column; min-width: 0; }
+    .topbar {
+      position: sticky; top: 0; z-index: 20; background: rgba(7, 11, 20, 0.86);
+      backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); padding: 12px 22px;
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    .content { padding: 22px; display: grid; gap: 18px; max-width: 1400px; width: 100%; margin: 0 auto; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+    .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: 15px; padding: 15px; }
+    .kpi-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+    .kpi-value { font-size: 25px; font-weight: 900; margin-top: 6px; letter-spacing: -0.02em; }
+    .kpi-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+    .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 12px; margin-bottom: 12px; }
+    .table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--border); background: #0a101e; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 12px; border-bottom: 1px solid rgba(39, 54, 84, 0.65); vertical-align: top; }
+    th { background: #0e1628; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+    tr:last-child td { border-bottom: none; }
+    .code-panel { background: #070b13; border: 1px dashed var(--accent); border-radius: 14px; padding: 16px; }
+    .code-token { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 17px; font-weight: 900; color: #fdba74; word-break: break-all; margin: 6px 0; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(2, 6, 15, 0.78); backdrop-filter: blur(4px); display: grid; place-items: center; padding: 16px; z-index: 60; }
+    .modal-card { width: 100%; max-width: 680px; max-height: 90vh; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 20px; }
+    .toast { position: fixed; bottom: 20px; right: 20px; z-index: 90; background: #0d1527; border: 1px solid var(--accent); color: var(--text); padding: 12px 16px; border-radius: 12px; font-size: 13px; font-weight: 700; max-width: 420px; }
+    @media (max-width: 960px) {
+      .auth-card { grid-template-columns: 1fr; }
+      .auth-hero { border-right: none; border-bottom: 1px solid var(--border); padding: 22px; }
+      .app-shell { grid-template-columns: 1fr; }
+      .sidebar { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+      .nav-list { grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <section id="authGate" class="auth-shell">
+    <div class="card auth-card">
+      <div class="auth-hero">
+        <div>
+          <div class="brand-row">
+            <div class="brand-mark">B</div>
+            <div>
+              <h1 style="margin:0;font-size:19px;font-weight:900;">BeBoss Admin Platform</h1>
+              <div style="font-size:12px;color:var(--muted)">Enterprise Licensing, Verification &amp; Multi-Branch Sync</div>
+            </div>
+          </div>
+          <div class="feature-list" style="margin-top:22px;">
+            <div class="feature-item"><span class="badge b-pending">01</span><div><strong>Authenticated Admin Control:</strong> Supabase GoTrue Email/Password JWT &amp; PostgreSQL RLS (`admin_profiles`).</div></div>
+            <div class="feature-item"><span class="badge b-approved">02</span><div><strong>Real USSD Fee Audit:</strong> Validates branch count, worker headcount, and duration before issuing cryptographic <span class="mono">BB2</span> unlock codes.</div></div>
+            <div class="feature-item"><span class="badge b-redeemed">03</span><div><strong>Branch DataShare Monitor:</strong> Live view of synced multi-branch terminals across the network.</div></div>
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+          <span style="font-size:12px;color:var(--muted)">HMAC Engine: WebCrypto SHA-256 &bull; BB2 v2</span>
+          <button class="btn btn-dark btn-sm" onclick="openSqlModal()">View Supabase SQL Schema</button>
+        </div>
+      </div>
+      <div class="auth-form-pane">
+        <div class="auth-tabs">
+          <button id="tabSignInBtn" class="auth-tab active" onclick="setAuthMode('signin')">Admin Sign In</button>
+          <button id="tabSignUpBtn" class="auth-tab" onclick="setAuthMode('signup')">Register Admin</button>
+        </div>
+        <div id="authErrorBox" class="hidden" style="background:var(--red-soft);border:1px solid rgba(239,68,68,0.4);color:#fecaca;padding:10px 12px;border-radius:10px;font-size:12.5px;margin-bottom:14px;"></div>
+        <form id="authForm" onsubmit="handleAdminAuthSubmit(event)">
+          <div style="margin-bottom:11px;"><label>Supabase Project URL</label><input id="authSbUrl" type="url" placeholder="https://your-project-id.supabase.co" required /></div>
+          <div style="margin-bottom:11px;"><label>Supabase Anon Key</label><input id="authSbKey" type="password" placeholder="eyJhbGciOi..." required /></div>
+          <div id="authNameRow" class="hidden" style="margin-bottom:11px;"><label>Admin Full Name</label><input id="authFullName" type="text" placeholder="Jean Paul (Operations Admin)" /></div>
+          <div class="form-grid" style="margin-bottom:11px;">
+            <div><label>Admin Email</label><input id="authEmail" type="email" placeholder="admin@beboss.app" required /></div>
+            <div><label>Password (min 6 chars)</label><input id="authPassword" type="password" placeholder="••••••••" minlength="6" required /></div>
+          </div>
+          <div style="margin-bottom:16px;"><label>BB2 Unlock Signing Secret</label><input id="authSecret" type="text" value="BeBoss_Enterprise_HMAC_Signing_2026" required /></div>
+          <button id="authSubmitBtn" type="submit" class="btn btn-primary" style="width:100%;">Sign In to Admin Command Center</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <section id="dashboardShell" class="app-shell hidden">
+    <aside class="sidebar">
+      <div>
+        <div class="brand-row">
+          <div class="brand-mark">B</div>
+          <div>
+            <div style="font-weight:900;font-size:15px;">BeBoss Admin</div>
+            <div id="sidebarAdminEmail" style="font-size:11.5px;color:var(--muted);word-break:break-all;">—</div>
+          </div>
+        </div>
+        <nav class="nav-list">
+          <button class="nav-item active" data-view="overviewView" onclick="switchView('overviewView', this)"><span>Command Overview</span></button>
+          <button class="nav-item" data-view="queueView" onclick="switchView('queueView', this)"><span>Verification Queue</span><span id="navPendingBadge" class="nav-count">0</span></button>
+          <button class="nav-item" data-view="generatorView" onclick="switchView('generatorView', this)"><span>Unlock Code Engine</span></button>
+          <button class="nav-item" data-view="shopsView" onclick="switchView('shopsView', this)"><span>Shops &amp; Branch Sync</span><span id="navShopsBadge" class="nav-count">0</span></button>
+          <button class="nav-item" data-view="codesView" onclick="switchView('codesView', this)"><span>Codes Ledger</span></button>
+          <button class="nav-item" data-view="auditView" onclick="switchView('auditView', this)"><span>Admin Audit Trail</span></button>
+        </nav>
+      </div>
+      <div style="display:grid;gap:8px;border-top:1px solid var(--border);padding-top:14px;">
+        <button class="btn btn-dark btn-sm" onclick="openSqlModal()">SQL Schema &amp; RLS</button>
+        <button class="btn btn-red btn-sm" onclick="signOutAdmin()">Sign Out Session</button>
+      </div>
+    </aside>
+
+    <div class="main-pane">
+      <header class="topbar">
+        <div>
+          <div id="topbarTitle" style="font-weight:900;font-size:16px;">Command Overview</div>
+          <div id="topbarMeta" style="font-size:12px;color:var(--muted)">Authenticated Supabase Admin Session &bull; Auto-refresh every 15s</div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+          <span id="liveStatusBadge" class="badge b-approved">Live JWT Connected</span>
+          <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer;text-transform:none;font-size:12px;color:var(--text);">
+            <input id="autoPollToggle" type="checkbox" checked style="width:auto;margin:0;" onchange="toggleAutoPoll()" />
+            Auto-Poll
+          </label>
+          <button class="btn btn-primary btn-sm" onclick="refreshAll(true)">Sync Now</button>
+        </div>
+      </header>
+
+      <div class="content">
+        <div id="overviewView" class="view-pane">
+          <div class="kpi-grid">
+            <div class="kpi-card"><div class="kpi-label">Pending Payment Claims</div><div id="kpiPending" class="kpi-value" style="color:var(--amber)">0</div><div id="kpiPendingSub" class="kpi-sub">0 FRw awaiting verification</div></div>
+            <div class="kpi-card"><div class="kpi-label">Verified Revenue</div><div id="kpiRevenue" class="kpi-value" style="color:var(--green)">0 FRw</div><div id="kpiRevenueSub" class="kpi-sub">Approved &amp; redeemed renewals</div></div>
+            <div class="kpi-card"><div class="kpi-label">Active / Registered Shops</div><div id="kpiShops" class="kpi-value" style="color:var(--blue)">0 / 0</div><div id="kpiShopsSub" class="kpi-sub">0 expiring within 5 days</div></div>
+            <div class="kpi-card"><div class="kpi-label">Synced Branch Terminals</div><div id="kpiBranches" class="kpi-value" style="color:var(--purple)">0</div><div id="kpiBranchesSub" class="kpi-sub">Cross-branch DataShare nodes</div></div>
+          </div>
+          <div class="grid-2" style="margin-top:16px;">
+            <div class="card"><h3 style="margin:0 0 12px;font-size:15px;">Revenue by Branch Plan Tier</h3><div id="tierChartContainer"></div></div>
+            <div class="card"><h3 style="margin:0 0 12px;font-size:15px;">Payment Pipeline Health</h3><div id="pipelineChartContainer"></div></div>
+          </div>
+          <div class="card" style="margin-top:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+              <h3 style="margin:0;font-size:15px;">Urgent Verification Claims</h3>
+              <button class="btn btn-dark btn-sm" onclick="switchView('queueView', document.querySelector('[data-view=queueView]'))">Open Full Queue</button>
+            </div>
+            <div id="overviewUrgentList" style="display:grid;gap:10px;"></div>
+          </div>
+        </div>
+
+        <div id="queueView" class="view-pane hidden">
+          <div class="card">
+            <div class="form-grid">
+              <div><label>Search Username / Shop / Phone / Ref</label><input id="queueSearch" type="text" placeholder="Search..." oninput="renderRequests()" /></div>
+              <div>
+                <label>Filter Status</label>
+                <select id="queueStatus" onchange="renderRequests()">
+                  <option value="PENDING_VERIFICATION" selected>Pending Verification Only</option>
+                  <option value="APPROVED">Approved (Code Issued)</option>
+                  <option value="REDEEMED">Redeemed &amp; Active</option>
+                  <option value="REJECTED">Rejected</option>
+                  <option value="ALL">All Requests</option>
+                </select>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Shop &amp; Registered Account</th><th>USSD Proof</th><th>Plan &amp; Fee Audit</th><th>Status &amp; Code</th><th>Actions</th></tr></thead>
+                <tbody id="requestsBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="generatorView" class="view-pane hidden">
+          <div class="grid-2">
+            <div class="card">
+              <h3 style="margin:0 0 6px;font-size:16px;">Issue Account-Bound Unlock Code (<span class="mono">BB2</span>)</h3>
+              <p style="margin:0 0 14px;font-size:12.5px;color:var(--muted);">Bind token to created @username and registered phone number.</p>
+              <div class="form-grid">
+                <div><label>Owner @username *</label><input id="genUser" type="text" placeholder="kigali_boss" /></div>
+                <div><label>Registered Phone *</label><input id="genPhone" type="text" placeholder="+250788123456" /></div>
+              </div>
+              <div class="form-grid">
+                <div><label>Active Branches</label><input id="genBranches" type="number" value="1" min="1" max="50" oninput="recomputeGeneratorPrice()" /></div>
+                <div><label>Registered Staff</label><input id="genWorkers" type="number" value="1" min="1" max="100" oninput="recomputeGeneratorPrice()" /></div>
+                <div>
+                  <label>Months</label>
+                  <select id="genMonths" onchange="recomputeGeneratorPrice()">
+                    <option value="1">1 Month (30d)</option>
+                    <option value="3">3 Months (90d • -10%)</option>
+                    <option value="12">12 Months (360d • -20%)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-grid">
+                <div><label>Verified Amount (FRw)</label><input id="genAmount" type="number" value="5000" min="0" /></div>
+                <div><label>Shop Name</label><input id="genShopName" type="text" placeholder="BeBoss Superstore" /></div>
+              </div>
+              <div id="genFeeSummary" style="font-size:12px;color:#fdba74;margin-bottom:14px;"></div>
+              <button class="btn btn-primary" style="width:100%;" onclick="issueManualCode()">Generate Signed BB2 Code &amp; Save</button>
+            </div>
+            <div class="card">
+              <h3 style="margin:0 0 6px;font-size:16px;">Issued Code Dispatch</h3>
+              <div id="genOutputBox" class="code-panel hidden">
+                <div style="font-size:11px;font-weight:800;color:var(--accent);">ACCOUNT-BOUND HMAC-SHA256 TOKEN</div>
+                <div id="genOutputCode" class="code-token"></div>
+                <div id="genOutputMeta" style="font-size:12.5px;color:var(--muted);margin-bottom:12px;"></div>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                  <button class="btn btn-dark btn-sm" onclick="copyText(document.getElementById('genOutputCode').textContent, 'Copied!')">Copy Code</button>
+                  <a id="genOutputWa" href="#" target="_blank" class="btn btn-green btn-sm">Send Code on WhatsApp</a>
+                </div>
+              </div>
+              <div id="genEmptyBox" style="padding:20px;border:1px dashed var(--border);border-radius:12px;color:var(--muted);font-size:13px;">No code generated in this session yet.</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="shopsView" class="view-pane hidden">
+          <div class="card" style="margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+              <h3 style="margin:0;font-size:15px;">Registered Shop Accounts</h3>
+              <input id="shopSearch" type="text" placeholder="Filter shops..." style="max-width:260px;" oninput="renderShops()" />
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Shop Name</th><th>Owner &amp; @username</th><th>Phone &amp; Device</th><th>Branches / Workers</th><th>License</th><th>Action</th></tr></thead>
+                <tbody id="shopsBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <h3 style="margin:0 0 12px;font-size:15px;">Live Branch DataShare Cloud Snapshots</h3>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Shop Sync Key</th><th>Branch &amp; Device</th><th>Records Summary</th><th>Last Synced</th></tr></thead>
+                <tbody id="snapshotsBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="codesView" class="view-pane hidden">
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+              <h3 style="margin:0;font-size:15px;">Issued Codes Ledger</h3>
+              <select id="codeStatusFilter" style="max-width:200px;" onchange="renderCodes()">
+                <option value="ALL">All Statuses</option><option value="ISSUED">Issued</option><option value="REDEEMED">Redeemed</option><option value="REVOKED">Revoked</option>
+              </select>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Unlock Code</th><th>Bound @username &amp; Phone</th><th>Tier &amp; Days</th><th>Amount</th><th>Status</th><th>Issued By</th></tr></thead>
+                <tbody id="codesBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="auditView" class="view-pane hidden">
+          <div class="card">
+            <h3 style="margin:0 0 12px;font-size:15px;">Admin Audit Trail</h3>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Timestamp</th><th>Admin Email</th><th>Action</th><th>Target</th><th>Details</th></tr></thead>
+                <tbody id="auditBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="rejectModal" class="modal-backdrop hidden">
+    <div class="modal-card" style="max-width:460px;">
+      <h3 style="margin:0 0 6px;">Reject Payment Claim</h3>
+      <p id="rejectModalMeta" style="margin:0 0 12px;font-size:12.5px;color:var(--muted);"></p>
+      <label>Rejection Reason</label>
+      <textarea id="rejectReasonInput" rows="3" placeholder="Reason..."></textarea>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+        <button class="btn btn-dark btn-sm" onclick="closeRejectModal()">Cancel</button>
+        <button class="btn btn-red btn-sm" onclick="confirmRejectRequest()">Confirm Rejection</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="sqlModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div><h3 style="margin:0;">Supabase SQL Schema &amp; Admin RLS</h3></div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-primary btn-sm" onclick="copyText(SCHEMA_SQL, 'Copied SQL!')">Copy SQL</button>
+          <button class="btn btn-dark btn-sm" onclick="closeSqlModal()">Close</button>
+        </div>
+      </div>
+      <textarea id="sqlModalText" rows="16" readonly class="mono" style="font-size:11.5px;"></textarea>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script>
+    const SCHEMA_SQL = `-- BeBoss Enterprise Licensing, Admin Auth & Branch Auto-Sync Schema
+create table if not exists public.admin_profiles (
+    user_id uuid primary key references auth.users(id) on delete cascade,
+    email text not null unique,
+    full_name text not null default 'BeBoss Admin',
+    role text not null default 'SUPER_ADMIN',
+    is_active boolean not null default true,
+    created_at bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+create or replace function public.is_beboss_admin() returns boolean language sql security definer stable as $$
+  select exists (select 1 from public.admin_profiles where user_id = auth.uid() and is_active = true);
+$$;
+create table if not exists public.shop_accounts (
+    id text primary key, shop_name text not null, owner_name text not null default '',
+    owner_username text not null, owner_phone text not null, device_challenge text not null default '',
+    branch_count integer not null default 1, worker_count integer not null default 1,
+    monthly_fee_rwf integer not null default 5000, subscription_status text not null default 'ACTIVE',
+    subscription_expires_at bigint not null default 0, updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+create table if not exists public.payment_requests (
+    id text primary key, shop_name text not null, owner_username text not null, owner_phone text not null,
+    device_challenge text not null default '', provider text not null default 'MTN MoMo', ussd_code text not null default '',
+    payer_phone text not null default '', amount_rwf integer not null default 5000, duration_months integer not null default 1,
+    branch_count integer not null default 1, worker_count integer not null default 1, telco_reference text not null default '',
+    status text not null default 'PENDING_VERIFICATION', generated_unlock_code text not null default '',
+    verified_by_admin text not null default '', rejection_reason text not null default '',
+    created_at bigint not null default (extract(epoch from now()) * 1000)::bigint,
+    updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+create table if not exists public.unlock_codes (
+    id text primary key, unlock_code text not null unique, shop_username text not null, shop_phone text not null,
+    device_challenge text not null default '', tier_code text not null default 'SINGLE', plan_days integer not null default 30,
+    amount_rwf integer not null default 5000, status text not null default 'ISSUED', issued_by_admin text not null default 'BeBoss Admin',
+    issued_at bigint not null default (extract(epoch from now()) * 1000)::bigint, redeemed_at bigint
+);
+create table if not exists public.branch_sync_snapshots (
+    id text primary key, shop_sync_key text not null, device_id text not null,
+    branch_id text not null default 'main_branch', branch_name text not null default 'Main Store',
+    shop_name text not null default '', owner_username text not null default '',
+    payload_token text not null, records_summary text not null default '',
+    updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+create table if not exists public.admin_audit_logs (
+    id text primary key, admin_email text not null, action text not null, target_id text not null default '',
+    details text not null default '', created_at bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+alter table public.admin_profiles enable row level security;
+alter table public.shop_accounts enable row level security;
+alter table public.payment_requests enable row level security;
+alter table public.unlock_codes enable row level security;
+alter table public.branch_sync_snapshots enable row level security;
+alter table public.admin_audit_logs enable row level security;
+create policy "Read own or admin profiles" on public.admin_profiles for select using (auth.uid() = user_id or public.is_beboss_admin());
+create policy "Bootstrap or admin insert profile" on public.admin_profiles for insert with check (auth.uid() = user_id and (not exists (select 1 from public.admin_profiles) or public.is_beboss_admin()));
+create policy "Admin update profiles" on public.admin_profiles for update using (public.is_beboss_admin()) with check (public.is_beboss_admin());
+create policy "Shops and admins manage shop_accounts" on public.shop_accounts for all using (true) with check (true);
+create policy "Shop terminals submit and read payment_requests" on public.payment_requests for select using (true);
+create policy "Shop terminals insert payment_requests" on public.payment_requests for insert with check (true);
+create policy "Shop redeem or admin update payment_requests" on public.payment_requests for update using (true) with check (status = 'REDEEMED' or public.is_beboss_admin());
+create policy "Read unlock_codes" on public.unlock_codes for select using (true);
+create policy "Admin insert unlock_codes" on public.unlock_codes for insert with check (public.is_beboss_admin());
+create policy "Shop redeem or admin update unlock_codes" on public.unlock_codes for update using (true) with check (status = 'REDEEMED' or public.is_beboss_admin());
+create policy "Branch devices relay snapshots" on public.branch_sync_snapshots for all using (true) with check (true);
+create policy "Admin read audit_logs" on public.admin_audit_logs for select using (public.is_beboss_admin());
+create policy "Admin insert audit_logs" on public.admin_audit_logs for insert with check (public.is_beboss_admin());`;
+
+    const STORAGE_KEY = 'beboss_admin_platform_v2';
+    let authMode = 'signin';
+    let pollTimer = null;
+    let rejectTargetId = null;
+    let session = { url: '', anonKey: '', secret: 'BeBoss_Enterprise_HMAC_Signing_2026', accessToken: '', refreshToken: '', userId: '', email: '', fullName: 'BeBoss Admin', expiresAt: 0 };
+    let dataState = { requests: [], shops: [], codes: [], snapshots: [], audits: [] };
+
+    function showToast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.remove('hidden');
+      clearTimeout(window.__toastTimer);
+      window.__toastTimer = setTimeout(() => el.classList.add('hidden'), 3600);
+    }
+    function copyText(txt, okMsg = 'Copied!') { navigator.clipboard.writeText(txt); showToast(okMsg); }
+    function openSqlModal() { document.getElementById('sqlModalText').value = SCHEMA_SQL; document.getElementById('sqlModal').classList.remove('hidden'); }
+    function closeSqlModal() { document.getElementById('sqlModal').classList.add('hidden'); }
+    function setAuthMode(mode) {
+      authMode = mode;
+      document.getElementById('tabSignInBtn').classList.toggle('active', mode === 'signin');
+      document.getElementById('tabSignUpBtn').classList.toggle('active', mode === 'signup');
+      document.getElementById('authNameRow').classList.toggle('hidden', mode === 'signin');
+      document.getElementById('authSubmitBtn').textContent = mode === 'signin' ? 'Sign In to Admin Command Center' : 'Create Admin Account & Verify Profile';
+      document.getElementById('authErrorBox').classList.add('hidden');
+    }
+    function saveSession() { localStorage.setItem(STORAGE_KEY, JSON.stringify(session)); }
+    function restoreSession() {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+        session = { ...session, ...saved };
+        if (params.get('url')) session.url = params.get('url').replace(/\/+$/, '');
+        if (params.get('key')) session.anonKey = params.get('key');
+      } catch (_) {}
+      document.getElementById('authSbUrl').value = session.url || '';
+      document.getElementById('authSbKey').value = session.anonKey || '';
+      document.getElementById('authEmail').value = session.email || '';
+      document.getElementById('authSecret').value = session.secret || 'BeBoss_Enterprise_HMAC_Signing_2026';
+      if (session.accessToken && session.url && session.anonKey) enterAuthenticatedShell();
+    }
+    async function handleAdminAuthSubmit(e) {
+      e.preventDefault();
+      const errBox = document.getElementById('authErrorBox');
+      errBox.classList.add('hidden');
+      const url = document.getElementById('authSbUrl').value.trim().replace(/\/+$/, '');
+      const anonKey = document.getElementById('authSbKey').value.trim();
+      const email = document.getElementById('authEmail').value.trim().toLowerCase();
+      const password = document.getElementById('authPassword').value;
+      const secret = document.getElementById('authSecret').value.trim();
+      const fullName = document.getElementById('authFullName').value.trim() || email.split('@')[0];
+      const btn = document.getElementById('authSubmitBtn');
+      btn.disabled = true;
+      try {
+        const endpoint = authMode === 'signin' ? `${url}/auth/v1/token?grant_type=password` : `${url}/auth/v1/signup`;
+        const res = await fetch(endpoint, {
+          method: 'POST', headers: { 'apikey': anonKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, data: authMode === 'signup' ? { full_name: fullName } : undefined })
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error_description || body.msg || body.message || `Auth failed (${res.status})`);
+        const accessToken = body.access_token || body.session?.access_token;
+        if (!accessToken) throw new Error('Account created! Confirm email in Supabase Auth if required, then Sign In.');
+        session = { url, anonKey, secret, accessToken, refreshToken: body.refresh_token || '', userId: body.user?.id || '', email: body.user?.email || email, fullName: body.user?.user_metadata?.full_name || fullName, expiresAt: Date.now() + ((body.expires_in || 3600) * 1000) };
+        await ensureAdminProfileRecord();
+        saveSession();
+        await logAudit('ADMIN_LOGIN', session.email, 'Authenticated session opened');
+        enterAuthenticatedShell();
+      } catch (err) {
+        errBox.textContent = err.message || 'Authentication error';
+        errBox.classList.remove('hidden');
+      } finally { btn.disabled = false; }
+    }
+    async function ensureAdminProfileRecord() {
+      if (!session.userId) return;
+      const checkRes = await fetch(`${session.url}/rest/v1/admin_profiles?user_id=eq.${encodeURIComponent(session.userId)}&limit=1`, {
+        headers: { 'apikey': session.anonKey, 'Authorization': `Bearer ${session.accessToken}` }
+      });
+      if (checkRes.ok) {
+        const rows = await checkRes.json();
+        if (rows.length > 0) { if (rows[0].is_active === false) throw new Error('Admin account deactivated.'); session.fullName = rows[0].full_name || session.fullName; return; }
+      }
+      const insRes = await fetch(`${session.url}/rest/v1/admin_profiles`, {
+        method: 'POST',
+        headers: { 'apikey': session.anonKey, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ user_id: session.userId, email: session.email, full_name: session.fullName, role: 'SUPER_ADMIN', is_active: true, created_at: Date.now() })
+      });
+      if (!insRes.ok) throw new Error(`Not authorized in admin_profiles (${insRes.status})`);
+    }
+    async function refreshJwtIfNeeded() {
+      if (!session.refreshToken || Date.now() < session.expiresAt - 60000) return;
+      try {
+        const res = await fetch(`${session.url}/auth/v1/token?grant_type=refresh_token`, {
+          method: 'POST', headers: { 'apikey': session.anonKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: session.refreshToken })
+        });
+        if (res.ok) {
+          const d = await res.json();
+          if (d.access_token) { session.accessToken = d.access_token; session.refreshToken = d.refresh_token || session.refreshToken; session.expiresAt = Date.now() + ((d.expires_in || 3600) * 1000); saveSession(); }
+        }
+      } catch (_) {}
+    }
+    async function sbFetch(path, options = {}) {
+      await refreshJwtIfNeeded();
+      const res = await fetch(`${session.url}/rest/v1/${path}`, {
+        ...options,
+        headers: { 'apikey': session.anonKey, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', ...(options.headers || {}) }
+      });
+      if (res.status === 401) { signOutAdmin(true); throw new Error('Session expired.'); }
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      const ct = res.headers.get('content-type') || '';
+      return ct.includes('application/json') ? res.json() : null;
+    }
+    function enterAuthenticatedShell() {
+      document.getElementById('authGate').classList.add('hidden');
+      document.getElementById('dashboardShell').classList.remove('hidden');
+      document.getElementById('sidebarAdminEmail').textContent = `${session.fullName} (${session.email})`;
+      recomputeGeneratorPrice(); refreshAll(false); toggleAutoPoll();
+    }
+    async function signOutAdmin(silent = false) {
+      clearInterval(pollTimer);
+      session.accessToken = ''; session.refreshToken = ''; session.expiresAt = 0; saveSession();
+      document.getElementById('dashboardShell').classList.add('hidden');
+      document.getElementById('authGate').classList.remove('hidden');
+      if (!silent) showToast('Signed out.');
+    }
+    function toggleAutoPoll() {
+      clearInterval(pollTimer);
+      if (document.getElementById('autoPollToggle').checked) pollTimer = setInterval(() => refreshAll(false), 15000);
+    }
+    function switchView(viewId, btn) {
+      document.querySelectorAll('.view-pane').forEach(v => v.classList.add('hidden'));
+      document.getElementById(viewId).classList.remove('hidden');
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+    }
+    function calculateExpectedPlanPrice(branches, workers, months) {
+      const b = Math.max(1, Number(branches) || 1), w = Math.max(1, Number(workers) || 1), m = Math.max(1, Number(months) || 1);
+      const branchFee = b === 1 ? 5000 : (b === 2 ? 10000 : 20000);
+      const workerFee = w <= 1 ? 0 : (w <= 3 ? 2000 : (w <= 5 ? 4000 : 4000 + (w - 5) * 1000));
+      const monthly = branchFee + workerFee;
+      const discount = m === 12 ? 20 : (m === 3 ? 10 : 0);
+      const total = Math.round((monthly * m) * (100 - discount) / 100);
+      const tier = m >= 12 ? 'ANNUAL' : (b >= 3 ? 'MULTI' : (b === 2 ? 'DUAL' : 'SINGLE'));
+      return { branchFee, workerFee, monthly, discount, total, tier, days: m * 30 };
+    }
+    function normalizePhoneLast9(phone) { return String(phone || '').replace(/\D/g, '').slice(-9); }
+    function toHexUpper(buf) { return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase(); }
+    async function computeAccountBindingHash(username, phone) {
+      const seed = `${String(username || '').trim().toLowerCase()}:${normalizePhoneLast9(phone)}`;
+      return toHexUpper(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(seed))).slice(0, 6);
+    }
+    async function generateBB2UnlockCode(username, phone, tierCode, days, validityWindowDays = 14) {
+      const cleanTier = String(tierCode || 'SINGLE').trim().toUpperCase();
+      const acctHash6 = await computeAccountBindingHash(username, phone);
+      const expiryHex = (Math.floor(Date.now() / 86400000) + validityWindowDays).toString(16).toUpperCase();
+      const payload = `BB2:${cleanTier}:${days}:${expiryHex}:${acctHash6}`;
+      const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(session.secret || 'BeBoss_Enterprise_HMAC_Signing_2026'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+      const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload));
+      return `BB2-${cleanTier}-${days}-${expiryHex}-${acctHash6}-${toHexUpper(sig).slice(0, 8)}`;
+    }
+    function buildWhatsAppLink(phone, shopName, username, code, days, tierName) {
+      const digits = String(phone || '').replace(/\D/g, '');
+      const waPhone = digits.length === 9 ? '250' + digits : (digits.startsWith('07') ? '25' + digits : digits);
+      const msg = [`*BEBOSS SUBSCRIPTION APPROVED!*`, `━━━━━━━━━━━━━━━━━━━━`, `Hello *@${username}* (${shopName}),`, `Your Mobile Money payment has been verified!`, ``, `*Your Unlock Code:*`, `${code}`, ``, `• *Plan:* ${tierName}`, `• *Duration Added:* +${days} Days`, ``, `*How to Activate:*`, `Open BeBoss App -> *Settings* -> *Insert Unlock Code* -> Paste code above & tap *Verify & Activate*.`, `Murakoze gukoresha BeBoss!`].join('\n');
+      return `https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`;
+    }
+    async function logAudit(action, targetId, details) {
+      try {
+        await sbFetch('admin_audit_logs', { method: 'POST', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify({ id: crypto.randomUUID(), admin_email: session.email, action, target_id: String(targetId || ''), details: String(details || ''), created_at: Date.now() }) });
+      } catch (_) {}
+    }
+    async function refreshAll(notify = true) {
+      try {
+        const [requests, shops, codes, snapshots, audits] = await Promise.all([
+          sbFetch('payment_requests?order=created_at.desc&limit=150'),
+          sbFetch('shop_accounts?order=updated_at.desc&limit=150'),
+          sbFetch('unlock_codes?order=issued_at.desc&limit=150'),
+          sbFetch('branch_sync_snapshots?order=updated_at.desc&limit=150').catch(() => []),
+          sbFetch('admin_audit_logs?order=created_at.desc&limit=100').catch(() => [])
+        ]);
+        dataState = { requests: requests || [], shops: shops || [], codes: codes || [], snapshots: snapshots || [], audits: audits || [] };
+        renderOverview(); renderRequests(); renderShops(); renderSnapshots(); renderCodes(); renderAudits();
+        document.getElementById('liveStatusBadge').textContent = `Synced ${new Date().toLocaleTimeString()}`;
+        if (notify) showToast('Supabase Admin data synchronized.');
+      } catch (err) { showToast('Sync error: ' + err.message); }
+    }
+    function renderOverview() {
+      const pending = dataState.requests.filter(r => r.status === 'PENDING_VERIFICATION');
+      const approved = dataState.requests.filter(r => r.status === 'APPROVED' || r.status === 'REDEEMED');
+      const pendingSum = pending.reduce((a, r) => a + (Number(r.amount_rwf) || 0), 0);
+      const revSum = approved.reduce((a, r) => a + (Number(r.amount_rwf) || 0), 0);
+      const now = Date.now(); let activeShops = 0, expiringSoon = 0;
+      dataState.shops.forEach(s => { const dl = Math.ceil((Number(s.subscription_expires_at || 0) - now) / 86400000); if (s.subscription_status !== 'EXPIRED' && dl > 0) { activeShops++; if (dl <= 5) expiringSoon++; } });
+      document.getElementById('navPendingBadge').textContent = pending.length;
+      document.getElementById('navShopsBadge').textContent = dataState.shops.length;
+      document.getElementById('kpiPending').textContent = pending.length;
+      document.getElementById('kpiPendingSub').textContent = `${pendingSum.toLocaleString()} FRw awaiting verification`;
+      document.getElementById('kpiRevenue').textContent = `${revSum.toLocaleString()} FRw`;
+      document.getElementById('kpiRevenueSub').textContent = `${approved.length} verified monthly renewals`;
+      document.getElementById('kpiShops').textContent = `${activeShops} / ${dataState.shops.length}`;
+      document.getElementById('kpiShopsSub').textContent = `${expiringSoon} expiring within 5 days`;
+      document.getElementById('kpiBranches').textContent = dataState.snapshots.length;
+      const tierBuckets = { SINGLE: 0, DUAL: 0, MULTI: 0, ANNUAL: 0 };
+      approved.forEach(r => { tierBuckets[r.duration_months >= 12 ? 'ANNUAL' : (r.branch_count >= 3 ? 'MULTI' : (r.branch_count === 2 ? 'DUAL' : 'SINGLE'))] += (Number(r.amount_rwf) || 0); });
+      const maxTier = Math.max(1, ...Object.values(tierBuckets));
+      const tierColors = { SINGLE: '#3b82f6', DUAL: '#ff6b1a', MULTI: '#8b5cf6', ANNUAL: '#10b981' };
+      document.getElementById('tierChartContainer').innerHTML = Object.entries(tierBuckets).map(([k, v]) => `<div style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;"><span><strong>${k}</strong></span><span class="mono">${v.toLocaleString()} FRw</span></div><div style="height:10px;background:#090e1a;border-radius:999px;overflow:hidden;"><div style="height:100%;width:${Math.round((v/maxTier)*100)}%;background:${tierColors[k]};border-radius:999px;"></div></div></div>`).join('');
+      const totalReq = Math.max(1, dataState.requests.length);
+      document.getElementById('pipelineChartContainer').innerHTML = [['PENDING_VERIFICATION','Pending','#f59e0b'],['APPROVED','Code Issued','#10b981'],['REDEEMED','Redeemed','#3b82f6'],['REJECTED','Rejected','#ef4444']].map(([k, l, c]) => { const cnt = dataState.requests.filter(r => r.status === k).length; return `<div style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;"><span>${l}</span><span class="mono">${cnt} (${Math.round((cnt/totalReq)*100)}%)</span></div><div style="height:10px;background:#090e1a;border-radius:999px;overflow:hidden;"><div style="height:100%;width:${Math.round((cnt/totalReq)*100)}%;background:${c};border-radius:999px;"></div></div></div>`; }).join('');
+      const urgentEl = document.getElementById('overviewUrgentList');
+      urgentEl.innerHTML = !pending.length ? `<div style="color:var(--muted);font-size:13px;">All incoming payment verification requests have been handled.</div>` : pending.slice(0, 5).map(r => `<div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;padding:12px;background:#0b1222;border:1px solid var(--border);border-radius:12px;"><div><strong>${esc(r.shop_name)}</strong> <span class="mono" style="color:#fdba74">@${esc(r.owner_username)}</span><div style="font-size:12px;color:var(--muted)">${esc(r.provider)} &bull; ${Number(r.amount_rwf || 0).toLocaleString()} FRw &bull; Ref: ${esc(r.telco_reference || 'WhatsApp Proof')}</div></div><div style="display:flex;gap:8px;"><button class="btn btn-primary btn-sm" onclick="approveRequest('${escAttr(r.id)}')">Verify &amp; Issue Code</button><button class="btn btn-red btn-sm" onclick="openRejectModal('${escAttr(r.id)}')">Reject</button></div></div>`).join('');
+    }
+    function renderRequests() {
+      const tbody = document.getElementById('requestsBody');
+      const q = (document.getElementById('queueSearch').value || '').trim().toLowerCase();
+      const filterStatus = document.getElementById('queueStatus').value;
+      const list = dataState.requests.filter(r => (filterStatus === 'ALL' || r.status === filterStatus) && (!q || [r.shop_name, r.owner_username, r.owner_phone, r.payer_phone, r.telco_reference, r.generated_unlock_code].some(v => String(v || '').toLowerCase().includes(q))));
+      if (!list.length) { tbody.innerHTML = `<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:24px;">No matching requests.</td></tr>`; return; }
+      tbody.innerHTML = list.map(r => {
+        const expected = calculateExpectedPlanPrice(r.branch_count, r.worker_count, r.duration_months);
+        const paidAmt = Number(r.amount_rwf) || 0;
+        const badgeCls = r.status === 'APPROVED' ? 'b-approved' : (r.status === 'REDEEMED' ? 'b-redeemed' : (r.status === 'REJECTED' ? 'b-rejected' : 'b-pending'));
+        const waHref = r.generated_unlock_code ? buildWhatsAppLink(r.owner_phone || r.payer_phone, r.shop_name, r.owner_username, r.generated_unlock_code, (r.duration_months || 1) * 30, `${r.branch_count} Branch(es)`) : '#';
+        return `<tr><td><strong>${esc(r.shop_name)}</strong><br/><span class="mono" style="color:#fdba74">@${esc(r.owner_username)}</span><br/><span style="font-size:12px;color:var(--muted)">Phone: ${esc(r.owner_phone)}</span></td><td><strong>${esc(r.provider)}</strong><br/><span class="mono" style="font-size:12px">${esc(r.ussd_code)}</span><br/><span style="font-size:12px;color:var(--muted)">Ref: <strong>${esc(r.telco_reference || 'WhatsApp')}</strong></span></td><td><strong style="color:var(--accent)">${paidAmt.toLocaleString()} FRw</strong> <span class="badge ${paidAmt >= expected.total ? 'b-approved' : 'b-rejected'}">${paidAmt >= expected.total ? 'FEE OK' : `EXP ${expected.total.toLocaleString()}`}</span><br/><span style="font-size:12px;">${r.branch_count}B • ${r.worker_count}W • ${r.duration_months}mo</span></td><td><span class="badge ${badgeCls}">${esc(r.status)}</span>${r.generated_unlock_code ? `<div class="mono" style="margin-top:6px;font-size:12px;color:#6ee7b7;font-weight:800">${esc(r.generated_unlock_code)}</div>` : ''}${r.rejection_reason ? `<div style="font-size:11.5px;color:#fca5a5;">${esc(r.rejection_reason)}</div>` : ''}</td><td><div style="display:flex;flex-direction:column;gap:6px;">${r.status === 'PENDING_VERIFICATION' ? `<button class="btn btn-primary btn-sm" onclick="approveRequest('${escAttr(r.id)}')">Verify &amp; Issue Code</button><button class="btn btn-red btn-sm" onclick="openRejectModal('${escAttr(r.id)}')">Reject</button>` : ''}${r.generated_unlock_code ? `<a class="btn btn-green btn-sm" href="${waHref}" target="_blank">Send via WhatsApp</a>` : ''}</div></td></tr>`;
+      }).join('');
+    }
+    function renderShops() {
+      const tbody = document.getElementById('shopsBody');
+      const q = (document.getElementById('shopSearch')?.value || '').trim().toLowerCase();
+      const filtered = dataState.shops.filter(s => !q || [s.shop_name, s.owner_name, s.owner_username, s.owner_phone].some(v => String(v || '').toLowerCase().includes(q)));
+      tbody.innerHTML = !filtered.length ? `<tr><td colspan="6" style="color:var(--muted);text-align:center;padding:24px;">No shops loaded.</td></tr>` : filtered.map(s => {
+        const dl = Math.ceil((Number(s.subscription_expires_at || 0) - Date.now()) / 86400000);
+        const active = s.subscription_status !== 'EXPIRED' && dl > 0;
+        return `<tr><td><strong>${esc(s.shop_name)}</strong></td><td>${esc(s.owner_name)}<br/><span class="mono" style="color:#fdba74">@${esc(s.owner_username)}</span></td><td>${esc(s.owner_phone)}<br/><span class="mono" style="font-size:11px;color:var(--muted)">${esc(s.device_challenge)}</span></td><td>${s.branch_count}B • ${s.worker_count}W<br/><strong>${Number(s.monthly_fee_rwf || 5000).toLocaleString()} FRw/mo</strong></td><td><span class="badge ${active ? (dl <= 5 ? 'b-pending' : 'b-approved') : 'b-expired'}">${active ? `ACTIVE • ${dl}d left` : 'EXPIRED'}</span></td><td><button class="btn btn-dark btn-sm" onclick="prefillGenerator('${escAttr(s.owner_username)}','${escAttr(s.owner_phone)}','${escAttr(s.shop_name)}',${s.branch_count || 1},${s.worker_count || 1})">Renew / Issue</button></td></tr>`;
+      }).join('');
+    }
+    function renderSnapshots() {
+      const tbody = document.getElementById('snapshotsBody');
+      tbody.innerHTML = !dataState.snapshots.length ? `<tr><td colspan="4" style="color:var(--muted);text-align:center;padding:20px;">No branch cloud snapshots yet.</td></tr>` : dataState.snapshots.map(sn => `<tr><td><strong>${esc(sn.shop_name || sn.shop_sync_key)}</strong><br/><span class="mono" style="font-size:11px;color:#fdba74">${esc(sn.shop_sync_key)}</span></td><td>${esc(sn.branch_name)}<br/><span class="mono" style="font-size:11px;color:var(--muted)">Device ${esc(sn.device_id)}</span></td><td><span class="badge b-purple">${esc(sn.records_summary || 'Synced')}</span></td><td style="font-size:12px;color:var(--muted)">${sn.updated_at ? new Date(Number(sn.updated_at)).toLocaleString() : '—'}</td></tr>`).join('');
+    }
+    function renderCodes() {
+      const tbody = document.getElementById('codesBody');
+      const f = document.getElementById('codeStatusFilter').value;
+      const list = dataState.codes.filter(c => f === 'ALL' || c.status === f);
+      tbody.innerHTML = !list.length ? `<tr><td colspan="6" style="color:var(--muted);text-align:center;padding:24px;">No codes match filter.</td></tr>` : list.map(c => `<tr><td class="mono" style="font-weight:800;color:#fdba74">${esc(c.unlock_code)}</td><td>@${esc(c.shop_username)}<br/><span style="font-size:12px;color:var(--muted)">${esc(c.shop_phone)}</span></td><td>${esc(c.tier_code)} • +${c.plan_days}d</td><td>${Number(c.amount_rwf || 0).toLocaleString()} FRw</td><td><span class="badge ${c.status === 'REDEEMED' ? 'b-redeemed' : (c.status === 'REVOKED' ? 'b-rejected' : 'b-approved')}">${esc(c.status)}</span></td><td><div>${esc(c.issued_by_admin)}</div><div style="display:flex;gap:6px;margin-top:6px;"><button class="btn btn-dark btn-sm" onclick="copyText('${escAttr(c.unlock_code)}')">Copy</button>${c.status === 'ISSUED' ? `<button class="btn btn-red btn-sm" onclick="revokeCode('${escAttr(c.id)}','${escAttr(c.unlock_code)}')">Revoke</button>` : ''}</div></td></tr>`).join('');
+    }
+    function renderAudits() {
+      const tbody = document.getElementById('auditBody');
+      tbody.innerHTML = !dataState.audits.length ? `<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:24px;">No audit events yet.</td></tr>` : dataState.audits.map(a => `<tr><td style="font-size:12px;color:var(--muted)">${a.created_at ? new Date(Number(a.created_at)).toLocaleString() : '—'}</td><td>${esc(a.admin_email)}</td><td><span class="badge b-purple">${esc(a.action)}</span></td><td class="mono" style="font-size:12px">${esc(a.target_id)}</td><td>${esc(a.details)}</td></tr>`).join('');
+    }
+    function recomputeGeneratorPrice() {
+      const calc = calculateExpectedPlanPrice(document.getElementById('genBranches').value, document.getElementById('genWorkers').value, document.getElementById('genMonths').value);
+      document.getElementById('genAmount').value = calc.total;
+      document.getElementById('genFeeSummary').textContent = `Tier: ${calc.tier} • Duration: +${calc.days}d • Monthly: ${calc.monthly.toLocaleString()} FRw • Discount: ${calc.discount}% • Total: ${calc.total.toLocaleString()} FRw`;
+    }
+    function prefillGenerator(u, p, s, b, w) {
+      document.getElementById('genUser').value = u; document.getElementById('genPhone').value = p;
+      document.getElementById('genShopName').value = s; document.getElementById('genBranches').value = Math.max(1, Number(b) || 1);
+      document.getElementById('genWorkers').value = Math.max(1, Number(w) || 1);
+      recomputeGeneratorPrice(); switchView('generatorView', document.querySelector('[data-view=generatorView]'));
+    }
+    async function approveRequest(reqId) {
+      const req = dataState.requests.find(x => x.id === reqId); if (!req) return;
+      const calc = calculateExpectedPlanPrice(req.branch_count, req.worker_count, req.duration_months);
+      const unlockCode = await generateBB2UnlockCode(req.owner_username, req.owner_phone, calc.tier, calc.days);
+      const now = Date.now(), adminLabel = `${session.fullName} (${session.email})`;
+      try {
+        await sbFetch('unlock_codes', { method: 'POST', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify({ id: crypto.randomUUID(), unlock_code: unlockCode, shop_username: String(req.owner_username || '').trim().toLowerCase(), shop_phone: String(req.owner_phone || '').trim(), device_challenge: req.device_challenge || '', tier_code: calc.tier, plan_days: calc.days, amount_rwf: Number(req.amount_rwf || calc.total), status: 'ISSUED', issued_by_admin: adminLabel, issued_at: now }) });
+        await sbFetch(`payment_requests?id=eq.${encodeURIComponent(req.id)}`, { method: 'PATCH', body: JSON.stringify({ status: 'APPROVED', generated_unlock_code: unlockCode, verified_by_admin: adminLabel, updated_at: now }) });
+        await logAudit('APPROVE_PAYMENT', req.owner_username, `Approved ${req.amount_rwf} FRw -> ${unlockCode}`);
+        showGeneratedOutput(unlockCode, req.shop_name, req.owner_username, req.owner_phone || req.payer_phone, calc.days, calc.tier);
+        switchView('generatorView', document.querySelector('[data-view=generatorView]'));
+        await refreshAll(false); showToast(`Issued ${unlockCode} for @${req.owner_username}`);
+      } catch (err) { showToast('Approval failed: ' + err.message); }
+    }
+    function openRejectModal(reqId) {
+      const req = dataState.requests.find(x => x.id === reqId); if (!req) return;
+      rejectTargetId = reqId;
+      document.getElementById('rejectModalMeta').textContent = `${req.shop_name} (@${req.owner_username}) • ${req.amount_rwf} FRw`;
+      document.getElementById('rejectReasonInput').value = ''; document.getElementById('rejectModal').classList.remove('hidden');
+    }
+    function closeRejectModal() { rejectTargetId = null; document.getElementById('rejectModal').classList.add('hidden'); }
+    async function confirmRejectRequest() {
+      if (!rejectTargetId) return;
+      const reason = document.getElementById('rejectReasonInput').value.trim() || 'Payment reference unverified by Admin';
+      const req = dataState.requests.find(x => x.id === rejectTargetId);
+      try {
+        await sbFetch(`payment_requests?id=eq.${encodeURIComponent(rejectTargetId)}`, { method: 'PATCH', body: JSON.stringify({ status: 'REJECTED', rejection_reason: reason, verified_by_admin: `${session.fullName} (${session.email})`, updated_at: Date.now() }) });
+        await logAudit('REJECT_PAYMENT', req?.owner_username || rejectTargetId, reason);
+        closeRejectModal(); await refreshAll(false); showToast('Claim rejected.');
+      } catch (err) { showToast('Reject failed: ' + err.message); }
+    }
+    async function issueManualCode() {
+      const username = document.getElementById('genUser').value.trim().toLowerCase(), phone = document.getElementById('genPhone').value.trim();
+      if (!username || !phone) { showToast('Enter both @username and registered phone.'); return; }
+      const calc = calculateExpectedPlanPrice(document.getElementById('genBranches').value, document.getElementById('genWorkers').value, document.getElementById('genMonths').value);
+      const amount = Math.max(0, Number(document.getElementById('genAmount').value || calc.total)), shopName = document.getElementById('genShopName').value.trim() || 'BeBoss Shop';
+      const code = await generateBB2UnlockCode(username, phone, calc.tier, calc.days), adminLabel = `${session.fullName} (${session.email})`;
+      try {
+        await sbFetch('unlock_codes', { method: 'POST', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify({ id: crypto.randomUUID(), unlock_code: code, shop_username: username, shop_phone: phone, device_challenge: '', tier_code: calc.tier, plan_days: calc.days, amount_rwf: amount, status: 'ISSUED', issued_by_admin: adminLabel, issued_at: Date.now() }) });
+        await logAudit('ISSUE_CODE', username, `Issued ${code} (+${calc.days}d, ${amount} FRw)`);
+        showGeneratedOutput(code, shopName, username, phone, calc.days, calc.tier);
+        await refreshAll(false); showToast('Unlock code signed and stored!');
+      } catch (err) { showToast('Save failed: ' + err.message); }
+    }
+    async function revokeCode(codeId, codeStr) {
+      try {
+        await sbFetch(`unlock_codes?id=eq.${encodeURIComponent(codeId)}`, { method: 'PATCH', body: JSON.stringify({ status: 'REVOKED' }) });
+        await logAudit('REVOKE_CODE', codeStr, 'Revoked unlock code');
+        await refreshAll(false); showToast(`Revoked ${codeStr}`);
+      } catch (err) { showToast('Revoke error: ' + err.message); }
+    }
+    function showGeneratedOutput(code, shopName, username, phone, days, tier) {
+      document.getElementById('genEmptyBox').classList.add('hidden');
+      document.getElementById('genOutputBox').classList.remove('hidden');
+      document.getElementById('genOutputCode').textContent = code;
+      document.getElementById('genOutputMeta').textContent = `Account @${username} (${phone}) • Tier ${tier} • +${days} Days`;
+      document.getElementById('genOutputWa').href = buildWhatsAppLink(phone, shopName, username, code, days, tier);
+    }
+    function esc(s) { return String(s || '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
+    function escAttr(s) { return String(s || '').replace(/'/g, "\\'"); }
+    restoreSession();
+  </script>
+</body>
+</html>

@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
@@ -53,6 +57,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -88,6 +93,8 @@ fun DataTransferDialog(
     customerPayments: List<CustomerPayment>,
     currentUser: User?,
     onImportPackage: (ShopImportSummary) -> Unit,
+    onExportFullPackage: (((File) -> Unit) -> Unit)? = null,
+    onCreateShareToken: (((String) -> Unit) -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -174,32 +181,65 @@ fun DataTransferDialog(
 
                         Button(
                             onClick = {
-                                try {
-                                    val f = ShopDataTransferManager.exportShopPackage(
-                                        context = context,
-                                        profile = shopProfile,
-                                        users = allUsers,
-                                        products = products,
-                                        customers = customers,
-                                        sales = sales,
-                                        saleItems = emptyList(), // or sale items
-                                        payments = customerPayments,
-                                        exportedByUser = currentUser
-                                    )
-                                    latestExportedFile = f
-                                    refreshBackups()
-                                    Toast.makeText(context, "Saved to Storage: ${f.name}", Toast.LENGTH_LONG).show()
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Export error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                if (onExportFullPackage != null) {
+                                    onExportFullPackage { f ->
+                                        latestExportedFile = f
+                                        refreshBackups()
+                                        Toast.makeText(context, "Saved full package: ${f.name}", Toast.LENGTH_LONG).show()
+                                    }
+                                } else {
+                                    try {
+                                        val f = ShopDataTransferManager.exportShopPackage(
+                                            context = context,
+                                            profile = shopProfile,
+                                            users = allUsers,
+                                            products = products,
+                                            customers = customers,
+                                            sales = sales,
+                                            saleItems = emptyList(),
+                                            payments = customerPayments,
+                                            exportedByUser = currentUser
+                                        )
+                                        latestExportedFile = f
+                                        refreshBackups()
+                                        Toast.makeText(context, "Saved to Storage: ${f.name}", Toast.LENGTH_LONG).show()
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Export error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .testTag("export_full_package_btn"),
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary)
                         ) {
                             Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Export to Phone Storage Now", fontWeight = FontWeight.Bold)
+                            Text("Export Full .beboss Package", fontWeight = FontWeight.Bold)
+                        }
+
+                        if (onCreateShareToken != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    onCreateShareToken { token ->
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        clipboard.setPrimaryClip(ClipData.newPlainText("BeBoss Branch Share Token", token))
+                                        Toast.makeText(context, "Signed BBSHARE1 token copied to clipboard!", Toast.LENGTH_LONG).show()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .testTag("copy_branch_share_token_btn"),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp), tint = DarkNavy)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Copy Signed BBSHARE1: Branch Token", color = DarkNavy, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
                         }
 
                         if (latestExportedFile != null) {
@@ -226,10 +266,11 @@ fun DataTransferDialog(
                                         onClick = {
                                             ShopDataTransferManager.shareBackupFile(context, latestExportedFile!!, shopProfile.shopName)
                                         },
+                                        modifier = Modifier.heightIn(min = 48.dp),
                                         colors = ButtonDefaults.buttonColors(containerColor = ProfitGreen),
                                         shape = RoundedCornerShape(8.dp)
                                     ) {
-                                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Icon(Icons.Default.Share, contentDescription = "Share exported package", modifier = Modifier.size(14.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text("Share", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
@@ -295,9 +336,9 @@ fun DataTransferDialog(
                                                 onClick = {
                                                     ShopDataTransferManager.shareBackupFile(context, backupFile, shopProfile.shopName)
                                                 },
-                                                modifier = Modifier.size(30.dp)
+                                                modifier = Modifier.size(48.dp)
                                             ) {
-                                                Icon(Icons.Default.Share, contentDescription = "Share", tint = OrangePrimary, modifier = Modifier.size(16.dp))
+                                                Icon(Icons.Default.Share, contentDescription = "Share backup file", tint = OrangePrimary, modifier = Modifier.size(18.dp))
                                             }
 
                                             // Restore / Preview
@@ -310,9 +351,9 @@ fun DataTransferDialog(
                                                         Toast.makeText(context, "Cannot parse backup: ${e.message}", Toast.LENGTH_SHORT).show()
                                                     }
                                                 },
-                                                modifier = Modifier.size(30.dp)
+                                                modifier = Modifier.size(48.dp)
                                             ) {
-                                                Icon(Icons.Default.Restore, contentDescription = "Restore", tint = ProfitGreen, modifier = Modifier.size(16.dp))
+                                                Icon(Icons.Default.Restore, contentDescription = "Restore backup file", tint = ProfitGreen, modifier = Modifier.size(18.dp))
                                             }
 
                                             // Delete
@@ -322,9 +363,9 @@ fun DataTransferDialog(
                                                     refreshBackups()
                                                     Toast.makeText(context, "Deleted backup file", Toast.LENGTH_SHORT).show()
                                                 },
-                                                modifier = Modifier.size(30.dp)
+                                                modifier = Modifier.size(48.dp)
                                             ) {
-                                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = LossRed, modifier = Modifier.size(16.dp))
+                                                Icon(Icons.Default.Delete, contentDescription = "Delete backup file", tint = LossRed, modifier = Modifier.size(18.dp))
                                             }
                                         }
                                     }
@@ -336,15 +377,18 @@ fun DataTransferDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Action Card 3: Import via JSON / Paste
+                // Action Card 3: Import via Signed BBSHARE1 Token or JSON Paste
                 OutlinedButton(
                     onClick = { showManualJsonInput = true },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("open_token_import_btn"),
                     shape = RoundedCornerShape(10.dp)
                 ) {
                     Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp), tint = DarkNavy)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Import from Raw Shop JSON Package", color = DarkNavy, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Import BBSHARE1: Token or Raw JSON", color = DarkNavy, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -363,16 +407,20 @@ fun DataTransferDialog(
             text = {
                 Column {
                     Text("Shop: ${summary.shopName}", fontWeight = FontWeight.Bold, color = OrangePrimary, fontSize = 14.sp)
+                    if (!summary.branchScopeName.isNullOrBlank()) {
+                        Text("Branch Scope: ${summary.branchScopeName}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = DarkNavy)
+                    }
                     Text("Exported: $expDate by ${summary.exportedBy}", fontSize = 12.sp, color = InkMedium)
                     Spacer(modifier = Modifier.height(10.dp))
                     Text("Package Contents:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("• ${summary.branches.size} Branches & ${summary.stockTransfers.size} Stock Transfers", fontSize = 12.sp)
                     Text("• ${summary.productCount} Products & Stock Quantities", fontSize = 12.sp)
                     Text("• ${summary.customerCount} Customers & Outstanding Debt", fontSize = 12.sp)
-                    Text("• ${summary.saleCount} Sales Transactions", fontSize = 12.sp)
+                    Text("• ${summary.saleCount} Sales Transactions (${summary.purchases.size} Purchases)", fontSize = 12.sp)
                     Text("• ${summary.paymentCount} Customer Debt Repayments", fontSize = 12.sp)
                     Text("• ${summary.userCount} Collaborator Accounts & PINs", fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(10.dp))
-                    Text("Are you sure you want to load and merge this data into your local database?", fontSize = 12.sp, color = InkMedium)
+                    Text("Are you sure you want to verify & merge this branch data into your local database?", fontSize = 12.sp, color = InkMedium)
                 }
             },
             confirmButton = {
@@ -380,38 +428,43 @@ fun DataTransferDialog(
                     onClick = {
                         onImportPackage(summary)
                         selectedBackupForPreview = null
-                        Toast.makeText(context, "Shop Data Package Imported Successfully!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Branch & Shop Data Package Merged!", Toast.LENGTH_SHORT).show()
                     },
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("confirm_restore_package_btn"),
                     colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary)
                 ) {
-                    Text("Restore & Import Data", fontWeight = FontWeight.Bold)
+                    Text("Verify & Merge Data", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                OutlinedButton(onClick = { selectedBackupForPreview = null }) {
+                OutlinedButton(
+                    onClick = { selectedBackupForPreview = null },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
                     Text("Cancel")
                 }
             }
         )
     }
 
-    // Manual JSON Import Dialog
+    // Manual Token or JSON Import Dialog
     if (showManualJsonInput) {
         AlertDialog(
             onDismissRequest = { showManualJsonInput = false },
-            title = { Text("Paste Shop Data JSON", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            title = { Text("Paste Branch Share Token or JSON", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
             text = {
                 Column {
-                    Text("Paste the JSON string from a received .beboss file or worker transfer package:", fontSize = 12.sp, color = InkMedium)
+                    Text("Paste a signed BBSHARE1: branch transfer token (from WhatsApp/Bluetooth) or the raw JSON from a .beboss file:", fontSize = 12.sp, color = InkMedium)
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = manualJsonText,
                         onValueChange = { manualJsonText = it },
-                        label = { Text("Raw Shop Package JSON") },
-                        placeholder = { Text("{\"metadata\": ...}") },
+                        label = { Text("BBSHARE1: Token or Raw JSON") },
+                        placeholder = { Text("BBSHARE1:... or {\"metadata\": ...}") },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(150.dp),
+                            .height(150.dp)
+                            .testTag("manual_import_token_field"),
                         shape = RoundedCornerShape(8.dp)
                     )
                 }
@@ -424,17 +477,21 @@ fun DataTransferDialog(
                             showManualJsonInput = false
                             selectedBackupForPreview = summary
                         } catch (e: Exception) {
-                            Toast.makeText(context, "Invalid JSON format: ${e.message}", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Invalid token or JSON: ${e.message}", Toast.LENGTH_SHORT).show()
                         }
                     },
                     enabled = manualJsonText.isNotBlank(),
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("verify_token_preview_btn"),
                     colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary)
                 ) {
                     Text("Verify & Preview")
                 }
             },
             dismissButton = {
-                OutlinedButton(onClick = { showManualJsonInput = false }) {
+                OutlinedButton(
+                    onClick = { showManualJsonInput = false },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
                     Text("Cancel")
                 }
             }

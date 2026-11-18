@@ -7,6 +7,7 @@ import androidx.room.RoomDatabase
 import com.example.data.dao.BranchDao
 import com.example.data.dao.CustomerDao
 import com.example.data.dao.CustomerPaymentDao
+import com.example.data.dao.PaymentVerificationDao
 import com.example.data.dao.ProductDao
 import com.example.data.dao.PurchaseDao
 import com.example.data.dao.RedeemedVoucherDao
@@ -18,6 +19,7 @@ import com.example.data.dao.UserDao
 import com.example.data.model.Branch
 import com.example.data.model.Customer
 import com.example.data.model.CustomerPayment
+import com.example.data.model.PaymentVerificationRequest
 import com.example.data.model.Product
 import com.example.data.model.PurchaseRecord
 import com.example.data.model.RedeemedVoucher
@@ -41,9 +43,10 @@ import com.example.data.model.User
         Branch::class,
         PurchaseRecord::class,
         StockTransfer::class,
-        RedeemedVoucher::class
+        RedeemedVoucher::class,
+        PaymentVerificationRequest::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -58,6 +61,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun purchaseDao(): PurchaseDao
     abstract fun stockTransferDao(): StockTransferDao
     abstract fun redeemedVoucherDao(): RedeemedVoucherDao
+    abstract fun paymentVerificationDao(): PaymentVerificationDao
 
     companion object {
         @Volatile
