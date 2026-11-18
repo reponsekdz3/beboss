@@ -451,12 +451,46 @@ class BeBossRepository(private val database: AppDatabase) {
         try {
             val username = ownerUser?.username?.trim().orEmpty().ifBlank { "owner" }
             val phone = ownerUser?.phone?.ifBlank { shopProfile.phone } ?: shopProfile.phone
+            val shopSyncKey = SupabaseAdminClient.computeShopSyncKey(username, phone)
+
+            var effectiveProfile = shopProfile
+            val remoteShop = SupabaseAdminClient.fetchShopAccountById(shopSyncKey)
+            if (remoteShop != null && remoteShop.updatedAt > effectiveProfile.updatedAt) {
+                effectiveProfile = effectiveProfile.copy(
+                    subscriptionStatus = remoteShop.subscriptionStatus,
+                    subscriptionExpiresAt = remoteShop.subscriptionExpiresAt,
+                    updatedAt = remoteShop.updatedAt
+                )
+                shopProfileDao.insertOrUpdateProfile(effectiveProfile)
+            }
+
+            val remoteUsers = SupabaseAdminClient.fetchShopUsersForShop(shopSyncKey)
+            for (ru in remoteUsers) {
+                val localUser = userDao.getUserById(ru.userId) ?: continue
+                if (ru.updatedAt > localUser.updatedAt) {
+                    val parsedRole = try { UserRole.valueOf(ru.role) } catch (_: Exception) { localUser.role }
+                    userDao.updateUser(
+                        localUser.copy(
+                            role = parsedRole,
+                            isActive = ru.isActive,
+                            assignedBranchId = ru.assignedBranchId.ifBlank { localUser.assignedBranchId },
+                            assignedBranchName = ru.assignedBranchName.ifBlank { localUser.assignedBranchName },
+                            updatedAt = ru.updatedAt
+                        )
+                    )
+                }
+            }
 
             SupabaseAdminClient.upsertShopAccount(
-                shopProfile = shopProfile,
+                shopProfile = effectiveProfile,
                 ownerUser = ownerUser,
                 branchCount = branchCount,
                 workerCount = workerCount
+            )
+            SupabaseAdminClient.upsertShopUsers(
+                shopSyncKey = shopSyncKey,
+                shopName = effectiveProfile.shopName,
+                users = userDao.getAllUsersDirect()
             )
 
             // Push all unsynced offline requests

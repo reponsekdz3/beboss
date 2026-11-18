@@ -239,6 +239,8 @@ fun SettingsScreen(
     isAdminAuthenticating: Boolean = false,
     adminPaymentRequests: List<SupabasePaymentRequestDto> = emptyList(),
     adminShopAccounts: List<SupabaseShopAccountDto> = emptyList(),
+    adminShopUsers: List<com.example.util.SupabaseShopUserDto> = emptyList(),
+    adminBranchSnapshots: List<com.example.util.SupabaseBranchSnapshotDto> = emptyList(),
     adminUnlockCodes: List<SupabaseUnlockCodeDto> = emptyList(),
     adminAuditLogs: List<SupabaseAuditLogDto> = emptyList(),
     isAdminLoading: Boolean = false,
@@ -250,6 +252,13 @@ fun SettingsScreen(
     onAdminRejectPayment: (SupabasePaymentRequestDto, String) -> Unit = { _, _ -> },
     onAdminIssueManualCode: ((username: String, registeredPhone: String, tierCode: String, days: Int, amountRwf: Int, onDone: (Boolean, String) -> Unit) -> Unit)? = null,
     onAdminRevokeCode: (SupabaseUnlockCodeDto) -> Unit = {},
+    onAdminExtendShopSubscription: (SupabaseShopAccountDto, Int) -> Unit = { _, _ -> },
+    onAdminSetShopStatus: (SupabaseShopAccountDto, String) -> Unit = { _, _ -> },
+    onAdminDeleteShopAccount: (SupabaseShopAccountDto) -> Unit = {},
+    onAdminUpdateShopUserRole: (com.example.util.SupabaseShopUserDto, String) -> Unit = { _, _ -> },
+    onAdminToggleShopUserActive: (com.example.util.SupabaseShopUserDto, Boolean) -> Unit = { _, _ -> },
+    onAdminDeleteShopUser: (com.example.util.SupabaseShopUserDto) -> Unit = {},
+    onAdminDeleteBranchSnapshot: (com.example.util.SupabaseBranchSnapshotDto) -> Unit = {},
     onShareAdminWebPortal: () -> Unit = {},
     onShowSplashScreen: () -> Unit = {},
     onTestNotification: (String) -> Unit = {},
@@ -1884,9 +1893,9 @@ fun SettingsScreen(
         item {
             val hasContacts = PermissionManager.hasContactsPermission(context)
             val hasSms = PermissionManager.hasSmsPermission(context)
-            val hasStorage = PermissionManager.hasStoragePermission(context)
+            val hasNotifications = PermissionManager.hasNotificationPermission(context)
             val hasCamera = PermissionManager.hasCameraPermission(context)
-            val isAllGranted = hasContacts && hasSms && hasStorage && hasCamera
+            val isAllGranted = hasContacts && hasSms && hasNotifications && hasCamera
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1924,7 +1933,7 @@ fun SettingsScreen(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = if (isAllGranted) "All capabilities active & ready" else "Grant access for contacts, SMS & backup",
+                                    text = if (isAllGranted) "All capabilities active & ready" else "Grant access for contacts, SMS & scanner",
                                     fontSize = 11.5.sp,
                                     color = if (isAllGranted) ProfitGreen else OrangePrimary,
                                     fontWeight = FontWeight.Medium
@@ -1970,15 +1979,15 @@ fun SettingsScreen(
 
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = if (hasStorage) Color(0xFFDCFCE7) else Color(0xFFFEE2E2),
+                            color = if (hasNotifications) Color(0xFFDCFCE7) else Color(0xFFFEE2E2),
                             modifier = Modifier.weight(1f)
                         ) {
                             Column(
                                 modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("Storage", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (hasStorage) ProfitGreen else LossRed)
-                                Text(if (hasStorage) "Granted" else "Missing", fontSize = 9.sp, color = InkMedium)
+                                Text("Alerts", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (hasNotifications) ProfitGreen else LossRed)
+                                Text(if (hasNotifications) "Granted" else "Missing", fontSize = 9.sp, color = InkMedium)
                             }
                         }
 
@@ -2666,6 +2675,8 @@ fun SettingsScreen(
             isAdminAuthenticating = isAdminAuthenticating,
             paymentRequests = adminPaymentRequests,
             shopAccounts = adminShopAccounts,
+            shopUsers = adminShopUsers,
+            branchSnapshots = adminBranchSnapshots,
             unlockCodes = adminUnlockCodes,
             auditLogs = adminAuditLogs,
             isLoading = isAdminLoading,
@@ -2685,6 +2696,13 @@ fun SettingsScreen(
                 }
             },
             onRevokeCode = onAdminRevokeCode,
+            onExtendShopSubscription = onAdminExtendShopSubscription,
+            onSetShopStatus = onAdminSetShopStatus,
+            onDeleteShopAccount = onAdminDeleteShopAccount,
+            onUpdateShopUserRole = onAdminUpdateShopUserRole,
+            onToggleShopUserActive = onAdminToggleShopUserActive,
+            onDeleteShopUser = onAdminDeleteShopUser,
+            onDeleteBranchSnapshot = onAdminDeleteBranchSnapshot,
             onShareWebPortal = onShareAdminWebPortal,
             onDismiss = { showAdminConsoleDialog = false }
         )

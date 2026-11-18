@@ -11,7 +11,7 @@
   - Pushes GZIP-compressed, HMAC-SHA256-signed `BBSHARE1:` branch snapshots (`ShopDataTransferManager`) to the Supabase `branch_sync_snapshots` table keyed by a deterministic `shop_sync_key`.
   - Pulls remote snapshots from sibling branch devices (`device_id != localDeviceId`) and merges records using **Last-Write-Wins (LWW)** conflict resolution (`BeBossRepository.mergeShopDataPackageLww`) based on `updatedAt` timestamps while deduplicating immutable sale items, repayments, purchases, and stock transfers by ID and preserving the longest active `subscriptionExpiresAt`.
 - **Zero-Data Local WiFi/Hotspot Mesh & Token Transfer:** Devices on the same local WiFi or mobile hotspot can discover nearby BeBoss hubs via UDP/mDNS (`LocalNetworkSyncServer`) and perform bidirectional HTTP `BBSHARE1:` merges on port `8989`, or export/import `.beboss` files and signed `BBSHARE1:` tokens directly.
-- **Supabase Usage Scope (Admin Licensing & Sync Relay Only):** Supabase holds `admin_profiles`, `shop_accounts`, `payment_requests`, `unlock_codes`, `admin_audit_logs`, and `branch_sync_snapshots`. Primary business workflows remain functional offline in Room SQLite.
+- **Supabase Usage Scope (Master Admin & Sync Relay Only):** Supabase holds `admin_profiles` (locked strictly to the single master administrator `reponsekdz@gmail.com`), `shop_accounts`, `shop_users` (non-credential user directory), `payment_requests`, `unlock_codes`, `admin_audit_logs`, and `branch_sync_snapshots`. Primary business workflows remain functional offline in Room SQLite.
 
 ---
 
@@ -30,7 +30,7 @@ Staff add-ons scale beyond tier limits (`+2,000 FRw` for 2–3 workers, `+4,000 
 ### End-to-End Renewal Lifecycle
 1. **Dial USSD:** From **Settings** or **Subscription**, the shop owner taps MTN MoMo (`*182*8*1*...#`) or Airtel Money (`*500*...#`) to complete payment on their phone.
 2. **Submit Claim + Account Details:** The user enters their payer phone and optional Mobile Money transaction reference, alongside their created **BeBoss `@username`** and **registered phone number**, then sends the WhatsApp verification message (`wa.me`) to the Admin Support number (`BuildConfig.BEBOSS_ADMIN_WHATSAPP`) and queues the claim into Supabase `payment_requests`.
-3. **Admin Real Payment Audit & Code Generation:** The administrator signs into the **BeBoss Web Admin Platform** (`/admin-web/index.html`) or the **In-App Admin Console** (`Settings -> Admin Console`) using real **Supabase GoTrue Email/Password Authentication** (`admin_profiles` RLS). After checking their phone's Mobile Money receipt against the expected tier fee badge, the admin clicks **Verify & Issue `BB2` Code** (or **Reject** with a reason) and sends the generated `BB2-...` code back to the shop owner on WhatsApp.
+3. **Single Master Admin Audit & Code Generation:** Only the designated master administrator (`reponsekdz@gmail.com`) can sign into the **BeBoss Web Admin Platform** (`/admin-web/index.html`) or the **In-App Admin Console** (`Settings -> Admin Console`) using real **Supabase GoTrue Email/Password Authentication** (`admin_profiles` RLS). After checking their phone's Mobile Money receipt against the expected tier fee badge, the admin clicks **Verify & Issue `BB2` Code** (or **Reject** with a reason) and sends the generated `BB2-...` code back to the shop owner on WhatsApp.
 4. **Account-Bound Activation in Settings:** The shop owner pastes the `BB2-...` code in **Settings -> Insert Admin Unlock Code**. `SubscriptionSecurityManager` validates the HMAC-SHA256 signature (`BuildConfig.BEBOSS_UNLOCK_SIGNING_SECRET`), checks account binding (`@username` + normalized 9-digit phone), checks local anti-replay vouchers (`redeemed_vouchers`) and cloud revocation status (`REVOKED` check on `unlock_codes`), extends `subscriptionExpiresAt` for the month, and marks the code `REDEEMED`.
 
 ---
@@ -38,11 +38,13 @@ Staff add-ons scale beyond tier limits (`+2,000 FRw` for 2–3 workers, `+4,000 
 ## 3. Web Admin Platform & In-App Admin Console
 
 - **Standalone Web Dashboard:** `/admin-web/index.html` (and bundled Android asset `/app/src/main/assets/admin_portal.html` for 1-tap export from Settings).
-- **Supabase Auth + RLS Enforcement:** Protected by Supabase GoTrue Email/Password login and `public.is_beboss_admin()` PostgreSQL security-definer policies (`/admin-web/supabase_schema.sql`).
+- **Single Master Admin Auth + RLS Enforcement:** Protected by Supabase GoTrue Email/Password login and `public.is_beboss_admin()` PostgreSQL security-definer policies (`/admin-web/supabase_schema.sql`), locked strictly to `reponsekdz@gmail.com`.
 - **Capabilities:**
-  - Live auto-polling KPI overview (pending queue, monthly revenue volume, verified shops, online branch snapshots, tier breakdown SVG chart).
+  - Live auto-polling KPI overview (pending queue, monthly revenue volume, active/expiring shops, registered shop users, online branch snapshots, tier breakdown SVG chart).
   - Fee-audited verification queue (`Verify & Issue BB2`, `Reject` with reason, 1-click WhatsApp `wa.me` reply).
-  - WebCrypto HMAC-SHA256 `BB2` unlock code generator, codes ledger with **Revoke** control, live `branch_sync_snapshots` monitor, and `admin_audit_logs` trail.
+  - **All Users Directory (`shop_users`):** Search all Owners, Managers, and Cashiers across every registered shop; change user roles (`OWNER`, `MANAGER`, `CASHIER`); suspend or reactivate user accounts; contact via WhatsApp; or remove user records (changes propagate automatically to shop terminals on sync).
+  - **Full Shop Management (`shop_accounts`):** Extend shop subscriptions (`+30d`), suspend/activate shops, issue `BB2` renewal codes, or delete shop records.
+  - WebCrypto HMAC-SHA256 `BB2` unlock code generator, codes ledger with **Revoke** control, live `branch_sync_snapshots` monitor with snapshot removal, and `admin_audit_logs` trail.
 
 ---
 
@@ -70,7 +72,7 @@ Sensitive keys and backend configuration live in `.env` (via **Secrets panel in 
 ```properties
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_ANON_KEY=your-supabase-anon-key
-SUPABASE_ADMIN_EMAIL=admin@beboss.app
+SUPABASE_ADMIN_EMAIL=reponsekdz@gmail.com
 BEBOSS_UNLOCK_SIGNING_SECRET=your-hmac-signing-secret
 BEBOSS_ADMIN_WHATSAPP=+250788765432
 GEMINI_API_KEY=your-optional-key

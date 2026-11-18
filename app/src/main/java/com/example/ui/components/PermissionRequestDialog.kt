@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Contacts
-import androidx.compose.material.icons.filled.FolderShared
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -260,7 +259,6 @@ fun PermissionItemCard(
     val icon: ImageVector = when (item.iconName) {
         "contacts" -> Icons.Default.Contacts
         "sms" -> Icons.Default.Message
-        "storage" -> Icons.Default.FolderShared
         "camera" -> Icons.Default.CameraAlt
         "notifications" -> Icons.Default.NotificationsActive
         else -> Icons.Default.Security

@@ -159,6 +159,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     val isAdminAuthenticating by viewModel.isAdminAuthenticating.collectAsState()
     val adminPaymentRequests by viewModel.adminPaymentRequests.collectAsState()
     val adminShopAccounts by viewModel.adminShopAccounts.collectAsState()
+    val adminShopUsers by viewModel.adminShopUsers.collectAsState()
+    val adminBranchSnapshots by viewModel.adminBranchSnapshots.collectAsState()
     val adminUnlockCodes by viewModel.adminUnlockCodes.collectAsState()
     val adminAuditLogs by viewModel.adminAuditLogs.collectAsState()
     val isAdminLoading by viewModel.isAdminLoading.collectAsState()
@@ -497,6 +499,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 isAdminAuthenticating = isAdminAuthenticating,
                                 adminPaymentRequests = adminPaymentRequests,
                                 adminShopAccounts = adminShopAccounts,
+                                adminShopUsers = adminShopUsers,
+                                adminBranchSnapshots = adminBranchSnapshots,
                                 adminUnlockCodes = adminUnlockCodes,
                                 adminAuditLogs = adminAuditLogs,
                                 isAdminLoading = isAdminLoading,
@@ -515,6 +519,27 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 },
                                 onAdminRevokeCode = { codeDto ->
                                     viewModel.adminRevokeCode(codeDto)
+                                },
+                                onAdminExtendShopSubscription = { shop, addDays ->
+                                    viewModel.adminExtendShopSubscription(shop, addDays)
+                                },
+                                onAdminSetShopStatus = { shop, status ->
+                                    viewModel.adminSetShopStatus(shop, status)
+                                },
+                                onAdminDeleteShopAccount = { shop ->
+                                    viewModel.adminDeleteShopAccount(shop)
+                                },
+                                onAdminUpdateShopUserRole = { user, role ->
+                                    viewModel.adminUpdateShopUserRole(user, role)
+                                },
+                                onAdminToggleShopUserActive = { user, active ->
+                                    viewModel.adminToggleShopUserActive(user, active)
+                                },
+                                onAdminDeleteShopUser = { user ->
+                                    viewModel.adminDeleteShopUser(user)
+                                },
+                                onAdminDeleteBranchSnapshot = { snap ->
+                                    viewModel.adminDeleteBranchSnapshot(snap)
                                 },
                                 onShareAdminWebPortal = { viewModel.shareAdminWebPortal(context) },
                                 onShowSplashScreen = { showSplashScreen = true },

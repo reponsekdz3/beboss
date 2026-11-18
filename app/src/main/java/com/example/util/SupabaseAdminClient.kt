@@ -93,6 +93,21 @@ data class SupabaseBranchSnapshotDto(
     val updatedAt: Long
 )
 
+data class SupabaseShopUserDto(
+    val id: String,
+    val shopSyncKey: String,
+    val shopName: String,
+    val userId: String,
+    val fullName: String,
+    val username: String,
+    val phone: String,
+    val role: String,
+    val assignedBranchId: String,
+    val assignedBranchName: String,
+    val isActive: Boolean,
+    val updatedAt: Long
+)
+
 data class SupabaseAuditLogDto(
     val id: String,
     val adminEmail: String,
@@ -118,6 +133,7 @@ data class SupabaseSyncResult(
 object SupabaseAdminClient {
 
     private const val TAG = "SupabaseAdminClient"
+    const val MASTER_ADMIN_EMAIL = "reponsekdz@gmail.com"
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     @Volatile
@@ -148,11 +164,16 @@ object SupabaseAdminClient {
     }
 
     fun getDefaultAdminEmail(): String {
-        return try {
-            BuildConfig.SUPABASE_ADMIN_EMAIL.trim()
+        val envEmail = try {
+            BuildConfig.SUPABASE_ADMIN_EMAIL.trim().lowercase(Locale.ROOT)
         } catch (_: Throwable) {
             ""
         }
+        return if (envEmail == MASTER_ADMIN_EMAIL) envEmail else MASTER_ADMIN_EMAIL
+    }
+
+    fun isAllowedMasterAdminEmail(email: String): Boolean {
+        return email.trim().lowercase(Locale.ROOT) == MASTER_ADMIN_EMAIL
     }
 
     fun isConfigured(): Boolean {
@@ -200,12 +221,17 @@ object SupabaseAdminClient {
     // REAL SUPABASE ADMIN AUTHENTICATION (GoTrue Email/Password JWT)
     // -------------------------------------------------------------------------
     suspend fun signInAdmin(email: String, password: String): Result<SupabaseAdminSession> = withContext(Dispatchers.IO) {
+        if (!isAllowedMasterAdminEmail(email)) {
+            return@withContext Result.failure(
+                IllegalStateException("Access restricted to single master administrator ($MASTER_ADMIN_EMAIL).")
+            )
+        }
         if (!isConfigured()) {
             return@withContext Result.failure(IllegalStateException("Configure SUPABASE_URL and SUPABASE_ANON_KEY in AI Studio Secrets."))
         }
         try {
             val payload = JSONObject().apply {
-                put("email", email.trim().lowercase(Locale.ROOT))
+                put("email", MASTER_ADMIN_EMAIL)
                 put("password", password)
             }
             val req = Request.Builder()
@@ -225,7 +251,7 @@ object SupabaseAdminClient {
                         .ifBlank { "Sign in failed (HTTP ${resp.code})" }
                     return@withContext Result.failure(IllegalStateException(msg))
                 }
-                val session = parseAuthSession(json, email)
+                val session = parseAuthSession(json, MASTER_ADMIN_EMAIL)
                     ?: return@withContext Result.failure(IllegalStateException("Missing access token in Supabase response."))
                 ensureAdminProfile(session)
                 activeAdminSession = session
@@ -238,13 +264,18 @@ object SupabaseAdminClient {
     }
 
     suspend fun signUpAdmin(email: String, password: String, fullName: String): Result<SupabaseAdminSession> = withContext(Dispatchers.IO) {
+        if (!isAllowedMasterAdminEmail(email)) {
+            return@withContext Result.failure(
+                IllegalStateException("Only the designated master admin ($MASTER_ADMIN_EMAIL) can register in BeBoss Admin.")
+            )
+        }
         if (!isConfigured()) {
             return@withContext Result.failure(IllegalStateException("Configure SUPABASE_URL and SUPABASE_ANON_KEY in AI Studio Secrets."))
         }
         try {
-            val cleanName = fullName.trim().ifBlank { email.substringBefore("@") }
+            val cleanName = fullName.trim().ifBlank { "BeBoss Master Admin" }
             val payload = JSONObject().apply {
-                put("email", email.trim().lowercase(Locale.ROOT))
+                put("email", MASTER_ADMIN_EMAIL)
                 put("password", password)
                 put("data", JSONObject().apply { put("full_name", cleanName) })
             }
@@ -314,6 +345,9 @@ object SupabaseAdminClient {
     }
 
     private fun ensureAdminProfile(session: SupabaseAdminSession) {
+        if (!isAllowedMasterAdminEmail(session.email)) {
+            throw IllegalStateException("Unauthorized admin identity: ${session.email}")
+        }
         if (session.userId.isBlank()) return
         val checkReq = Request.Builder()
             .url("${getSupabaseUrl()}/rest/v1/admin_profiles?user_id=eq.${URLEncoder.encode(session.userId, "UTF-8")}&limit=1")
@@ -492,6 +526,84 @@ object SupabaseAdminClient {
         }
     }
 
+    suspend fun fetchShopAccountById(accountId: String): SupabaseShopAccountDto? = withContext(Dispatchers.IO) {
+        if (!isConfigured() || accountId.isBlank()) return@withContext null
+        try {
+            val enc = URLEncoder.encode(accountId, "UTF-8")
+            val req = buildRestRequest("shop_accounts?id=eq.$enc&limit=1").get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val arr = JSONArray(resp.body?.string().orEmpty().ifBlank { "[]" })
+                if (arr.length() == 0) return@withContext null
+                parseShopAccountDto(arr.getJSONObject(0))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchShopAccountById error: ${e.message}")
+            null
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // SHOP USERS DIRECTORY SYNC (`shop_users`) — Metadata only (No PIN/Password)
+    // -------------------------------------------------------------------------
+    suspend fun upsertShopUsers(
+        shopSyncKey: String,
+        shopName: String,
+        users: List<User>
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (!isConfigured() || shopSyncKey.isBlank() || users.isEmpty()) return@withContext false
+        try {
+            val arr = JSONArray()
+            for (u in users) {
+                arr.put(
+                    JSONObject().apply {
+                        put("id", "${shopSyncKey}::${u.id}")
+                        put("shop_sync_key", shopSyncKey)
+                        put("shop_name", shopName)
+                        put("user_id", u.id)
+                        put("full_name", u.name)
+                        put("username", u.username.trim().lowercase(Locale.ROOT))
+                        put("phone", u.phone)
+                        put("role", u.role.name)
+                        put("assigned_branch_id", u.assignedBranchId)
+                        put("assigned_branch_name", u.assignedBranchName)
+                        put("is_active", u.isActive)
+                        put("updated_at", u.updatedAt)
+                    }
+                )
+            }
+            val req = buildRestRequest("shop_users?on_conflict=id")
+                .addHeader("Prefer", "resolution=merge-duplicates,return=minimal")
+                .post(arr.toString().toRequestBody(jsonMediaType))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    Log.w(TAG, "upsertShopUsers HTTP ${resp.code}: ${resp.body?.string()}")
+                }
+                resp.isSuccessful
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "upsertShopUsers error: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun fetchShopUsersForShop(shopSyncKey: String): List<SupabaseShopUserDto> = withContext(Dispatchers.IO) {
+        if (!isConfigured() || shopSyncKey.isBlank()) return@withContext emptyList()
+        try {
+            val enc = URLEncoder.encode(shopSyncKey, "UTF-8")
+            val req = buildRestRequest("shop_users?shop_sync_key=eq.$enc&limit=200").get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext emptyList()
+                val arr = JSONArray(resp.body?.string().orEmpty().ifBlank { "[]" })
+                (0 until arr.length()).map { parseShopUserDto(arr.getJSONObject(it)) }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchShopUsersForShop error: ${e.message}")
+            emptyList()
+        }
+    }
+
     suspend fun submitPaymentRequest(request: PaymentVerificationRequest): Boolean = withContext(Dispatchers.IO) {
         if (!isConfigured()) return@withContext false
         try {
@@ -630,7 +742,41 @@ object SupabaseAdminClient {
     suspend fun fetchAllShopAccounts(): List<SupabaseShopAccountDto> = withContext(Dispatchers.IO) {
         if (!isConfigured()) return@withContext emptyList()
         try {
-            val req = buildRestRequest("shop_accounts?order=updated_at.desc&limit=100", useAdminJwtIfAvailable = true)
+            val req = buildRestRequest("shop_accounts?order=updated_at.desc&limit=150", useAdminJwtIfAvailable = true)
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext emptyList()
+                val arr = JSONArray(resp.body?.string().orEmpty().ifBlank { "[]" })
+                (0 until arr.length()).map { parseShopAccountDto(arr.getJSONObject(it)) }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchAllShopAccounts error: ${e.message}")
+            emptyList()
+        }
+    }
+
+    suspend fun fetchAllShopUsers(): List<SupabaseShopUserDto> = withContext(Dispatchers.IO) {
+        if (!isConfigured() || activeAdminSession == null) return@withContext emptyList()
+        try {
+            val req = buildRestRequest("shop_users?order=updated_at.desc&limit=250", useAdminJwtIfAvailable = true)
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext emptyList()
+                val arr = JSONArray(resp.body?.string().orEmpty().ifBlank { "[]" })
+                (0 until arr.length()).map { parseShopUserDto(arr.getJSONObject(it)) }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchAllShopUsers error: ${e.message}")
+            emptyList()
+        }
+    }
+
+    suspend fun fetchAllBranchSnapshots(): List<SupabaseBranchSnapshotDto> = withContext(Dispatchers.IO) {
+        if (!isConfigured() || activeAdminSession == null) return@withContext emptyList()
+        try {
+            val req = buildRestRequest("branch_sync_snapshots?order=updated_at.desc&limit=150", useAdminJwtIfAvailable = true)
                 .get()
                 .build()
             client.newCall(req).execute().use { resp ->
@@ -638,24 +784,22 @@ object SupabaseAdminClient {
                 val arr = JSONArray(resp.body?.string().orEmpty().ifBlank { "[]" })
                 (0 until arr.length()).map { idx ->
                     val o = arr.getJSONObject(idx)
-                    SupabaseShopAccountDto(
+                    SupabaseBranchSnapshotDto(
                         id = o.optString("id"),
+                        shopSyncKey = o.optString("shop_sync_key"),
+                        deviceId = o.optString("device_id"),
+                        branchId = o.optString("branch_id"),
+                        branchName = o.optString("branch_name"),
                         shopName = o.optString("shop_name"),
-                        ownerName = o.optString("owner_name"),
                         ownerUsername = o.optString("owner_username"),
-                        ownerPhone = o.optString("owner_phone"),
-                        deviceChallenge = o.optString("device_challenge"),
-                        branchCount = o.optInt("branch_count", 1),
-                        workerCount = o.optInt("worker_count", 1),
-                        monthlyFeeRwf = o.optInt("monthly_fee_rwf", 5000),
-                        subscriptionStatus = o.optString("subscription_status", "ACTIVE"),
-                        subscriptionExpiresAt = o.optLong("subscription_expires_at", 0L),
+                        payloadToken = o.optString("payload_token"),
+                        recordsSummary = o.optString("records_summary"),
                         updatedAt = o.optLong("updated_at", 0L)
                     )
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "fetchAllShopAccounts error: ${e.message}")
+            Log.e(TAG, "fetchAllBranchSnapshots error: ${e.message}")
             emptyList()
         }
     }
@@ -762,10 +906,12 @@ object SupabaseAdminClient {
             val prOk = client.newCall(patchPrReq).execute().use { it.isSuccessful }
 
             if (codeOk && prOk) {
+                val shopKey = computeShopSyncKey(request.ownerUsername, request.ownerPhone)
+                extendShopExpiryInternal(shopKey, days)
                 logAdminAudit(
                     action = "APPROVE_PAYMENT",
                     targetId = request.ownerUsername,
-                    details = "Approved ${request.amountRwf} FRw (${request.provider}) -> $generatedCode"
+                    details = "Approved ${request.amountRwf} FRw (${request.provider}) -> $generatedCode (+${days}d)"
                 )
             }
             Pair(codeOk && prOk, generatedCode)
@@ -861,6 +1007,8 @@ object SupabaseAdminClient {
                 .build()
             val ok = client.newCall(req).execute().use { it.isSuccessful }
             if (ok) {
+                val shopKey = computeShopSyncKey(username, registeredPhone)
+                extendShopExpiryInternal(shopKey, days)
                 logAdminAudit("ISSUE_CODE", username, "Issued $code (+$days d, $amountRwf FRw)")
             }
             Pair(ok, code)
@@ -868,6 +1016,177 @@ object SupabaseAdminClient {
             Log.e(TAG, "issueManualUnlockCode error: ${e.message}")
             Pair(false, code)
         }
+    }
+
+    suspend fun adminExtendShopSubscription(
+        shop: SupabaseShopAccountDto,
+        addDays: Int
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (!isConfigured() || activeAdminSession == null) return@withContext false
+        try {
+            val now = System.currentTimeMillis()
+            val base = maxOf(shop.subscriptionExpiresAt, now)
+            val newExpiry = base + addDays.coerceAtLeast(1) * 86_400_000L
+            val patch = JSONObject().apply {
+                put("subscription_status", "ACTIVE")
+                put("subscription_expires_at", newExpiry)
+                put("updated_at", now)
+            }
+            val req = buildRestRequest(
+                "shop_accounts?id=eq.${URLEncoder.encode(shop.id, "UTF-8")}",
+                useAdminJwtIfAvailable = true
+            ).patch(patch.toString().toRequestBody(jsonMediaType)).build()
+            val ok = client.newCall(req).execute().use { it.isSuccessful }
+            if (ok) {
+                logAdminAudit("EXTEND_SHOP", "@${shop.ownerUsername}", "Extended ${shop.shopName} license by +$addDays days")
+            }
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "adminExtendShopSubscription error: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun adminSetShopStatus(
+        shop: SupabaseShopAccountDto,
+        newStatus: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (!isConfigured() || activeAdminSession == null) return@withContext false
+        try {
+            val now = System.currentTimeMillis()
+            val patch = JSONObject().apply {
+                put("subscription_status", newStatus)
+                put("updated_at", now)
+            }
+            val req = buildRestRequest(
+                "shop_accounts?id=eq.${URLEncoder.encode(shop.id, "UTF-8")}",
+                useAdminJwtIfAvailable = true
+            ).patch(patch.toString().toRequestBody(jsonMediaType)).build()
+            val ok = client.newCall(req).execute().use { it.isSuccessful }
+            if (ok) {
+                logAdminAudit("SET_SHOP_STATUS", "@${shop.ownerUsername}", "${shop.shopName} -> $newStatus")
+            }
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "adminSetShopStatus error: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun adminDeleteShopAccount(shop: SupabaseShopAccountDto): Boolean = withContext(Dispatchers.IO) {
+        if (!isConfigured() || activeAdminSession == null) return@withContext false
+        try {
+            val req = buildRestRequest(
+                "shop_accounts?id=eq.${URLEncoder.encode(shop.id, "UTF-8")}",
+                useAdminJwtIfAvailable = true
+            ).delete().build()
+            val ok = client.newCall(req).execute().use { it.isSuccessful }
+            if (ok) {
+                logAdminAudit("DELETE_SHOP", "@${shop.ownerUsername}", "Deleted shop record ${shop.shopName}")
+            }
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "adminDeleteShopAccount error: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun adminUpdateShopUser(
+        user: SupabaseShopUserDto,
+        newRole: String? = null,
+        isActive: Boolean? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (!isConfigured() || activeAdminSession == null) return@withContext false
+        try {
+            val now = System.currentTimeMillis()
+            val patch = JSONObject().apply {
+                if (newRole != null) put("role", newRole)
+                if (isActive != null) put("is_active", isActive)
+                put("updated_at", now)
+            }
+            val req = buildRestRequest(
+                "shop_users?id=eq.${URLEncoder.encode(user.id, "UTF-8")}",
+                useAdminJwtIfAvailable = true
+            ).patch(patch.toString().toRequestBody(jsonMediaType)).build()
+            val ok = client.newCall(req).execute().use { it.isSuccessful }
+            if (ok) {
+                val changes = buildList {
+                    if (newRole != null) add("role=$newRole")
+                    if (isActive != null) add("active=$isActive")
+                }.joinToString(", ")
+                logAdminAudit("UPDATE_USER", "@${user.username}", "Updated ${user.fullName} (${user.shopName}): $changes")
+            }
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "adminUpdateShopUser error: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun adminDeleteShopUser(user: SupabaseShopUserDto): Boolean = withContext(Dispatchers.IO) {
+        if (!isConfigured() || activeAdminSession == null) return@withContext false
+        try {
+            val req = buildRestRequest(
+                "shop_users?id=eq.${URLEncoder.encode(user.id, "UTF-8")}",
+                useAdminJwtIfAvailable = true
+            ).delete().build()
+            val ok = client.newCall(req).execute().use { it.isSuccessful }
+            if (ok) {
+                logAdminAudit("DELETE_USER", "@${user.username}", "Removed user ${user.fullName} from ${user.shopName}")
+            }
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "adminDeleteShopUser error: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun adminDeleteBranchSnapshot(snapshot: SupabaseBranchSnapshotDto): Boolean = withContext(Dispatchers.IO) {
+        if (!isConfigured() || activeAdminSession == null) return@withContext false
+        try {
+            val req = buildRestRequest(
+                "branch_sync_snapshots?id=eq.${URLEncoder.encode(snapshot.id, "UTF-8")}",
+                useAdminJwtIfAvailable = true
+            ).delete().build()
+            val ok = client.newCall(req).execute().use { it.isSuccessful }
+            if (ok) {
+                logAdminAudit("DELETE_SNAPSHOT", snapshot.deviceId, "Removed branch snapshot ${snapshot.branchName} (${snapshot.shopName})")
+            }
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "adminDeleteBranchSnapshot error: ${e.message}")
+            false
+        }
+    }
+
+    private fun extendShopExpiryInternal(shopId: String, addDays: Int) {
+        try {
+            val enc = URLEncoder.encode(shopId, "UTF-8")
+            val getReq = buildRestRequest("shop_accounts?id=eq.$enc&limit=1", useAdminJwtIfAvailable = true).get().build()
+            var existingExpiry = 0L
+            var exists = false
+            client.newCall(getReq).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val arr = JSONArray(resp.body?.string().orEmpty().ifBlank { "[]" })
+                    if (arr.length() > 0) {
+                        exists = true
+                        existingExpiry = arr.getJSONObject(0).optLong("subscription_expires_at", 0L)
+                    }
+                }
+            }
+            if (!exists) return
+            val now = System.currentTimeMillis()
+            val newExpiry = maxOf(existingExpiry, now) + addDays.coerceAtLeast(1) * 86_400_000L
+            val patch = JSONObject().apply {
+                put("subscription_status", "ACTIVE")
+                put("subscription_expires_at", newExpiry)
+                put("updated_at", now)
+            }
+            val patchReq = buildRestRequest("shop_accounts?id=eq.$enc", useAdminJwtIfAvailable = true)
+                .patch(patch.toString().toRequestBody(jsonMediaType))
+                .build()
+            client.newCall(patchReq).execute().close()
+        } catch (_: Exception) {}
     }
 
     private fun logAdminAudit(action: String, targetId: String, details: String) {
@@ -927,6 +1246,40 @@ object SupabaseAdminClient {
             issuedByAdmin = o.optString("issued_by_admin"),
             issuedAt = o.optLong("issued_at", 0L),
             redeemedAt = if (o.isNull("redeemed_at")) null else o.optLong("redeemed_at")
+        )
+    }
+
+    private fun parseShopAccountDto(o: JSONObject): SupabaseShopAccountDto {
+        return SupabaseShopAccountDto(
+            id = o.optString("id"),
+            shopName = o.optString("shop_name"),
+            ownerName = o.optString("owner_name"),
+            ownerUsername = o.optString("owner_username"),
+            ownerPhone = o.optString("owner_phone"),
+            deviceChallenge = o.optString("device_challenge"),
+            branchCount = o.optInt("branch_count", 1),
+            workerCount = o.optInt("worker_count", 1),
+            monthlyFeeRwf = o.optInt("monthly_fee_rwf", 5000),
+            subscriptionStatus = o.optString("subscription_status", "ACTIVE"),
+            subscriptionExpiresAt = o.optLong("subscription_expires_at", 0L),
+            updatedAt = o.optLong("updated_at", 0L)
+        )
+    }
+
+    private fun parseShopUserDto(o: JSONObject): SupabaseShopUserDto {
+        return SupabaseShopUserDto(
+            id = o.optString("id"),
+            shopSyncKey = o.optString("shop_sync_key"),
+            shopName = o.optString("shop_name"),
+            userId = o.optString("user_id"),
+            fullName = o.optString("full_name"),
+            username = o.optString("username"),
+            phone = o.optString("phone"),
+            role = o.optString("role", "CASHIER"),
+            assignedBranchId = o.optString("assigned_branch_id"),
+            assignedBranchName = o.optString("assigned_branch_name", "All Branches"),
+            isActive = o.optBoolean("is_active", true),
+            updatedAt = o.optLong("updated_at", 0L)
         )
     }
 }

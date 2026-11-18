@@ -1,16 +1,17 @@
--- BeBoss Enterprise Licensing, Admin Auth & Synchronous Branch DataShare Schema (Supabase PostgreSQL)
+-- BeBoss Enterprise Licensing, Single Master Admin Auth & Synchronous Branch DataShare Schema (Supabase PostgreSQL)
 -- Usage:
---   * Admin Management, Licensing Verification & Audit Logs use Supabase Auth + PostgreSQL.
+--   * Admin Management (Shops, All Shop Users, Payments, Unlock Codes, Branch Snapshots, Audit Logs)
+--     uses Supabase Auth + PostgreSQL RLS locked strictly to the single master admin (`reponsekdz@gmail.com`).
 --   * Cross-Branch Internet Auto-Sync uses encrypted/signed `branch_sync_snapshots` while all POS,
 --     Inventory, Sales, Customers, Purchases, and Debts execute 100% offline-first in Room SQLite.
 --
 -- Run this entire script once in your Supabase SQL Editor.
 
--- 1. Admin Operators Registry (Linked to Supabase Auth users)
+-- 1. Single Master Admin Registry (Linked strictly to reponsekdz@gmail.com in auth.users)
 create table if not exists public.admin_profiles (
     user_id uuid primary key references auth.users(id) on delete cascade,
     email text not null unique,
-    full_name text not null default 'BeBoss Admin',
+    full_name text not null default 'BeBoss Master Admin',
     role text not null default 'SUPER_ADMIN',
     is_active boolean not null default true,
     created_at bigint not null default (extract(epoch from now()) * 1000)::bigint
@@ -24,7 +25,9 @@ stable
 as $$
   select exists (
     select 1 from public.admin_profiles
-    where user_id = auth.uid() and is_active = true
+    where user_id = auth.uid()
+      and lower(email) = 'reponsekdz@gmail.com'
+      and is_active = true
   );
 $$;
 
@@ -44,7 +47,23 @@ create table if not exists public.shop_accounts (
     updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
 );
 
--- 3. USSD & WhatsApp Payment Verification Claims
+-- 3. Shop Users Directory (Owners, Managers & Cashiers across all shops — NO PIN/password hashes stored!)
+create table if not exists public.shop_users (
+    id text primary key,
+    shop_sync_key text not null,
+    shop_name text not null default '',
+    user_id text not null,
+    full_name text not null default '',
+    username text not null,
+    phone text not null default '',
+    role text not null default 'CASHIER',
+    assigned_branch_id text not null default '',
+    assigned_branch_name text not null default 'All Branches',
+    is_active boolean not null default true,
+    updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+
+-- 4. USSD & WhatsApp Payment Verification Claims
 create table if not exists public.payment_requests (
     id text primary key,
     shop_name text not null,
@@ -70,7 +89,7 @@ create table if not exists public.payment_requests (
 alter table public.payment_requests
     add column if not exists rejection_reason text not null default '';
 
--- 4. Cryptographic Account-Bound Unlock Codes Ledger (BB2-...)
+-- 5. Cryptographic Account-Bound Unlock Codes Ledger (BB2-...)
 create table if not exists public.unlock_codes (
     id text primary key,
     unlock_code text not null unique,
@@ -81,12 +100,12 @@ create table if not exists public.unlock_codes (
     plan_days integer not null default 30,
     amount_rwf integer not null default 5000,
     status text not null default 'ISSUED',
-    issued_by_admin text not null default 'BeBoss Admin',
+    issued_by_admin text not null default 'BeBoss Master Admin',
     issued_at bigint not null default (extract(epoch from now()) * 1000)::bigint,
     redeemed_at bigint
 );
 
--- 5. Synchronous Multi-Branch Auto-Sync Snapshots (Relays compressed BBSHARE1 payloads across devices)
+-- 6. Synchronous Multi-Branch Auto-Sync Snapshots (Relays compressed BBSHARE1 payloads across devices)
 create table if not exists public.branch_sync_snapshots (
     id text primary key,
     shop_sync_key text not null,
@@ -100,7 +119,7 @@ create table if not exists public.branch_sync_snapshots (
     updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
 );
 
--- 6. Admin Audit Trail
+-- 7. Admin Audit Trail
 create table if not exists public.admin_audit_logs (
     id text primary key,
     admin_email text not null,
@@ -111,6 +130,9 @@ create table if not exists public.admin_audit_logs (
 );
 
 create index if not exists idx_shop_accounts_username on public.shop_accounts(owner_username);
+create index if not exists idx_shop_users_shop_key on public.shop_users(shop_sync_key);
+create index if not exists idx_shop_users_username on public.shop_users(username);
+create index if not exists idx_shop_users_updated on public.shop_users(updated_at desc);
 create index if not exists idx_payment_requests_status on public.payment_requests(status);
 create index if not exists idx_payment_requests_username on public.payment_requests(owner_username);
 create index if not exists idx_unlock_codes_code on public.unlock_codes(unlock_code);
@@ -121,36 +143,60 @@ create index if not exists idx_admin_audit_created on public.admin_audit_logs(cr
 
 alter table public.admin_profiles enable row level security;
 alter table public.shop_accounts enable row level security;
+alter table public.shop_users enable row level security;
 alter table public.payment_requests enable row level security;
 alter table public.unlock_codes enable row level security;
 alter table public.branch_sync_snapshots enable row level security;
 alter table public.admin_audit_logs enable row level security;
 
--- Admin Profiles Policies:
--- First admin to sign up registers automatically; subsequent admins require an existing active admin.
+-- Single Master Admin Policies (strictly reponsekdz@gmail.com):
 drop policy if exists "Read own or admin profiles" on public.admin_profiles;
 create policy "Read own or admin profiles" on public.admin_profiles
-    for select using (auth.uid() = user_id or public.is_beboss_admin());
+    for select using (
+        auth.uid() = user_id and lower(email) = 'reponsekdz@gmail.com'
+    );
 
 drop policy if exists "Bootstrap or admin insert profile" on public.admin_profiles;
 create policy "Bootstrap or admin insert profile" on public.admin_profiles
     for insert with check (
-        auth.uid() = user_id and (
-            not exists (select 1 from public.admin_profiles)
-            or public.is_beboss_admin()
-        )
+        auth.uid() = user_id
+        and lower(email) = 'reponsekdz@gmail.com'
     );
 
 drop policy if exists "Admin update profiles" on public.admin_profiles;
 create policy "Admin update profiles" on public.admin_profiles
     for update using (public.is_beboss_admin()) with check (public.is_beboss_admin());
 
--- Shop Accounts Policies (Shop terminals sync account metadata; Admins oversee all shops)
+-- Shop Accounts Policies (Shop terminals sync account metadata; Master Admin has full management & delete)
 drop policy if exists "Shops and admins manage shop_accounts" on public.shop_accounts;
-create policy "Shops and admins manage shop_accounts" on public.shop_accounts
-    for all using (true) with check (true);
+drop policy if exists "Shop terminals read shop_accounts" on public.shop_accounts;
+create policy "Shop terminals read shop_accounts" on public.shop_accounts
+    for select using (true);
+drop policy if exists "Shop terminals upsert shop_accounts" on public.shop_accounts;
+create policy "Shop terminals upsert shop_accounts" on public.shop_accounts
+    for insert with check (true);
+drop policy if exists "Shop terminals or admin update shop_accounts" on public.shop_accounts;
+create policy "Shop terminals or admin update shop_accounts" on public.shop_accounts
+    for update using (true) with check (true);
+drop policy if exists "Master admin delete shop_accounts" on public.shop_accounts;
+create policy "Master admin delete shop_accounts" on public.shop_accounts
+    for delete using (public.is_beboss_admin());
 
--- Payment Requests Policies (Shops submit & view claims; authenticated Admins verify/reject)
+-- Shop Users Directory Policies (Shop terminals sync staff metadata; Master Admin controls roles, status & deletion)
+drop policy if exists "Read shop_users" on public.shop_users;
+create policy "Read shop_users" on public.shop_users
+    for select using (true);
+drop policy if exists "Upsert shop_users" on public.shop_users;
+create policy "Upsert shop_users" on public.shop_users
+    for insert with check (true);
+drop policy if exists "Update shop_users" on public.shop_users;
+create policy "Update shop_users" on public.shop_users
+    for update using (true) with check (true);
+drop policy if exists "Master admin delete shop_users" on public.shop_users;
+create policy "Master admin delete shop_users" on public.shop_users
+    for delete using (public.is_beboss_admin());
+
+-- Payment Requests Policies
 drop policy if exists "Shop terminals submit and read payment_requests" on public.payment_requests;
 create policy "Shop terminals submit and read payment_requests" on public.payment_requests
     for select using (true);
@@ -164,7 +210,11 @@ create policy "Shop redeem or admin update payment_requests" on public.payment_r
     for update using (true)
     with check (status = 'REDEEMED' or public.is_beboss_admin());
 
--- Unlock Codes Policies (Only authenticated admins issue/revoke codes; shops read & mark REDEEMED)
+drop policy if exists "Master admin delete payment_requests" on public.payment_requests;
+create policy "Master admin delete payment_requests" on public.payment_requests
+    for delete using (public.is_beboss_admin());
+
+-- Unlock Codes Policies (Only authenticated Master Admin issues/revokes/deletes codes; shops read & mark REDEEMED)
 drop policy if exists "Read unlock_codes" on public.unlock_codes;
 create policy "Read unlock_codes" on public.unlock_codes
     for select using (true);
@@ -178,12 +228,25 @@ create policy "Shop redeem or admin update unlock_codes" on public.unlock_codes
     for update using (true)
     with check (status = 'REDEEMED' or public.is_beboss_admin());
 
--- Branch Sync Snapshots Policies (Cross-device offline-first automatic branch DataShare relay)
+drop policy if exists "Master admin delete unlock_codes" on public.unlock_codes;
+create policy "Master admin delete unlock_codes" on public.unlock_codes
+    for delete using (public.is_beboss_admin());
+
+-- Branch Sync Snapshots Policies
 drop policy if exists "Branch devices relay snapshots" on public.branch_sync_snapshots;
 create policy "Branch devices relay snapshots" on public.branch_sync_snapshots
-    for all using (true) with check (true);
+    for select using (true);
+drop policy if exists "Branch devices insert snapshots" on public.branch_sync_snapshots;
+create policy "Branch devices insert snapshots" on public.branch_sync_snapshots
+    for insert with check (true);
+drop policy if exists "Branch devices update snapshots" on public.branch_sync_snapshots;
+create policy "Branch devices update snapshots" on public.branch_sync_snapshots
+    for update using (true) with check (true);
+drop policy if exists "Master admin delete snapshots" on public.branch_sync_snapshots;
+create policy "Master admin delete snapshots" on public.branch_sync_snapshots
+    for delete using (public.is_beboss_admin());
 
--- Admin Audit Logs Policies (Strict authenticated Admin access only)
+-- Admin Audit Logs Policies (Strict authenticated Master Admin access only)
 drop policy if exists "Admin read audit_logs" on public.admin_audit_logs;
 create policy "Admin read audit_logs" on public.admin_audit_logs
     for select using (public.is_beboss_admin());

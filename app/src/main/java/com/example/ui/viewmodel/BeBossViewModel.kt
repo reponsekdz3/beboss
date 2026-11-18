@@ -742,7 +742,13 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun loginWithCredentials(username: String, pinOrPass: String): Boolean {
         viewModelScope.launch {
             val user = repository.getUserByUsername(username.trim())
-            val isValid = user != null && (
+            if (user != null && !user.isActive) {
+                _authError.value = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Konti yawe yahagaritswe n'Umuyobozi Mukuru (Admin)."
+                else "Account suspended by Master Administrator."
+                return@launch
+            }
+            val isValid = user != null && user.isActive && (
                 com.example.util.SecurityUtils.verifyPin(pinOrPass.trim(), user.pinHash) ||
                 com.example.util.SecurityUtils.verifyPassword(pinOrPass.trim(), user.password)
             )
@@ -752,14 +758,14 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 _authError.value = null
                 prefs.edit().putString("active_user_id", user.id).apply()
                 repository.updateLastLogin(user.id)
-                val welcome = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                    "Winjiye nka ${user.name} (${user.role.displayName})" 
-                    else "Logged in as ${user.name} (${user.role.displayName})"
+                val welcome = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Winjiye nka ${user.name} (${user.role.displayName})"
+                else "Logged in as ${user.name} (${user.role.displayName})"
                 _snackbarMessage.emit(welcome)
             } else {
-                _authError.value = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                    "Izina cyangwa ijambobanga si byo" 
-                    else "Invalid username or password"
+                _authError.value = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Izina cyangwa ijambobanga si byo"
+                else "Invalid username or password"
             }
         }
         return true
@@ -906,6 +912,12 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     private val _adminShopAccounts = MutableStateFlow<List<com.example.util.SupabaseShopAccountDto>>(emptyList())
     val adminShopAccounts: StateFlow<List<com.example.util.SupabaseShopAccountDto>> = _adminShopAccounts.asStateFlow()
 
+    private val _adminShopUsers = MutableStateFlow<List<com.example.util.SupabaseShopUserDto>>(emptyList())
+    val adminShopUsers: StateFlow<List<com.example.util.SupabaseShopUserDto>> = _adminShopUsers.asStateFlow()
+
+    private val _adminBranchSnapshots = MutableStateFlow<List<com.example.util.SupabaseBranchSnapshotDto>>(emptyList())
+    val adminBranchSnapshots: StateFlow<List<com.example.util.SupabaseBranchSnapshotDto>> = _adminBranchSnapshots.asStateFlow()
+
     private val _adminUnlockCodes = MutableStateFlow<List<com.example.util.SupabaseUnlockCodeDto>>(emptyList())
     val adminUnlockCodes: StateFlow<List<com.example.util.SupabaseUnlockCodeDto>> = _adminUnlockCodes.asStateFlow()
 
@@ -930,7 +942,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
             res.onSuccess { sess ->
                 _adminSession.value = sess
                 refreshAdminDashboardData()
-                _snackbarMessage.emit("Authenticated as ${sess.fullName} (${sess.email})")
+                _snackbarMessage.emit("Authenticated as Master Admin (${sess.email})")
             }.onFailure { err ->
                 _adminAuthError.value = err.message ?: "Admin sign-in failed"
             }
@@ -946,9 +958,9 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
             res.onSuccess { sess ->
                 _adminSession.value = sess
                 refreshAdminDashboardData()
-                _snackbarMessage.emit("Admin profile created & authenticated (${sess.email})")
+                _snackbarMessage.emit("Master Admin profile initialized (${sess.email})")
             }.onFailure { err ->
-                _adminAuthError.value = err.message ?: "Admin registration failed"
+                _adminAuthError.value = err.message ?: "Admin initialization failed"
             }
         }
     }
@@ -959,6 +971,8 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
             _adminSession.value = null
             _adminPaymentRequests.value = emptyList()
             _adminShopAccounts.value = emptyList()
+            _adminShopUsers.value = emptyList()
+            _adminBranchSnapshots.value = emptyList()
             _adminUnlockCodes.value = emptyList()
             _adminAuditLogs.value = emptyList()
             _adminAuthError.value = null
@@ -1067,6 +1081,8 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
             _isAdminLoading.value = true
             _adminPaymentRequests.value = com.example.util.SupabaseAdminClient.fetchAllPaymentRequests()
             _adminShopAccounts.value = com.example.util.SupabaseAdminClient.fetchAllShopAccounts()
+            _adminShopUsers.value = com.example.util.SupabaseAdminClient.fetchAllShopUsers()
+            _adminBranchSnapshots.value = com.example.util.SupabaseAdminClient.fetchAllBranchSnapshots()
             _adminUnlockCodes.value = com.example.util.SupabaseAdminClient.fetchAllUnlockCodes()
             _adminAuditLogs.value = com.example.util.SupabaseAdminClient.fetchAdminAuditLogs()
             _isAdminLoading.value = false
@@ -1149,6 +1165,104 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
             if (ok) refreshAdminDashboardData()
             _isAdminLoading.value = false
             onGenerated(ok, code)
+        }
+    }
+
+    fun adminExtendShopSubscription(shop: com.example.util.SupabaseShopAccountDto, addDays: Int) {
+        viewModelScope.launch {
+            _isAdminLoading.value = true
+            val ok = com.example.util.SupabaseAdminClient.adminExtendShopSubscription(shop, addDays)
+            if (ok) {
+                refreshAdminDashboardData()
+                _snackbarMessage.emit("Extended ${shop.shopName} license by +$addDays days.")
+            } else {
+                _snackbarMessage.emit("Failed extending shop license in Supabase.")
+            }
+            _isAdminLoading.value = false
+        }
+    }
+
+    fun adminSetShopStatus(shop: com.example.util.SupabaseShopAccountDto, status: String) {
+        viewModelScope.launch {
+            _isAdminLoading.value = true
+            val ok = com.example.util.SupabaseAdminClient.adminSetShopStatus(shop, status)
+            if (ok) {
+                refreshAdminDashboardData()
+                _snackbarMessage.emit("${shop.shopName} set to $status.")
+            } else {
+                _snackbarMessage.emit("Failed updating shop status.")
+            }
+            _isAdminLoading.value = false
+        }
+    }
+
+    fun adminDeleteShopAccount(shop: com.example.util.SupabaseShopAccountDto) {
+        viewModelScope.launch {
+            _isAdminLoading.value = true
+            val ok = com.example.util.SupabaseAdminClient.adminDeleteShopAccount(shop)
+            if (ok) {
+                refreshAdminDashboardData()
+                _snackbarMessage.emit("Deleted shop record ${shop.shopName}.")
+            } else {
+                _snackbarMessage.emit("Failed deleting shop record.")
+            }
+            _isAdminLoading.value = false
+        }
+    }
+
+    fun adminUpdateShopUserRole(user: com.example.util.SupabaseShopUserDto, newRole: String) {
+        viewModelScope.launch {
+            _isAdminLoading.value = true
+            val ok = com.example.util.SupabaseAdminClient.adminUpdateShopUser(user, newRole = newRole)
+            if (ok) {
+                refreshAdminDashboardData()
+                _snackbarMessage.emit("@${user.username} role updated to $newRole.")
+            } else {
+                _snackbarMessage.emit("Failed updating user role in Supabase.")
+            }
+            _isAdminLoading.value = false
+        }
+    }
+
+    fun adminToggleShopUserActive(user: com.example.util.SupabaseShopUserDto, newActive: Boolean) {
+        viewModelScope.launch {
+            _isAdminLoading.value = true
+            val ok = com.example.util.SupabaseAdminClient.adminUpdateShopUser(user, isActive = newActive)
+            if (ok) {
+                refreshAdminDashboardData()
+                _snackbarMessage.emit("@${user.username} ${if (newActive) "reactivated" else "suspended"}.")
+            } else {
+                _snackbarMessage.emit("Failed updating user status in Supabase.")
+            }
+            _isAdminLoading.value = false
+        }
+    }
+
+    fun adminDeleteShopUser(user: com.example.util.SupabaseShopUserDto) {
+        viewModelScope.launch {
+            _isAdminLoading.value = true
+            val ok = com.example.util.SupabaseAdminClient.adminDeleteShopUser(user)
+            if (ok) {
+                refreshAdminDashboardData()
+                _snackbarMessage.emit("Removed user @${user.username} from directory.")
+            } else {
+                _snackbarMessage.emit("Failed deleting user in Supabase.")
+            }
+            _isAdminLoading.value = false
+        }
+    }
+
+    fun adminDeleteBranchSnapshot(snapshot: com.example.util.SupabaseBranchSnapshotDto) {
+        viewModelScope.launch {
+            _isAdminLoading.value = true
+            val ok = com.example.util.SupabaseAdminClient.adminDeleteBranchSnapshot(snapshot)
+            if (ok) {
+                refreshAdminDashboardData()
+                _snackbarMessage.emit("Removed branch snapshot (${snapshot.branchName}).")
+            } else {
+                _snackbarMessage.emit("Failed removing branch snapshot.")
+            }
+            _isAdminLoading.value = false
         }
     }
 

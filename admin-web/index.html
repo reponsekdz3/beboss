@@ -398,8 +398,8 @@
 
       <div class="auth-form-pane">
         <div class="auth-tabs">
-          <button id="tabSignInBtn" class="auth-tab active" onclick="setAuthMode('signin')">Admin Sign In</button>
-          <button id="tabSignUpBtn" class="auth-tab" onclick="setAuthMode('signup')">Register Admin</button>
+          <button id="tabSignInBtn" class="auth-tab active" onclick="setAuthMode('signin')">Master Sign In</button>
+          <button id="tabSignUpBtn" class="auth-tab" onclick="setAuthMode('signup')">Initialize Admin</button>
         </div>
 
         <div id="authErrorBox" class="hidden" style="background:var(--red-soft);border:1px solid rgba(239,68,68,0.4);color:#fecaca;padding:10px 12px;border-radius:10px;font-size:12.5px;margin-bottom:14px;"></div>
@@ -414,13 +414,13 @@
             <input id="authSbKey" type="password" placeholder="eyJhbGciOi..." required />
           </div>
           <div id="authNameRow" class="hidden" style="margin-bottom:11px;">
-            <label>Admin Full Name</label>
-            <input id="authFullName" type="text" placeholder="Jean Paul (Operations Admin)" />
+            <label>Master Admin Name</label>
+            <input id="authFullName" type="text" value="BeBoss Master Admin" placeholder="BeBoss Master Admin" />
           </div>
           <div class="form-grid" style="margin-bottom:11px;">
             <div>
-              <label>Admin Email</label>
-              <input id="authEmail" type="email" placeholder="admin@beboss.app" required />
+              <label>Master Admin Email (Locked)</label>
+              <input id="authEmail" type="email" value="reponsekdz@gmail.com" readonly style="opacity:0.88;cursor:not-allowed;color:#fdba74;font-weight:700;" required />
             </div>
             <div>
               <label>Password (min 6 chars)</label>
@@ -433,7 +433,7 @@
           </div>
 
           <button id="authSubmitBtn" type="submit" class="btn btn-primary" style="width:100%;">
-            Sign In to Admin Command Center
+            Sign In as Master Admin
           </button>
         </form>
       </div>
@@ -460,12 +460,16 @@
             <span>Verification Queue</span>
             <span id="navPendingBadge" class="nav-count">0</span>
           </button>
-          <button class="nav-item" data-view="generatorView" onclick="switchView('generatorView', this)">
-            <span>Unlock Code Engine</span>
+          <button class="nav-item" data-view="usersView" onclick="switchView('usersView', this)">
+            <span>All Users Directory</span>
+            <span id="navUsersBadge" class="nav-count">0</span>
           </button>
           <button class="nav-item" data-view="shopsView" onclick="switchView('shopsView', this)">
             <span>Shops &amp; Branch Sync</span>
             <span id="navShopsBadge" class="nav-count">0</span>
+          </button>
+          <button class="nav-item" data-view="generatorView" onclick="switchView('generatorView', this)">
+            <span>Unlock Code Engine</span>
           </button>
           <button class="nav-item" data-view="codesView" onclick="switchView('codesView', this)">
             <span>Codes Ledger</span>
@@ -516,6 +520,11 @@
               <div class="kpi-label">Active / Expiring Shops</div>
               <div id="kpiShops" class="kpi-value" style="color:var(--blue)">0 / 0</div>
               <div id="kpiShopsSub" class="kpi-sub">0 expiring within 5 days</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Registered Shop Users</div>
+              <div id="kpiUsers" class="kpi-value" style="color:var(--accent)">0</div>
+              <div id="kpiUsersSub" class="kpi-sub">0 suspended accounts</div>
             </div>
             <div class="kpi-card">
               <div class="kpi-label">Synced Branch Terminals</div>
@@ -669,13 +678,63 @@
           </div>
         </div>
 
+        <!-- ALL USERS DIRECTORY VIEW -->
+        <div id="usersView" class="view-pane hidden">
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+              <div>
+                <h3 style="margin:0;font-size:15px;">All Users Across Every BeBoss Shop (<span class="mono">shop_users</span>)</h3>
+                <div style="font-size:12px;color:var(--muted)">Promote or change roles, suspend/reactivate access, remove users, or message directly on WhatsApp</div>
+              </div>
+            </div>
+            <div class="form-grid">
+              <div>
+                <label>Search Name / @username / Shop / Phone</label>
+                <input id="userSearch" type="text" placeholder="e.g. jeanpaul, cashier, kigali..." oninput="renderUsers()" />
+              </div>
+              <div>
+                <label>Filter by Role</label>
+                <select id="userRoleFilter" onchange="renderUsers()">
+                  <option value="ALL">All Roles</option>
+                  <option value="OWNER">Owners</option>
+                  <option value="MANAGER">Managers</option>
+                  <option value="CASHIER">Cashiers</option>
+                </select>
+              </div>
+              <div>
+                <label>Filter by Status</label>
+                <select id="userStatusFilter" onchange="renderUsers()">
+                  <option value="ALL">All Statuses</option>
+                  <option value="ACTIVE">Active Only</option>
+                  <option value="SUSPENDED">Suspended Only</option>
+                </select>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>User &amp; @username</th>
+                    <th>Shop &amp; Branch</th>
+                    <th>Phone</th>
+                    <th>Role Control</th>
+                    <th>Status</th>
+                    <th>Master Admin Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="usersBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <!-- SHOPS & BRANCH DATA SHARE VIEW -->
         <div id="shopsView" class="view-pane hidden">
           <div class="card" style="margin-bottom:16px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
               <div>
-                <h3 style="margin:0;font-size:15px;">Registered Shop Accounts &amp; Monthly Licensing</h3>
-                <div style="font-size:12px;color:var(--muted)">1-click renewal prefill for expiring or expired monthly shops</div>
+                <h3 style="margin:0;font-size:15px;">Registered Shop Accounts &amp; Full Subscription Control</h3>
+                <div style="font-size:12px;color:var(--muted)">Extend subscriptions (+30d/+90d), suspend/activate shops, prefill BB2 codes, or delete records</div>
               </div>
               <input id="shopSearch" type="text" placeholder="Filter shops..." style="max-width:260px;" oninput="renderShops()" />
             </div>
@@ -688,7 +747,7 @@
                     <th>Phone &amp; Device</th>
                     <th>Branches / Workers</th>
                     <th>License Countdown</th>
-                    <th>Action</th>
+                    <th>Master Admin Actions</th>
                   </tr>
                 </thead>
                 <tbody id="shopsBody"></tbody>
@@ -699,7 +758,7 @@
           <div class="card">
             <div style="margin-bottom:12px;">
               <h3 style="margin:0;font-size:15px;">Live Branch DataShare Cloud Snapshots (<span class="mono">branch_sync_snapshots</span>)</h3>
-              <div style="font-size:12px;color:var(--muted)">Devices syncing automatically across branches whenever internet connects</div>
+              <div style="font-size:12px;color:var(--muted)">Inspect connected terminals or remove stale branch snapshots</div>
             </div>
             <div class="table-wrap">
               <table>
@@ -709,6 +768,7 @@
                     <th>Branch &amp; Device Terminal</th>
                     <th>Synced Records Summary</th>
                     <th>Last Synced</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody id="snapshotsBody"></tbody>
@@ -808,17 +868,17 @@
   <div id="toast" class="toast hidden"></div>
 
   <script>
-    const SCHEMA_SQL = `-- BeBoss Enterprise Licensing, Admin Auth & Branch Auto-Sync Schema
+    const SCHEMA_SQL = `-- BeBoss Enterprise Licensing, Single Master Admin & Synchronous Branch DataShare Schema
 create table if not exists public.admin_profiles (
     user_id uuid primary key references auth.users(id) on delete cascade,
     email text not null unique,
-    full_name text not null default 'BeBoss Admin',
+    full_name text not null default 'BeBoss Master Admin',
     role text not null default 'SUPER_ADMIN',
     is_active boolean not null default true,
     created_at bigint not null default (extract(epoch from now()) * 1000)::bigint
 );
 create or replace function public.is_beboss_admin() returns boolean language sql security definer stable as $$
-  select exists (select 1 from public.admin_profiles where user_id = auth.uid() and is_active = true);
+  select exists (select 1 from public.admin_profiles where user_id = auth.uid() and lower(email) = 'reponsekdz@gmail.com' and is_active = true);
 $$;
 create table if not exists public.shop_accounts (
     id text primary key, shop_name text not null, owner_name text not null default '',
@@ -826,6 +886,13 @@ create table if not exists public.shop_accounts (
     branch_count integer not null default 1, worker_count integer not null default 1,
     monthly_fee_rwf integer not null default 5000, subscription_status text not null default 'ACTIVE',
     subscription_expires_at bigint not null default 0, updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+create table if not exists public.shop_users (
+    id text primary key, shop_sync_key text not null, shop_name text not null default '',
+    user_id text not null, full_name text not null default '', username text not null,
+    phone text not null default '', role text not null default 'CASHIER',
+    assigned_branch_id text not null default '', assigned_branch_name text not null default 'All Branches',
+    is_active boolean not null default true, updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
 );
 create table if not exists public.payment_requests (
     id text primary key, shop_name text not null, owner_username text not null, owner_phone text not null,
@@ -840,7 +907,7 @@ create table if not exists public.payment_requests (
 create table if not exists public.unlock_codes (
     id text primary key, unlock_code text not null unique, shop_username text not null, shop_phone text not null,
     device_challenge text not null default '', tier_code text not null default 'SINGLE', plan_days integer not null default 30,
-    amount_rwf integer not null default 5000, status text not null default 'ISSUED', issued_by_admin text not null default 'BeBoss Admin',
+    amount_rwf integer not null default 5000, status text not null default 'ISSUED', issued_by_admin text not null default 'BeBoss Master Admin',
     issued_at bigint not null default (extract(epoch from now()) * 1000)::bigint, redeemed_at bigint
 );
 create table if not exists public.branch_sync_snapshots (
@@ -856,24 +923,38 @@ create table if not exists public.admin_audit_logs (
 );
 alter table public.admin_profiles enable row level security;
 alter table public.shop_accounts enable row level security;
+alter table public.shop_users enable row level security;
 alter table public.payment_requests enable row level security;
 alter table public.unlock_codes enable row level security;
 alter table public.branch_sync_snapshots enable row level security;
 alter table public.admin_audit_logs enable row level security;
-create policy "Read own or admin profiles" on public.admin_profiles for select using (auth.uid() = user_id or public.is_beboss_admin());
-create policy "Bootstrap or admin insert profile" on public.admin_profiles for insert with check (auth.uid() = user_id and (not exists (select 1 from public.admin_profiles) or public.is_beboss_admin()));
+create policy "Read own or admin profiles" on public.admin_profiles for select using (auth.uid() = user_id and lower(email) = 'reponsekdz@gmail.com');
+create policy "Bootstrap or admin insert profile" on public.admin_profiles for insert with check (auth.uid() = user_id and lower(email) = 'reponsekdz@gmail.com');
 create policy "Admin update profiles" on public.admin_profiles for update using (public.is_beboss_admin()) with check (public.is_beboss_admin());
-create policy "Shops and admins manage shop_accounts" on public.shop_accounts for all using (true) with check (true);
+create policy "Shop terminals read shop_accounts" on public.shop_accounts for select using (true);
+create policy "Shop terminals upsert shop_accounts" on public.shop_accounts for insert with check (true);
+create policy "Shop terminals or admin update shop_accounts" on public.shop_accounts for update using (true) with check (true);
+create policy "Master admin delete shop_accounts" on public.shop_accounts for delete using (public.is_beboss_admin());
+create policy "Read shop_users" on public.shop_users for select using (true);
+create policy "Upsert shop_users" on public.shop_users for insert with check (true);
+create policy "Update shop_users" on public.shop_users for update using (true) with check (true);
+create policy "Master admin delete shop_users" on public.shop_users for delete using (public.is_beboss_admin());
 create policy "Shop terminals submit and read payment_requests" on public.payment_requests for select using (true);
 create policy "Shop terminals insert payment_requests" on public.payment_requests for insert with check (true);
 create policy "Shop redeem or admin update payment_requests" on public.payment_requests for update using (true) with check (status = 'REDEEMED' or public.is_beboss_admin());
+create policy "Master admin delete payment_requests" on public.payment_requests for delete using (public.is_beboss_admin());
 create policy "Read unlock_codes" on public.unlock_codes for select using (true);
 create policy "Admin insert unlock_codes" on public.unlock_codes for insert with check (public.is_beboss_admin());
 create policy "Shop redeem or admin update unlock_codes" on public.unlock_codes for update using (true) with check (status = 'REDEEMED' or public.is_beboss_admin());
-create policy "Branch devices relay snapshots" on public.branch_sync_snapshots for all using (true) with check (true);
+create policy "Master admin delete unlock_codes" on public.unlock_codes for delete using (public.is_beboss_admin());
+create policy "Branch devices relay snapshots" on public.branch_sync_snapshots for select using (true);
+create policy "Branch devices insert snapshots" on public.branch_sync_snapshots for insert with check (true);
+create policy "Branch devices update snapshots" on public.branch_sync_snapshots for update using (true) with check (true);
+create policy "Master admin delete snapshots" on public.branch_sync_snapshots for delete using (public.is_beboss_admin());
 create policy "Admin read audit_logs" on public.admin_audit_logs for select using (public.is_beboss_admin());
 create policy "Admin insert audit_logs" on public.admin_audit_logs for insert with check (public.is_beboss_admin());`;
 
+    const MASTER_ADMIN_EMAIL = 'reponsekdz@gmail.com';
     const STORAGE_KEY = 'beboss_admin_platform_v2';
     let authMode = 'signin';
     let pollTimer = null;
@@ -886,14 +967,15 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
       accessToken: '',
       refreshToken: '',
       userId: '',
-      email: '',
-      fullName: 'BeBoss Admin',
+      email: MASTER_ADMIN_EMAIL,
+      fullName: 'BeBoss Master Admin',
       expiresAt: 0
     };
 
     let dataState = {
       requests: [],
       shops: [],
+      users: [],
       codes: [],
       snapshots: [],
       audits: []
@@ -926,8 +1008,8 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
       document.getElementById('tabSignUpBtn').classList.toggle('active', mode === 'signup');
       document.getElementById('authNameRow').classList.toggle('hidden', mode === 'signin');
       document.getElementById('authSubmitBtn').textContent = mode === 'signin'
-        ? 'Sign In to Admin Command Center'
-        : 'Create Admin Account & Verify Profile';
+        ? 'Sign In as Master Admin'
+        : 'Initialize Master Admin Profile';
       document.getElementById('authErrorBox').classList.add('hidden');
     }
 
@@ -944,12 +1026,17 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
         if (params.get('key')) session.anonKey = params.get('key');
       } catch (_) {}
 
+      if (session.email && session.email.toLowerCase() !== MASTER_ADMIN_EMAIL) {
+        session.accessToken = '';
+        session.email = MASTER_ADMIN_EMAIL;
+      }
+
       document.getElementById('authSbUrl').value = session.url || '';
       document.getElementById('authSbKey').value = session.anonKey || '';
-      document.getElementById('authEmail').value = session.email || '';
+      document.getElementById('authEmail').value = MASTER_ADMIN_EMAIL;
       document.getElementById('authSecret').value = session.secret || 'BeBoss_Enterprise_HMAC_Signing_2026';
 
-      if (session.accessToken && session.url && session.anonKey) {
+      if (session.accessToken && session.url && session.anonKey && session.email === MASTER_ADMIN_EMAIL) {
         enterAuthenticatedShell();
       }
     }
@@ -964,7 +1051,13 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
       const email = document.getElementById('authEmail').value.trim().toLowerCase();
       const password = document.getElementById('authPassword').value;
       const secret = document.getElementById('authSecret').value.trim();
-      const fullName = document.getElementById('authFullName').value.trim() || email.split('@')[0];
+      const fullName = document.getElementById('authFullName').value.trim() || 'BeBoss Master Admin';
+
+      if (email !== MASTER_ADMIN_EMAIL) {
+        errBox.textContent = `Access restricted strictly to the single master administrator (${MASTER_ADMIN_EMAIL}).`;
+        errBox.classList.remove('hidden');
+        return;
+      }
 
       const btn = document.getElementById('authSubmitBtn');
       btn.disabled = true;
@@ -1026,6 +1119,9 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
     }
 
     async function ensureAdminProfileRecord() {
+      if ((session.email || '').toLowerCase() !== MASTER_ADMIN_EMAIL) {
+        throw new Error(`Unauthorized admin email. Only ${MASTER_ADMIN_EMAIL} is permitted.`);
+      }
       if (!session.userId) return;
       const checkRes = await fetch(`${session.url}/rest/v1/admin_profiles?user_id=eq.${encodeURIComponent(session.userId)}&limit=1`, {
         headers: {
@@ -1151,8 +1247,9 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
       const titles = {
         overviewView: 'Command Overview',
         queueView: 'USSD Payment Verification Queue',
-        generatorView: 'Account-Bound BB2 Code Engine',
+        usersView: 'All Users Directory & Access Control',
         shopsView: 'Shops & Live Branch DataShare',
+        generatorView: 'Account-Bound BB2 Code Engine',
         codesView: 'Issued & Redeemed Codes Ledger',
         auditView: 'Admin Audit Trail'
       };
@@ -1242,9 +1339,10 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
 
     async function refreshAll(notify = true) {
       try {
-        const [requests, shops, codes, snapshots, audits] = await Promise.all([
+        const [requests, shops, users, codes, snapshots, audits] = await Promise.all([
           sbFetch('payment_requests?order=created_at.desc&limit=150'),
           sbFetch('shop_accounts?order=updated_at.desc&limit=150'),
+          sbFetch('shop_users?order=updated_at.desc&limit=300').catch(() => []),
           sbFetch('unlock_codes?order=issued_at.desc&limit=150'),
           sbFetch('branch_sync_snapshots?order=updated_at.desc&limit=150').catch(() => []),
           sbFetch('admin_audit_logs?order=created_at.desc&limit=100').catch(() => [])
@@ -1252,13 +1350,14 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
         dataState = {
           requests: requests || [],
           shops: shops || [],
+          users: users || [],
           codes: codes || [],
           snapshots: snapshots || [],
           audits: audits || []
         };
         renderAll();
         document.getElementById('liveStatusBadge').textContent = `Synced ${new Date().toLocaleTimeString()}`;
-        if (notify) showToast('Supabase Admin data synchronized.');
+        if (notify) showToast('Supabase Master Admin data synchronized.');
       } catch (err) {
         showToast('Sync error: ' + err.message);
       }
@@ -1267,6 +1366,7 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
     function renderAll() {
       renderOverview();
       renderRequests();
+      renderUsers();
       renderShops();
       renderSnapshots();
       renderCodes();
@@ -1284,13 +1384,15 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
       let expiringSoon = 0;
       dataState.shops.forEach(s => {
         const daysLeft = Math.ceil((Number(s.subscription_expires_at || 0) - now) / 86400000);
-        if (s.subscription_status !== 'EXPIRED' && daysLeft > 0) {
+        if (s.subscription_status === 'ACTIVE' && daysLeft > 0) {
           activeShops++;
           if (daysLeft <= 5) expiringSoon++;
         }
       });
+      const suspendedUsers = dataState.users.filter(u => u.is_active === false).length;
 
       document.getElementById('navPendingBadge').textContent = pending.length;
+      document.getElementById('navUsersBadge').textContent = dataState.users.length;
       document.getElementById('navShopsBadge').textContent = dataState.shops.length;
       document.getElementById('kpiPending').textContent = pending.length;
       document.getElementById('kpiPendingSub').textContent = `${pendingSum.toLocaleString()} FRw awaiting verification`;
@@ -1298,6 +1400,8 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
       document.getElementById('kpiRevenueSub').textContent = `${approved.length} verified monthly renewals`;
       document.getElementById('kpiShops').textContent = `${activeShops} / ${dataState.shops.length}`;
       document.getElementById('kpiShopsSub').textContent = `${expiringSoon} shop(s) expiring within 5 days`;
+      document.getElementById('kpiUsers').textContent = dataState.users.length;
+      document.getElementById('kpiUsersSub').textContent = `${suspendedUsers} suspended user account(s)`;
       document.getElementById('kpiBranches').textContent = dataState.snapshots.length;
       document.getElementById('kpiBranchesSub').textContent = `${new Set(dataState.snapshots.map(x => x.shop_sync_key)).size} synced multi-branch store network(s)`;
 
@@ -1436,6 +1540,66 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
       }).join('');
     }
 
+    function renderUsers() {
+      const tbody = document.getElementById('usersBody');
+      if (!tbody) return;
+      const q = (document.getElementById('userSearch')?.value || '').trim().toLowerCase();
+      const roleFilter = document.getElementById('userRoleFilter')?.value || 'ALL';
+      const statusFilter = document.getElementById('userStatusFilter')?.value || 'ALL';
+
+      const list = dataState.users.filter(u => {
+        if (roleFilter !== 'ALL' && u.role !== roleFilter) return false;
+        if (statusFilter === 'ACTIVE' && u.is_active === false) return false;
+        if (statusFilter === 'SUSPENDED' && u.is_active !== false) return false;
+        if (!q) return true;
+        return [u.full_name, u.username, u.shop_name, u.assigned_branch_name, u.phone, u.role]
+          .some(v => String(v || '').toLowerCase().includes(q));
+      });
+
+      if (!list.length) {
+        tbody.innerHTML = `<tr><td colspan="6" style="color:var(--muted);text-align:center;padding:24px;">No shop users found. Staff profiles sync automatically when devices connect online.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = list.map(u => {
+        const active = u.is_active !== false;
+        const phoneDigits = String(u.phone || '').replace(/\D/g, '');
+        const waPhone = phoneDigits.length === 9 ? '250' + phoneDigits : (phoneDigits.startsWith('07') ? '25' + phoneDigits : phoneDigits);
+        return `
+          <tr>
+            <td>
+              <strong>${esc(u.full_name)}</strong><br/>
+              <span class="mono" style="color:#fdba74">@${esc(u.username)}</span>
+            </td>
+            <td>
+              <strong>${esc(u.shop_name || u.shop_sync_key)}</strong><br/>
+              <span style="font-size:12px;color:var(--muted)">Branch: ${esc(u.assigned_branch_name || 'All Branches')}</span>
+            </td>
+            <td class="mono" style="font-size:12px">${esc(u.phone || '—')}</td>
+            <td>
+              <select style="min-width:125px;padding:6px 8px;" onchange="updateShopUserRole('${escAttr(u.id)}', this.value)">
+                <option value="OWNER" ${u.role === 'OWNER' ? 'selected' : ''}>OWNER</option>
+                <option value="MANAGER" ${u.role === 'MANAGER' ? 'selected' : ''}>MANAGER</option>
+                <option value="CASHIER" ${u.role === 'CASHIER' ? 'selected' : ''}>CASHIER</option>
+              </select>
+            </td>
+            <td>
+              <span class="badge ${active ? 'b-approved' : 'b-rejected'}">${active ? 'ACTIVE' : 'SUSPENDED'}</span>
+            </td>
+            <td>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                <button class="btn btn-dark btn-sm" onclick="toggleShopUserActive('${escAttr(u.id)}', ${!active})">
+                  ${active ? 'Suspend' : 'Activate'}
+                </button>
+                ${waPhone ? `<a class="btn btn-green btn-sm" href="https://wa.me/${waPhone}" target="_blank">WhatsApp</a>` : ''}
+                <button class="btn btn-red btn-sm" onclick="deleteShopUser('${escAttr(u.id)}')">Remove</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
     function renderShops() {
       const tbody = document.getElementById('shopsBody');
       const q = (document.getElementById('shopSearch')?.value || '').trim().toLowerCase();
@@ -1449,17 +1613,24 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
       tbody.innerHTML = filtered.map(s => {
         const expMs = Number(s.subscription_expires_at || 0);
         const daysLeft = Math.ceil((expMs - Date.now()) / 86400000);
-        const isActive = s.subscription_status !== 'EXPIRED' && daysLeft > 0;
-        const badge = isActive ? (daysLeft <= 5 ? 'b-pending' : 'b-approved') : 'b-expired';
+        const isSuspended = s.subscription_status === 'SUSPENDED';
+        const isActive = !isSuspended && s.subscription_status !== 'EXPIRED' && daysLeft > 0;
+        const badge = isSuspended ? 'b-rejected' : (isActive ? (daysLeft <= 5 ? 'b-pending' : 'b-approved') : 'b-expired');
+        const label = isSuspended ? 'SUSPENDED' : (isActive ? `ACTIVE &bull; ${daysLeft}d left` : 'EXPIRED');
         return `
           <tr>
             <td><strong>${esc(s.shop_name)}</strong></td>
             <td>${esc(s.owner_name)}<br/><span class="mono" style="color:#fdba74">@${esc(s.owner_username)}</span></td>
             <td>${esc(s.owner_phone)}<br/><span class="mono" style="font-size:11px;color:var(--muted)">${esc(s.device_challenge)}</span></td>
             <td>${s.branch_count} Branches &bull; ${s.worker_count} Staff<br/><strong>${Number(s.monthly_fee_rwf || 5000).toLocaleString()} FRw/mo</strong></td>
-            <td><span class="badge ${badge}">${isActive ? `ACTIVE &bull; ${daysLeft}d left` : 'EXPIRED'}</span></td>
+            <td><span class="badge ${badge}">${label}</span></td>
             <td>
-              <button class="btn btn-dark btn-sm" onclick="prefillGenerator('${escAttr(s.owner_username)}','${escAttr(s.owner_phone)}','${escAttr(s.shop_name)}',${s.branch_count || 1},${s.worker_count || 1})">Renew / Issue Code</button>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                <button class="btn btn-primary btn-sm" onclick="extendShopSubscription('${escAttr(s.id)}', 30)">+30d</button>
+                <button class="btn btn-dark btn-sm" onclick="prefillGenerator('${escAttr(s.owner_username)}','${escAttr(s.owner_phone)}','${escAttr(s.shop_name)}',${s.branch_count || 1},${s.worker_count || 1})">Issue BB2</button>
+                <button class="btn btn-dark btn-sm" onclick="setShopStatus('${escAttr(s.id)}', '${isSuspended ? 'ACTIVE' : 'SUSPENDED'}')">${isSuspended ? 'Activate' : 'Suspend'}</button>
+                <button class="btn btn-red btn-sm" onclick="deleteShopAccount('${escAttr(s.id)}')">Delete</button>
+              </div>
             </td>
           </tr>
         `;
@@ -1469,7 +1640,7 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
     function renderSnapshots() {
       const tbody = document.getElementById('snapshotsBody');
       if (!dataState.snapshots.length) {
-        tbody.innerHTML = `<tr><td colspan="4" style="color:var(--muted);text-align:center;padding:20px;">No automatic internet branch sync snapshots uploaded yet.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:20px;">No automatic internet branch sync snapshots uploaded yet.</td></tr>`;
         return;
       }
       tbody.innerHTML = dataState.snapshots.map(sn => `
@@ -1478,6 +1649,9 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
           <td>${esc(sn.branch_name)}<br/><span class="mono" style="font-size:11px;color:var(--muted)">Device ${esc(sn.device_id)}</span></td>
           <td><span class="badge b-purple">${esc(sn.records_summary || 'Synced')}</span></td>
           <td style="font-size:12px;color:var(--muted)">${sn.updated_at ? new Date(Number(sn.updated_at)).toLocaleString() : '—'}</td>
+          <td>
+            <button class="btn btn-red btn-sm" onclick="deleteBranchSnapshot('${escAttr(sn.id)}')">Remove</button>
+          </td>
         </tr>
       `).join('');
     }
@@ -1548,6 +1722,121 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
       switchView('generatorView', document.querySelector('[data-view=generatorView]'));
     }
 
+    async function extendShopByKey(username, phone, addDays) {
+      const shopKey = `${String(username || '').trim().toLowerCase() || 'owner'}_${normalizePhoneLast9(phone) || '000000000'}`;
+      const match = dataState.shops.find(s => s.id === shopKey);
+      if (!match) return;
+      await extendShopSubscription(match.id, addDays, true);
+    }
+
+    async function extendShopSubscription(shopId, addDays, silent = false) {
+      const s = dataState.shops.find(x => x.id === shopId);
+      if (!s) return;
+      const now = Date.now();
+      const base = Math.max(Number(s.subscription_expires_at || 0), now);
+      const newExpiry = base + addDays * 86400000;
+      try {
+        await sbFetch(`shop_accounts?id=eq.${encodeURIComponent(shopId)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ subscription_status: 'ACTIVE', subscription_expires_at: newExpiry, updated_at: now })
+        });
+        await logAudit('EXTEND_SHOP', `@${s.owner_username}`, `Extended ${s.shop_name} by +${addDays} days`);
+        if (!silent) {
+          await refreshAll(false);
+          showToast(`Extended ${s.shop_name} by +${addDays} days.`);
+        }
+      } catch (err) {
+        if (!silent) showToast('Extend failed: ' + err.message);
+      }
+    }
+
+    async function setShopStatus(shopId, newStatus) {
+      const s = dataState.shops.find(x => x.id === shopId);
+      if (!s) return;
+      try {
+        await sbFetch(`shop_accounts?id=eq.${encodeURIComponent(shopId)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ subscription_status: newStatus, updated_at: Date.now() })
+        });
+        await logAudit('SET_SHOP_STATUS', `@${s.owner_username}`, `${s.shop_name} -> ${newStatus}`);
+        await refreshAll(false);
+        showToast(`${s.shop_name} updated to ${newStatus}`);
+      } catch (err) {
+        showToast('Status update failed: ' + err.message);
+      }
+    }
+
+    async function deleteShopAccount(shopId) {
+      const s = dataState.shops.find(x => x.id === shopId);
+      if (!s || !confirm(`Delete shop record "${s.shop_name}" (@${s.owner_username})?`)) return;
+      try {
+        await sbFetch(`shop_accounts?id=eq.${encodeURIComponent(shopId)}`, { method: 'DELETE' });
+        await logAudit('DELETE_SHOP', `@${s.owner_username}`, `Deleted shop ${s.shop_name}`);
+        await refreshAll(false);
+        showToast(`Deleted shop ${s.shop_name}`);
+      } catch (err) {
+        showToast('Delete shop failed: ' + err.message);
+      }
+    }
+
+    async function updateShopUserRole(userRowId, newRole) {
+      const u = dataState.users.find(x => x.id === userRowId);
+      if (!u) return;
+      try {
+        await sbFetch(`shop_users?id=eq.${encodeURIComponent(userRowId)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ role: newRole, updated_at: Date.now() })
+        });
+        await logAudit('UPDATE_USER_ROLE', `@${u.username}`, `${u.full_name} (${u.shop_name}) role -> ${newRole}`);
+        await refreshAll(false);
+        showToast(`@${u.username} role changed to ${newRole}`);
+      } catch (err) {
+        showToast('Role update failed: ' + err.message);
+      }
+    }
+
+    async function toggleShopUserActive(userRowId, newActive) {
+      const u = dataState.users.find(x => x.id === userRowId);
+      if (!u) return;
+      try {
+        await sbFetch(`shop_users?id=eq.${encodeURIComponent(userRowId)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ is_active: newActive, updated_at: Date.now() })
+        });
+        await logAudit('UPDATE_USER_STATUS', `@${u.username}`, `${u.full_name} (${u.shop_name}) active -> ${newActive}`);
+        await refreshAll(false);
+        showToast(`@${u.username} ${newActive ? 'activated' : 'suspended'}`);
+      } catch (err) {
+        showToast('User update failed: ' + err.message);
+      }
+    }
+
+    async function deleteShopUser(userRowId) {
+      const u = dataState.users.find(x => x.id === userRowId);
+      if (!u || !confirm(`Remove user "${u.full_name}" (@${u.username}) from ${u.shop_name}?`)) return;
+      try {
+        await sbFetch(`shop_users?id=eq.${encodeURIComponent(userRowId)}`, { method: 'DELETE' });
+        await logAudit('DELETE_USER', `@${u.username}`, `Removed ${u.full_name} from ${u.shop_name}`);
+        await refreshAll(false);
+        showToast(`Removed @${u.username}`);
+      } catch (err) {
+        showToast('Delete user failed: ' + err.message);
+      }
+    }
+
+    async function deleteBranchSnapshot(snapshotId) {
+      const sn = dataState.snapshots.find(x => x.id === snapshotId);
+      if (!sn || !confirm(`Remove cloud branch snapshot "${sn.branch_name}" (${sn.device_id})?`)) return;
+      try {
+        await sbFetch(`branch_sync_snapshots?id=eq.${encodeURIComponent(snapshotId)}`, { method: 'DELETE' });
+        await logAudit('DELETE_SNAPSHOT', sn.device_id, `Removed snapshot ${sn.branch_name} (${sn.shop_name})`);
+        await refreshAll(false);
+        showToast('Branch snapshot removed.');
+      } catch (err) {
+        showToast('Remove snapshot failed: ' + err.message);
+      }
+    }
+
     async function approveRequest(reqId) {
       const req = dataState.requests.find(x => x.id === reqId);
       if (!req) return;
@@ -1585,6 +1874,7 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
           })
         });
 
+        await extendShopByKey(req.owner_username, req.owner_phone, calc.days);
         await logAudit('APPROVE_PAYMENT', req.owner_username, `Approved ${req.amount_rwf} FRw (${req.provider}) -> issued ${unlockCode}`);
         showGeneratedOutput(unlockCode, req.shop_name, req.owner_username, req.owner_phone || req.payer_phone, calc.days, calc.tier);
         switchView('generatorView', document.querySelector('[data-view=generatorView]'));
@@ -1666,6 +1956,7 @@ create policy "Admin insert audit_logs" on public.admin_audit_logs for insert wi
             issued_at: Date.now()
           })
         });
+        await extendShopByKey(username, phone, calc.days);
         await logAudit('ISSUE_CODE', username, `Issued ${code} (+${calc.days}d, ${amount} FRw)`);
         showGeneratedOutput(code, shopName, username, phone, calc.days, calc.tier);
         await refreshAll(false);

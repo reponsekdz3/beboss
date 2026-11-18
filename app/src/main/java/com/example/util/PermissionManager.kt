@@ -43,14 +43,6 @@ object PermissionManager {
         }
     }
 
-    fun hasStoragePermission(context: Context): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            hasPermission(context, Manifest.permission.READ_MEDIA_IMAGES)
-        } else {
-            hasPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE)
-        }
-    }
-
     fun getAllPermissionsStatus(context: Context): List<AppPermissionItem> {
         val list = mutableListOf<AppPermissionItem>()
 
@@ -79,25 +71,6 @@ object PermissionManager {
                 isGranted = hasSmsPermission(context),
                 isCrucial = true,
                 iconName = "sms"
-            )
-        )
-
-        // Storage & Files
-        val storagePerm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            Manifest.permission.READ_MEDIA_IMAGES
-        } else {
-            Manifest.permission.READ_EXTERNAL_STORAGE
-        }
-        list.add(
-            AppPermissionItem(
-                permission = storagePerm,
-                title = "Documents & Storage",
-                titleRw = "Ububiko n'Inyandiko",
-                description = "Export and save Excel (.csv) spreadsheets, PDF invoices, and offline database backup files safely.",
-                descriptionRw = "Kubika no gusohora inyandiko za Excel, PDF z'amafaranga na backup ya BeBoss ku buryo bwizewe.",
-                isGranted = hasStoragePermission(context),
-                isCrucial = true,
-                iconName = "storage"
             )
         )
 
@@ -142,9 +115,6 @@ object PermissionManager {
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             list.add(Manifest.permission.POST_NOTIFICATIONS)
-            list.add(Manifest.permission.READ_MEDIA_IMAGES)
-        } else {
-            list.add(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
         return list
     }

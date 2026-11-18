@@ -4,6 +4,7 @@ import android.util.Log
 import com.example.data.db.AppDatabase
 import com.example.data.model.Product
 import com.example.data.model.ShopProfile
+import com.example.data.model.User
 import com.example.data.model.UserRole
 import com.example.data.repository.BranchMergeResult
 import kotlinx.coroutines.Dispatchers
@@ -153,10 +154,13 @@ class CloudSyncManager(private val database: AppDatabase) {
             val saleItems = saleDao.getAllSaleItemsList()
             val purchases = purchaseDao.getAllPurchasesList()
             val transfers = stockTransferDao.getAllTransfersList()
-            val users = userDao.getAllActiveUsersList()
-            val profile = shopProfileDao.getShopProfileDirect() ?: ShopProfile()
+            val users = userDao.getAllUsersDirect()
+            val activeUsers = users.filter { it.isActive }
+            var profile = shopProfileDao.getShopProfileDirect() ?: ShopProfile()
 
-            val ownerUser = users.firstOrNull { it.role == UserRole.OWNER } ?: users.firstOrNull()
+            val ownerUser = activeUsers.firstOrNull { it.role == UserRole.OWNER }
+                ?: users.firstOrNull { it.role == UserRole.OWNER }
+                ?: users.firstOrNull()
             val activeBranch = branches.firstOrNull { it.id == activeBranchId }
                 ?: branches.firstOrNull { it.isMainBranch }
                 ?: branches.firstOrNull()
@@ -185,13 +189,65 @@ class CloudSyncManager(private val database: AppDatabase) {
             var supabaseSyncOk = false
             var customServerSyncOk = false
 
-            // 1. Primary Cross-Branch Internet Sync via Supabase `branch_sync_snapshots`
+            // 1. Primary Cross-Branch Internet Sync via Supabase `branch_sync_snapshots` & Admin Controls
             if (SupabaseAdminClient.isConfigured()) {
                 val ownerUsername = ownerUser?.username ?: "owner"
                 val ownerPhone = ownerUser?.phone?.ifBlank { profile.phone } ?: profile.phone
                 val shopSyncKey = SupabaseAdminClient.computeShopSyncKey(ownerUsername, ownerPhone)
                 val recordsSummary = "${branches.size} branches • ${products.size} items • ${sales.size} sales • ${customers.size} clients"
 
+                // Pull admin-side overrides for shop license (e.g. Master Admin extended expiry or suspended shop)
+                val remoteShop = SupabaseAdminClient.fetchShopAccountById(shopSyncKey)
+                if (remoteShop != null && remoteShop.updatedAt > profile.updatedAt) {
+                    val updatedProf = profile.copy(
+                        subscriptionStatus = remoteShop.subscriptionStatus,
+                        subscriptionExpiresAt = remoteShop.subscriptionExpiresAt,
+                        updatedAt = remoteShop.updatedAt
+                    )
+                    shopProfileDao.insertOrUpdateProfile(updatedProf)
+                    profile = updatedProf
+                    itemsPulledCount++
+                }
+
+                // Pull admin-side updates to users (role change or suspension)
+                val remoteUsers = SupabaseAdminClient.fetchShopUsersForShop(shopSyncKey)
+                for (ru in remoteUsers) {
+                    val localUser = userDao.getUserById(ru.userId) ?: continue
+                    if (ru.updatedAt > localUser.updatedAt) {
+                        val parsedRole = try { UserRole.valueOf(ru.role) } catch (_: Exception) { localUser.role }
+                        val roleTemplate = User.defaultForRole(
+                            name = localUser.name,
+                            username = localUser.username,
+                            role = parsedRole,
+                            pin = localUser.pinHash,
+                            phone = localUser.phone
+                        )
+                        val updatedLocal = if (parsedRole != localUser.role) {
+                            roleTemplate.copy(
+                                id = localUser.id,
+                                email = localUser.email,
+                                password = localUser.password,
+                                assignedBranchId = ru.assignedBranchId.ifBlank { localUser.assignedBranchId },
+                                assignedBranchName = ru.assignedBranchName.ifBlank { localUser.assignedBranchName },
+                                isActive = ru.isActive,
+                                lastLoginAt = localUser.lastLoginAt,
+                                createdAt = localUser.createdAt,
+                                updatedAt = ru.updatedAt
+                            )
+                        } else {
+                            localUser.copy(
+                                isActive = ru.isActive,
+                                assignedBranchId = ru.assignedBranchId.ifBlank { localUser.assignedBranchId },
+                                assignedBranchName = ru.assignedBranchName.ifBlank { localUser.assignedBranchName },
+                                updatedAt = ru.updatedAt
+                            )
+                        }
+                        userDao.updateUser(updatedLocal)
+                        itemsPulledCount++
+                    }
+                }
+
+                val latestUsers = userDao.getAllUsersDirect()
                 val pushedSnapshot = SupabaseAdminClient.upsertBranchSyncSnapshot(
                     shopSyncKey = shopSyncKey,
                     deviceId = deviceId,
@@ -207,7 +263,12 @@ class CloudSyncManager(private val database: AppDatabase) {
                     shopProfile = profile,
                     ownerUser = ownerUser,
                     branchCount = branches.size,
-                    workerCount = users.size
+                    workerCount = latestUsers.count { it.isActive }.coerceAtLeast(1)
+                )
+                SupabaseAdminClient.upsertShopUsers(
+                    shopSyncKey = shopSyncKey,
+                    shopName = profile.shopName,
+                    users = latestUsers
                 )
 
                 val peerSnapshots = SupabaseAdminClient.fetchShopBranchSnapshots(
