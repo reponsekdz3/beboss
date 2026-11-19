@@ -1,0 +1,17 @@
+{
+  "name": "BeBoss Enterprise POS & Admin Portal",
+  "short_name": "BeBoss POS",
+  "description": "Offline-first multi-branch Android POS, inventory intelligence, credit ledger, APK download & Master Admin cloud portal in English, Ikinyarwanda, Français & Kiswahili.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#070b14",
+  "theme_color": "#f97316",
+  "icons": [
+    {
+      "src": "./favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

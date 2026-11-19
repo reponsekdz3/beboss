@@ -2268,6 +2268,8 @@ fun AdminVerificationConsoleDialog(
                             var cfgAirtelPhone by remember(paymentConfig) { mutableStateOf(paymentConfig.airtelMoneyPhone) }
                             var cfgAirtelName by remember(paymentConfig) { mutableStateOf(paymentConfig.airtelRecipientName) }
                             var cfgPerDeviceFee by remember(paymentConfig) { mutableStateOf(paymentConfig.perDeviceFeeRwf.toString()) }
+                            var cfgApkUrl by remember(paymentConfig) { mutableStateOf(paymentConfig.apkDownloadUrl) }
+                            var cfgApkVersion by remember(paymentConfig) { mutableStateOf(paymentConfig.apkVersion.ifBlank { "2.0.0" }) }
                             var savingCfg by remember { mutableStateOf(false) }
 
                             val draftConfig = AdminPaymentConfig(
@@ -2278,6 +2280,8 @@ fun AdminVerificationConsoleDialog(
                                 airtelMoneyPhone = cfgAirtelPhone.trim(),
                                 airtelRecipientName = cfgAirtelName.trim(),
                                 perDeviceFeeRwf = cfgPerDeviceFee.toIntOrNull() ?: 2000,
+                                apkDownloadUrl = cfgApkUrl.trim(),
+                                apkVersion = cfgApkVersion.trim().ifBlank { "2.0.0" },
                                 updatedAt = System.currentTimeMillis()
                             )
 
@@ -2289,7 +2293,7 @@ fun AdminVerificationConsoleDialog(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "Changes saved here sync to Supabase (app_config) and automatically appear in every shop's Subscription USSD dialer & WhatsApp proof form.",
+                                    text = "Changes saved here sync to Supabase (app_config) and automatically appear in every shop's Subscription USSD dialer, WhatsApp proof form & Public APK QR site.",
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -2365,6 +2369,25 @@ fun AdminVerificationConsoleDialog(
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(12.dp)
                                 )
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedTextField(
+                                        value = cfgApkUrl,
+                                        onValueChange = { cfgApkUrl = it },
+                                        label = { Text("Public APK URL (optional CDN link)") },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1.4f),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    OutlinedTextField(
+                                        value = cfgApkVersion,
+                                        onValueChange = { cfgApkVersion = it },
+                                        label = { Text("APK Ver") },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(0.6f),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                }
 
                                 // Live USSD Preview Banner
                                 Surface(

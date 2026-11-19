@@ -31,7 +31,7 @@ as $$
   );
 $$;
 
--- 1b. Global App Payment & Support Config (Admin WhatsApp & USSD numbers synced live to all apps)
+-- 1b. Global App Payment & Support Config (Admin WhatsApp, USSD & APK Download numbers synced live)
 create table if not exists public.app_config (
     id text primary key default 'global',
     admin_whatsapp_number text not null default '',
@@ -41,8 +41,14 @@ create table if not exists public.app_config (
     airtel_money_phone text not null default '0738765432',
     airtel_recipient_name text not null default 'BeBoss Pay',
     per_device_fee_rwf integer not null default 2000,
+    apk_download_url text not null default '',
+    apk_version text not null default '2.0.0',
     updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
 );
+
+alter table public.app_config
+    add column if not exists apk_download_url text not null default '',
+    add column if not exists apk_version text not null default '2.0.0';
 
 insert into public.app_config (id) values ('global') on conflict (id) do nothing;
 

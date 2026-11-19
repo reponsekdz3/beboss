@@ -1,0 +1,2126 @@
+// BeBoss Master Admin Console & Shared Supabase / Licensing Core
+(function (global) {
+  const { useState, useEffect, useMemo, useCallback } = React;
+
+  const MASTER_ADMIN_EMAIL = 'reponsekdz@gmail.com';
+  const STORAGE_KEY = 'beboss_admin_platform_v3';
+  const DEFAULT_HMAC_SECRET = 'BeBoss_Enterprise_HMAC_Signing_2026';
+
+  const SCHEMA_SQL = `-- BeBoss Enterprise Licensing, Multi-Device Sync & Global Payment Config Schema (Supabase PostgreSQL)
+-- Master Admin Email: reponsekdz@gmail.com
+-- Full authoritative schema: /admin-web/supabase_schema.sql
+
+create table if not exists public.admin_profiles (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  email text not null unique,
+  full_name text not null default 'BeBoss Master Admin',
+  role text not null default 'SUPER_ADMIN',
+  is_active boolean not null default true,
+  created_at bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+
+create table if not exists public.app_config (
+  id text primary key default 'global',
+  admin_whatsapp_number text not null default '',
+  mtn_momo_code text not null default '054321',
+  mtn_momo_phone text not null default '0788765432',
+  mtn_recipient_name text not null default 'BeBoss Pay',
+  airtel_money_phone text not null default '0738765432',
+  airtel_recipient_name text not null default 'BeBoss Pay',
+  per_device_fee_rwf integer not null default 2000,
+  apk_download_url text not null default '',
+  apk_version text not null default '2.0.0',
+  updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+insert into public.app_config (id) values ('global') on conflict (id) do nothing;
+
+create table if not exists public.shop_accounts (
+  id text primary key,
+  shop_name text not null,
+  owner_name text not null default '',
+  owner_username text not null,
+  owner_phone text not null,
+  device_challenge text not null default '',
+  branch_count integer not null default 1,
+  worker_count integer not null default 1,
+  device_count integer not null default 1,
+  device_limit integer not null default 1,
+  admin_whatsapp text not null default '',
+  auto_unlocked_at bigint not null default 0,
+  monthly_fee_rwf integer not null default 5000,
+  subscription_status text not null default 'TRIAL',
+  subscription_expires_at bigint not null default ((extract(epoch from now()) + 345600) * 1000)::bigint,
+  updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+
+create table if not exists public.shop_devices (
+  id text primary key,
+  shop_sync_key text not null,
+  shop_name text not null default '',
+  device_id text not null default '',
+  device_name text not null default '',
+  join_code text not null default '',
+  assigned_user_id text not null default '',
+  assigned_username text not null default '',
+  assigned_user_name text not null default '',
+  role text not null default 'CASHIER',
+  branch_id text not null default 'main_branch',
+  branch_name text not null default 'Main Store',
+  is_owner_primary boolean not null default false,
+  is_active boolean not null default true,
+  monthly_fee_addon_rwf integer not null default 2000,
+  last_synced_at bigint not null default 0,
+  created_at bigint not null default (extract(epoch from now()) * 1000)::bigint,
+  updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+
+create table if not exists public.payment_requests (
+  id text primary key,
+  shop_name text not null,
+  owner_username text not null,
+  owner_phone text not null,
+  device_challenge text not null default '',
+  provider text not null default 'MTN MoMo',
+  ussd_code text not null default '',
+  payer_phone text not null default '',
+  payer_full_name text not null default '',
+  amount_rwf integer not null default 5000,
+  duration_months integer not null default 1,
+  branch_count integer not null default 1,
+  worker_count integer not null default 1,
+  device_count integer not null default 1,
+  telco_reference text not null default '',
+  status text not null default 'PENDING_VERIFICATION',
+  approval_mode text not null default '',
+  generated_unlock_code text not null default '',
+  verified_by_admin text not null default '',
+  rejection_reason text not null default '',
+  created_at bigint not null default (extract(epoch from now()) * 1000)::bigint,
+  updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+
+-- Plus unlock_codes, shop_users, branch_sync_snapshots, admin_audit_logs & multi-tenant RLS rules.
+-- Run /admin-web/supabase_schema.sql in your Supabase SQL Editor for the complete script.`;
+
+  function normalizePhoneLast9(phone) {
+    return String(phone || '').replace(/\D/g, '').slice(-9);
+  }
+
+  function computeShopKey(username, phone) {
+    const u = String(username || '').trim().toLowerCase() || 'owner';
+    const p = normalizePhoneLast9(phone) || '000000000';
+    return `${u}_${p}`;
+  }
+
+  function toHexUpper(buf) {
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+  }
+
+  async function computeAccountBindingHash(username, phone) {
+    const seed = `${String(username || '').trim().toLowerCase()}:${normalizePhoneLast9(phone)}`;
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(seed));
+    return toHexUpper(digest).slice(0, 6);
+  }
+
+  async function generateBB2UnlockCode(username, phone, tierCode, days, secret, validityWindowDays = 14) {
+    const cleanTier = String(tierCode || 'SINGLE').trim().toUpperCase();
+    const acctHash6 = await computeAccountBindingHash(username, phone);
+    const expiryHex = (Math.floor(Date.now() / 86400000) + validityWindowDays).toString(16).toUpperCase();
+    const payload = `BB2:${cleanTier}:${days}:${expiryHex}:${acctHash6}`;
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(secret || DEFAULT_HMAC_SECRET),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload));
+    return `BB2-${cleanTier}-${days}-${expiryHex}-${acctHash6}-${toHexUpper(sig).slice(0, 8)}`;
+  }
+
+  function calculateSubscriptionFee(branches, workers, months, devices = 1, perDeviceRate = 2000) {
+    const b = Math.max(1, Number(branches) || 1);
+    const w = Math.max(1, Number(workers) || 1);
+    const m = Math.max(1, Number(months) || 1);
+    const d = Math.max(1, Number(devices) || 1);
+    const extraDevices = Math.max(0, d - 1);
+    const branchFee = b === 1 ? 5000 : (b === 2 ? 10000 : 20000);
+    const workerFee = w <= 1 ? 0 : (w <= 3 ? 2000 : (w <= 5 ? 4000 : 4000 + (w - 5) * 1000));
+    const deviceFee = extraDevices * Math.max(0, Number(perDeviceRate) || 2000);
+    const monthly = branchFee + workerFee + deviceFee;
+    const discount = m === 12 ? 20 : (m === 3 ? 10 : 0);
+    const total = Math.round((monthly * m) * (100 - discount) / 100);
+    const tier = m >= 12 ? 'ANNUAL' : (b >= 3 ? 'MULTI' : (b === 2 ? 'DUAL' : 'SINGLE'));
+    return { branchFee, workerFee, deviceFee, extraDevices, monthly, discount, total, tier, days: m * 30 };
+  }
+
+  function buildWhatsAppUrl(phone, text) {
+    const digits = String(phone || '').replace(/\D/g, '');
+    const waPhone = digits.length === 9 ? '250' + digits : (digits.startsWith('07') ? '25' + digits : digits);
+    if (!waPhone) return `https://wa.me/?text=${encodeURIComponent(text || '')}`;
+    return `https://wa.me/${waPhone}?text=${encodeURIComponent(text || '')}`;
+  }
+
+  function buildUnlockReplyText(shopName, username, code, days, tierName) {
+    return [
+      `*BEBOSS SUBSCRIPTION APPROVED!*`,
+      `━━━━━━━━━━━━━━━━━━━━`,
+      `Hello *@${username}* (${shopName}),`,
+      `Your Mobile Money payment has been verified!`,
+      ``,
+      `*Your Unlock Code:*`,
+      `${code}`,
+      ``,
+      `• *Plan:* ${tierName}`,
+      `• *Duration Added:* +${days} Days`,
+      ``,
+      `*How to Activate:*`,
+      `Open BeBoss App -> *Settings* -> *Insert Unlock Code* -> Paste code above & tap *Verify & Activate*.`,
+      `Murakoze gukoresha BeBoss!`
+    ].join('\n');
+  }
+
+  function buildDirectAutoUnlockReplyText(shopName, username, days, tierName) {
+    return [
+      `*BEBOSS DIRECT AUTO-UNLOCK ACTIVATED!*`,
+      `━━━━━━━━━━━━━━━━━━━━`,
+      `Hello *@${username}* (${shopName}),`,
+      `Your Mobile Money payment has been confirmed and your shop has been *AUTO-UNLOCKED* directly from the BeBoss Admin Console!`,
+      ``,
+      `• *Plan:* ${tierName}`,
+      `• *Duration Added:* +${days} Days`,
+      `• *Activation:* Automatic when internet syncs (no unlock code required).`,
+      ``,
+      `Open BeBoss App and your full access is ready. Murakoze gukoresha BeBoss!`
+    ].join('\n');
+  }
+
+  function formatTime(ms) {
+    if (!ms || Number(ms) <= 0) return '—';
+    return new Date(Number(ms)).toLocaleString();
+  }
+
+  function buildMtnUssd(amount, cfg) {
+    const code = String(cfg?.mtn_momo_code || '').trim();
+    const phone = String(cfg?.mtn_momo_phone || '0788765432').trim();
+    return code && code !== '0' ? `*182*8*1*${code}*${amount}#` : `*182*1*1*${phone}*${amount}#`;
+  }
+
+  function buildAirtelUssd(amount, cfg) {
+    const phone = String(cfg?.airtel_money_phone || '0738765432').trim();
+    return `*500*1*1*${phone}*${amount}#`;
+  }
+
+  function loadInitialSession() {
+    const params = new URLSearchParams(window.location.search);
+    let saved = {};
+    try {
+      saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    } catch (_) {}
+    const url = (params.get('url') || saved.url || '').replace(/\/+$/, '');
+    const anonKey = params.get('key') || saved.anonKey || '';
+    const email = (saved.email || MASTER_ADMIN_EMAIL).toLowerCase() === MASTER_ADMIN_EMAIL ? MASTER_ADMIN_EMAIL : MASTER_ADMIN_EMAIL;
+    return {
+      url,
+      anonKey,
+      secret: saved.secret || DEFAULT_HMAC_SECRET,
+      accessToken: saved.accessToken || '',
+      refreshToken: saved.refreshToken || '',
+      userId: saved.userId || '',
+      email,
+      fullName: saved.fullName || 'BeBoss Master Admin',
+      expiresAt: Number(saved.expiresAt || 0)
+    };
+  }
+
+  async function fetchPublicPayConfig(url, anonKey) {
+    const cleanUrl = String(url || '').trim().replace(/\/+$/, '');
+    const cleanKey = String(anonKey || '').trim();
+    if (!cleanUrl || !cleanKey) return null;
+    try {
+      const res = await fetch(`${cleanUrl}/rest/v1/app_config?id=eq.global&limit=1`, {
+        headers: { apikey: cleanKey, Authorization: `Bearer ${cleanKey}` }
+      });
+      if (!res.ok) return null;
+      const rows = await res.json();
+      return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function AdminLoginModal({ session, onLoginSuccess, onClose, onShowSql }) {
+    const [url, setUrl] = useState(session.url || '');
+    const [anonKey, setAnonKey] = useState(session.anonKey || '');
+    const [secret, setSecret] = useState(session.secret || DEFAULT_HMAC_SECRET);
+    const [authMode, setAuthMode] = useState('signin');
+    const [authPassword, setAuthPassword] = useState('');
+    const [authFullName, setAuthFullName] = useState(session.fullName || 'BeBoss Master Admin');
+    const [authError, setAuthError] = useState('');
+    const [authBusy, setAuthBusy] = useState(false);
+
+    const handleSubmit = async (e) => {
+      e.preventDefault();
+      setAuthError('');
+      const cleanUrl = url.trim().replace(/\/+$/, '');
+      const cleanKey = anonKey.trim();
+      if (!cleanUrl || !cleanKey) {
+        setAuthError('Supabase Project URL and Anon Key are required.');
+        return;
+      }
+      setAuthBusy(true);
+      try {
+        const endpoint = authMode === 'signin'
+          ? `${cleanUrl}/auth/v1/token?grant_type=password`
+          : `${cleanUrl}/auth/v1/signup`;
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { apikey: cleanKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: MASTER_ADMIN_EMAIL,
+            password: authPassword,
+            data: authMode === 'signup' ? { full_name: authFullName.trim() || 'BeBoss Master Admin' } : undefined
+          })
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          throw new Error(body.error_description || body.msg || body.message || `Auth failed (${res.status})`);
+        }
+        const accessToken = body.access_token || body.session?.access_token;
+        if (!accessToken) {
+          throw new Error('Account created! Confirm email in Supabase if confirmation is enabled, then Sign In.');
+        }
+        const userId = body.user?.id || '';
+        const fullName = body.user?.user_metadata?.full_name || authFullName.trim() || 'BeBoss Master Admin';
+
+        if (userId) {
+          const checkRes = await fetch(`${cleanUrl}/rest/v1/admin_profiles?user_id=eq.${encodeURIComponent(userId)}&limit=1`, {
+            headers: { apikey: cleanKey, Authorization: `Bearer ${accessToken}` }
+          });
+          const rows = checkRes.ok ? await checkRes.json() : [];
+          if (rows.length === 0) {
+            const insRes = await fetch(`${cleanUrl}/rest/v1/admin_profiles`, {
+              method: 'POST',
+              headers: {
+                apikey: cleanKey,
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+                Prefer: 'return=minimal'
+              },
+              body: JSON.stringify({
+                user_id: userId,
+                email: MASTER_ADMIN_EMAIL,
+                full_name: fullName,
+                role: 'SUPER_ADMIN',
+                is_active: true,
+                created_at: Date.now()
+              })
+            });
+            if (!insRes.ok) {
+              throw new Error(`admin_profiles check failed (${insRes.status}): ${await insRes.text()}`);
+            }
+          } else if (rows[0].is_active === false) {
+            throw new Error('This Master Admin account has been suspended.');
+          }
+        }
+
+        const nextSession = {
+          url: cleanUrl,
+          anonKey: cleanKey,
+          secret: secret.trim() || DEFAULT_HMAC_SECRET,
+          accessToken,
+          refreshToken: body.refresh_token || body.session?.refresh_token || '',
+          userId,
+          email: MASTER_ADMIN_EMAIL,
+          fullName,
+          expiresAt: Date.now() + ((body.expires_in || 3600) * 1000)
+        };
+        setAuthPassword('');
+        onLoginSuccess(nextSession);
+      } catch (err) {
+        setAuthError(err.message || 'Authentication error.');
+      } finally {
+        setAuthBusy(false);
+      }
+    };
+
+    return (
+      <div className="modal-backdrop" onClick={onClose}>
+        <div className="modal-card" style={{ maxWidth: 540 }} onClick={e => e.stopPropagation()}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div className="brand-mark">BB</div>
+              <div>
+                <div style={{ fontSize: 17, fontWeight: 900 }}>BeBoss Master Admin Login</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  Locked strictly to <span className="mono" style={{ color: '#fdba74' }}>{MASTER_ADMIN_EMAIL}</span>
+                </div>
+              </div>
+            </div>
+            <button type="button" className="btn btn-dark btn-sm" onClick={onClose}>Close</button>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+            <button
+              type="button"
+              className={`btn ${authMode === 'signin' ? 'btn-primary' : 'btn-dark'}`}
+              style={{ flex: 1 }}
+              onClick={() => { setAuthMode('signin'); setAuthError(''); }}
+            >
+              Master Sign In
+            </button>
+            <button
+              type="button"
+              className={`btn ${authMode === 'signup' ? 'btn-primary' : 'btn-dark'}`}
+              style={{ flex: 1 }}
+              onClick={() => { setAuthMode('signup'); setAuthError(''); }}
+            >
+              First-Time Setup
+            </button>
+          </div>
+
+          <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 12 }}>
+            <div>
+              <label className="field-label">Supabase Project URL *</label>
+              <input
+                className="input"
+                required
+                placeholder="https://your-project.supabase.co"
+                value={url}
+                onChange={e => setUrl(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="field-label">Supabase Anon Public Key *</label>
+              <input
+                className="input"
+                required
+                placeholder="eyJhbGciOi..."
+                value={anonKey}
+                onChange={e => setAnonKey(e.target.value)}
+              />
+            </div>
+            {authMode === 'signup' && (
+              <div>
+                <label className="field-label">Master Admin Full Name</label>
+                <input
+                  className="input"
+                  value={authFullName}
+                  onChange={e => setAuthFullName(e.target.value)}
+                />
+              </div>
+            )}
+            <div className="grid-2">
+              <div>
+                <label className="field-label">Authorized Email (Locked)</label>
+                <input className="input mono" readOnly value={MASTER_ADMIN_EMAIL} />
+              </div>
+              <div>
+                <label className="field-label">Admin Password *</label>
+                <input
+                  className="input"
+                  type="password"
+                  required
+                  minLength={6}
+                  placeholder="••••••••"
+                  value={authPassword}
+                  onChange={e => setAuthPassword(e.target.value)}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="field-label">BB2 Cryptographic HMAC Signing Secret</label>
+              <input
+                className="input mono"
+                required
+                value={secret}
+                onChange={e => setSecret(e.target.value)}
+              />
+            </div>
+
+            {authError && (
+              <div style={{ background: 'var(--red-soft)', border: '1px solid rgba(239,68,68,0.45)', borderRadius: 10, padding: 10, color: '#fca5a5', fontSize: 12, fontWeight: 700 }}>
+                {authError}
+              </div>
+            )}
+
+            <button type="submit" className="btn btn-primary" disabled={authBusy} style={{ padding: '12px 16px', fontSize: 13.5 }}>
+              {authBusy ? 'Authenticating...' : (authMode === 'signin' ? 'Sign In & Open Admin Console' : 'Initialize Master Admin Profile')}
+            </button>
+          </form>
+
+          <div style={{ marginTop: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-dark btn-sm" onClick={onShowSql}>
+              View Supabase SQL Schema
+            </button>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Supabase Auth + Multi-Tenant RLS</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function BeBossAdminConsole({
+    session,
+    persistSession,
+    signOut,
+    payConfig,
+    setPayConfig,
+    onBackToPublic,
+    notify,
+    onShowSql
+  }) {
+    const [activeView, setActiveView] = useState('overview');
+    const [autoPoll, setAutoPoll] = useState(true);
+    const [loading, setLoading] = useState(false);
+    const [lastSyncedAt, setLastSyncedAt] = useState(0);
+    const [rejectTarget, setRejectTarget] = useState(null);
+    const [rejectReason, setRejectReason] = useState('MoMo transaction reference not found on statement');
+
+    const [requests, setRequests] = useState([]);
+    const [shops, setShops] = useState([]);
+    const [devices, setDevices] = useState([]);
+    const [users, setUsers] = useState([]);
+    const [codes, setCodes] = useState([]);
+    const [snapshots, setSnapshots] = useState([]);
+    const [audits, setAudits] = useState([]);
+
+    const [queueSearch, setQueueSearch] = useState('');
+    const [queueStatusFilter, setQueueStatusFilter] = useState('ALL');
+    const [shopSearch, setShopSearch] = useState('');
+    const [shopStatusFilter, setShopStatusFilter] = useState('ALL');
+    const [shopDraftLimits, setShopDraftLimits] = useState({});
+    const [deviceSearch, setDeviceSearch] = useState('');
+    const [userSearch, setUserSearch] = useState('');
+    const [codeSearch, setCodeSearch] = useState('');
+    const [codeStatusFilter, setCodeStatusFilter] = useState('ALL');
+
+    const [genForm, setGenForm] = useState({
+      shopName: 'BeBoss Shop',
+      username: '',
+      phone: '',
+      branches: 1,
+      workers: 1,
+      devices: 1,
+      months: 1,
+      amount: 5000
+    });
+    const [latestGenerated, setLatestGenerated] = useState(null);
+
+    const copyAndNotify = (txt, msg = 'Copied to clipboard!') => {
+      navigator.clipboard.writeText(txt);
+      notify(msg);
+    };
+
+    const getValidAccessToken = useCallback(async () => {
+      if (!session.refreshToken || Date.now() < Number(session.expiresAt) - 60000) {
+        return session.accessToken;
+      }
+      try {
+        const res = await fetch(`${session.url}/auth/v1/token?grant_type=refresh_token`, {
+          method: 'POST',
+          headers: { apikey: session.anonKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: session.refreshToken })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.access_token) {
+            const updated = {
+              ...session,
+              accessToken: data.access_token,
+              refreshToken: data.refresh_token || session.refreshToken,
+              expiresAt: Date.now() + ((data.expires_in || 3600) * 1000)
+            };
+            persistSession(updated);
+            return updated.accessToken;
+          }
+        }
+      } catch (_) {}
+      return session.accessToken;
+    }, [session, persistSession]);
+
+    const sbFetch = useCallback(async (path, options = {}) => {
+      const token = await getValidAccessToken();
+      const res = await fetch(`${session.url}/rest/v1/${path}`, {
+        ...options,
+        headers: {
+          apikey: session.anonKey,
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          ...(options.headers || {})
+        }
+      });
+      if (res.status === 401) {
+        await signOut(true);
+        throw new Error('Admin session expired. Please sign in again.');
+      }
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`HTTP ${res.status}: ${txt}`);
+      }
+      const ct = res.headers.get('content-type') || '';
+      return ct.includes('application/json') ? res.json() : null;
+    }, [session.url, session.anonKey, getValidAccessToken, signOut]);
+
+    const logAudit = useCallback(async (action, targetId, details) => {
+      try {
+        await sbFetch('admin_audit_logs', {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            id: crypto.randomUUID(),
+            admin_email: session.email,
+            action,
+            target_id: String(targetId || ''),
+            details: String(details || ''),
+            created_at: Date.now()
+          })
+        });
+      } catch (_) {}
+    }, [sbFetch, session.email]);
+
+    const refreshAll = useCallback(async (showToastOnSuccess = false) => {
+      if (!session.accessToken) return;
+      setLoading(true);
+      try {
+        const [reqs, shps, devs, usrs, cds, snaps, auds, cfgRows] = await Promise.all([
+          sbFetch('payment_requests?order=created_at.desc&limit=200').catch(() => []),
+          sbFetch('shop_accounts?order=updated_at.desc&limit=200').catch(() => []),
+          sbFetch('shop_devices?order=updated_at.desc&limit=300').catch(() => []),
+          sbFetch('shop_users?order=updated_at.desc&limit=400').catch(() => []),
+          sbFetch('unlock_codes?order=issued_at.desc&limit=200').catch(() => []),
+          sbFetch('branch_sync_snapshots?order=updated_at.desc&limit=200').catch(() => []),
+          sbFetch('admin_audit_logs?order=created_at.desc&limit=150').catch(() => []),
+          sbFetch('app_config?id=eq.global&limit=1').catch(() => [])
+        ]);
+        setRequests(reqs || []);
+        setShops(shps || []);
+        setDevices(devs || []);
+        setUsers(usrs || []);
+        setCodes(cds || []);
+        setSnapshots(snaps || []);
+        setAudits(auds || []);
+        if (Array.isArray(cfgRows) && cfgRows.length > 0) {
+          setPayConfig(prev => ({ ...prev, ...cfgRows[0] }));
+        }
+        setLastSyncedAt(Date.now());
+        if (showToastOnSuccess) notify('Supabase Master Admin data synchronized.');
+      } catch (err) {
+        notify(`Sync error: ${err.message}`);
+      } finally {
+        setLoading(false);
+      }
+    }, [session.accessToken, sbFetch, notify, setPayConfig]);
+
+    useEffect(() => {
+      refreshAll(false);
+    }, [refreshAll]);
+
+    useEffect(() => {
+      if (!autoPoll) return;
+      const timer = setInterval(() => refreshAll(false), 15000);
+      return () => clearInterval(timer);
+    }, [autoPoll, refreshAll]);
+
+    const extendOrActivateShop = async (shopKey, { addDays, branches, workers, deviceLimit, monthlyFee, markAutoUnlock = false }) => {
+      const now = Date.now();
+      const match = shops.find(s => s.id === shopKey);
+      if (!match) return;
+      const base = Math.max(Number(match.subscription_expires_at || 0), now);
+      const newExpiry = base + addDays * 86400000;
+      const payload = {
+        subscription_status: 'ACTIVE',
+        subscription_expires_at: newExpiry,
+        updated_at: now
+      };
+      if (branches != null) payload.branch_count = Math.max(1, branches);
+      if (workers != null) payload.worker_count = Math.max(1, workers);
+      if (deviceLimit != null) payload.device_limit = Math.max(1, deviceLimit);
+      if (monthlyFee != null) payload.monthly_fee_rwf = Math.max(5000, monthlyFee);
+      if (markAutoUnlock) payload.auto_unlocked_at = now;
+      await sbFetch(`shop_accounts?id=eq.${encodeURIComponent(shopKey)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload)
+      });
+    };
+
+    const handleApproveWithCode = async (req) => {
+      const calc = calculateSubscriptionFee(
+        req.branch_count,
+        req.worker_count,
+        req.duration_months,
+        req.device_count || 1,
+        payConfig.per_device_fee_rwf
+      );
+      const code = await generateBB2UnlockCode(req.owner_username, req.owner_phone, calc.tier, calc.days, session.secret);
+      const now = Date.now();
+      const adminLabel = `${session.fullName} (${session.email})`;
+      try {
+        await sbFetch('unlock_codes', {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            id: crypto.randomUUID(),
+            unlock_code: code,
+            shop_username: String(req.owner_username || '').trim().toLowerCase(),
+            shop_phone: String(req.owner_phone || '').trim(),
+            device_challenge: req.device_challenge || '',
+            tier_code: calc.tier,
+            plan_days: calc.days,
+            amount_rwf: calc.total,
+            status: 'ISSUED',
+            issued_by_admin: adminLabel,
+            issued_at: now
+          })
+        });
+        await sbFetch(`payment_requests?id=eq.${encodeURIComponent(req.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            status: 'APPROVED',
+            approval_mode: 'UNLOCK_CODE',
+            amount_rwf: calc.total,
+            generated_unlock_code: code,
+            verified_by_admin: adminLabel,
+            updated_at: now
+          })
+        });
+        await extendOrActivateShop(computeShopKey(req.owner_username, req.owner_phone), {
+          addDays: calc.days,
+          branches: req.branch_count,
+          workers: req.worker_count,
+          deviceLimit: req.device_count || 1,
+          monthlyFee: calc.monthly,
+          markAutoUnlock: false
+        });
+        await logAudit('APPROVE_PAYMENT', req.owner_username, `Verified ${req.payer_full_name || req.payer_phone} (${calc.total} FRw) -> issued ${code}`);
+        setLatestGenerated({
+          mode: 'CODE',
+          code,
+          shopName: req.shop_name,
+          username: req.owner_username,
+          phone: req.owner_phone || req.payer_phone,
+          days: calc.days,
+          tier: `${calc.tier} (${calc.total.toLocaleString()} FRw)`
+        });
+        await refreshAll(false);
+        notify(`Issued BB2 code ${code} for @${req.owner_username}`);
+      } catch (err) {
+        notify(`Approve failed: ${err.message}`);
+      }
+    };
+
+    const handleDirectAutoUnlock = async (req) => {
+      const calc = calculateSubscriptionFee(
+        req.branch_count,
+        req.worker_count,
+        req.duration_months,
+        req.device_count || 1,
+        payConfig.per_device_fee_rwf
+      );
+      const now = Date.now();
+      const adminLabel = `${session.fullName} (${session.email})`;
+      try {
+        await sbFetch(`payment_requests?id=eq.${encodeURIComponent(req.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            status: 'APPROVED',
+            approval_mode: 'DIRECT_AUTO_UNLOCK',
+            amount_rwf: calc.total,
+            generated_unlock_code: '',
+            verified_by_admin: adminLabel,
+            updated_at: now
+          })
+        });
+        await extendOrActivateShop(computeShopKey(req.owner_username, req.owner_phone), {
+          addDays: calc.days,
+          branches: req.branch_count,
+          workers: req.worker_count,
+          deviceLimit: req.device_count || 1,
+          monthlyFee: calc.monthly,
+          markAutoUnlock: true
+        });
+        await logAudit('DIRECT_AUTO_UNLOCK', req.owner_username, `Auto-Unlocked ${req.shop_name} without code (+${calc.days}d, ${calc.total} FRw, ${req.device_count || 1} devices)`);
+        setLatestGenerated({
+          mode: 'DIRECT',
+          code: 'DIRECT_AUTO_UNLOCK (No Code Needed)',
+          shopName: req.shop_name,
+          username: req.owner_username,
+          phone: req.owner_phone || req.payer_phone,
+          days: calc.days,
+          tier: `${calc.tier} (${calc.total.toLocaleString()} FRw)`
+        });
+        await refreshAll(false);
+        notify(`Direct Auto-Unlocked @${req.owner_username} without code!`);
+      } catch (err) {
+        notify(`Auto-unlock failed: ${err.message}`);
+      }
+    };
+
+    const handleBatchApprove = async () => {
+      const pendingList = requests.filter(r => r.status === 'PENDING_VERIFICATION');
+      if (!pendingList.length) return;
+      let ok = 0;
+      for (const req of pendingList) {
+        try {
+          await handleApproveWithCode(req);
+          ok++;
+        } catch (_) {}
+      }
+      notify(`Batch approved ${ok}/${pendingList.length} pending claims.`);
+    };
+
+    const handleConfirmReject = async () => {
+      if (!rejectTarget) return;
+      try {
+        await sbFetch(`payment_requests?id=eq.${encodeURIComponent(rejectTarget.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            status: 'REJECTED',
+            rejection_reason: rejectReason.trim() || 'MoMo transaction could not be confirmed',
+            verified_by_admin: `${session.fullName} (${session.email})`,
+            updated_at: Date.now()
+          })
+        });
+        await logAudit('REJECT_PAYMENT', rejectTarget.owner_username, rejectReason);
+        setRejectTarget(null);
+        await refreshAll(false);
+        notify('Payment claim marked REJECTED.');
+      } catch (err) {
+        notify(`Reject failed: ${err.message}`);
+      }
+    };
+
+    const handleShopExtend = async (shop, addDays) => {
+      try {
+        await extendOrActivateShop(shop.id, { addDays, markAutoUnlock: false });
+        await logAudit('EXTEND_SHOP', `@${shop.owner_username}`, `Extended ${shop.shop_name} by +${addDays} days`);
+        await refreshAll(false);
+        notify(`Extended ${shop.shop_name} by +${addDays}d.`);
+      } catch (err) {
+        notify(`Extend failed: ${err.message}`);
+      }
+    };
+
+    const handleShopAutoUnlockNow = async (shop) => {
+      try {
+        await extendOrActivateShop(shop.id, { addDays: 30, markAutoUnlock: true });
+        await logAudit('DIRECT_AUTO_UNLOCK', `@${shop.owner_username}`, `Direct Auto-Unlocked ${shop.shop_name} (+30d)`);
+        await refreshAll(false);
+        notify(`${shop.shop_name} directly auto-unlocked (+30d)!`);
+      } catch (err) {
+        notify(`Auto-unlock failed: ${err.message}`);
+      }
+    };
+
+    const handleResetTrial = async (shop) => {
+      const now = Date.now();
+      try {
+        await sbFetch(`shop_accounts?id=eq.${encodeURIComponent(shop.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            subscription_status: 'TRIAL',
+            subscription_expires_at: now + 4 * 86400000,
+            updated_at: now
+          })
+        });
+        await logAudit('RESET_TRIAL', `@${shop.owner_username}`, `Reset 4-day free trial for ${shop.shop_name}`);
+        await refreshAll(false);
+        notify(`4-day trial reset for ${shop.shop_name}.`);
+      } catch (err) {
+        notify(`Trial reset failed: ${err.message}`);
+      }
+    };
+
+    const handleSetShopStatus = async (shop, status) => {
+      try {
+        await sbFetch(`shop_accounts?id=eq.${encodeURIComponent(shop.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ subscription_status: status, updated_at: Date.now() })
+        });
+        await logAudit('SET_SHOP_STATUS', `@${shop.owner_username}`, `${shop.shop_name} -> ${status}`);
+        await refreshAll(false);
+        notify(`${shop.shop_name} set to ${status}.`);
+      } catch (err) {
+        notify(`Status update failed: ${err.message}`);
+      }
+    };
+
+    const handleSaveShopLimits = async (shop) => {
+      const draft = shopDraftLimits[shop.id] || {
+        branches: shop.branch_count || 1,
+        workers: shop.worker_count || 1,
+        devices: shop.device_limit || 1
+      };
+      const calc = calculateSubscriptionFee(draft.branches, draft.workers, 1, draft.devices, payConfig.per_device_fee_rwf);
+      try {
+        await sbFetch(`shop_accounts?id=eq.${encodeURIComponent(shop.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            branch_count: draft.branches,
+            worker_count: draft.workers,
+            device_limit: draft.devices,
+            monthly_fee_rwf: calc.monthly,
+            updated_at: Date.now()
+          })
+        });
+        await logAudit('UPDATE_SHOP_LIMITS', `@${shop.owner_username}`, `Quotas: ${draft.branches}br / ${draft.workers}stf / ${draft.devices}dev -> ${calc.monthly} FRw/mo`);
+        await refreshAll(false);
+        notify(`Saved quotas for ${shop.shop_name} (${calc.monthly.toLocaleString()} FRw/mo).`);
+      } catch (err) {
+        notify(`Save quotas failed: ${err.message}`);
+      }
+    };
+
+    const handleDeleteShop = async (shop) => {
+      if (!window.confirm(`Delete shop "${shop.shop_name}" (@${shop.owner_username})?`)) return;
+      try {
+        await sbFetch(`shop_accounts?id=eq.${encodeURIComponent(shop.id)}`, { method: 'DELETE' });
+        await logAudit('DELETE_SHOP', `@${shop.owner_username}`, `Deleted ${shop.shop_name}`);
+        await refreshAll(false);
+        notify(`Deleted ${shop.shop_name}.`);
+      } catch (err) {
+        notify(`Delete shop failed: ${err.message}`);
+      }
+    };
+
+    const handleToggleDevice = async (dev, nextActive) => {
+      try {
+        await sbFetch(`shop_devices?id=eq.${encodeURIComponent(dev.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ is_active: nextActive, updated_at: Date.now() })
+        });
+        await logAudit('TOGGLE_SHOP_DEVICE', dev.join_code || dev.device_id, `${dev.device_name} active -> ${nextActive}`);
+        await refreshAll(false);
+        notify(`${dev.device_name} ${nextActive ? 'activated' : 'paused'}.`);
+      } catch (err) {
+        notify(`Device update failed: ${err.message}`);
+      }
+    };
+
+    const handleDeleteDevice = async (dev) => {
+      if (!window.confirm(`Remove paired device "${dev.device_name}" (${dev.join_code})?`)) return;
+      try {
+        await sbFetch(`shop_devices?id=eq.${encodeURIComponent(dev.id)}`, { method: 'DELETE' });
+        await logAudit('DELETE_SHOP_DEVICE', dev.join_code || dev.device_id, `Removed ${dev.device_name} from ${dev.shop_name}`);
+        await refreshAll(false);
+        notify(`Removed device ${dev.device_name}.`);
+      } catch (err) {
+        notify(`Remove device failed: ${err.message}`);
+      }
+    };
+
+    const handleUpdateUserRole = async (u, role) => {
+      try {
+        await sbFetch(`shop_users?id=eq.${encodeURIComponent(u.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ role, updated_at: Date.now() })
+        });
+        await logAudit('UPDATE_USER_ROLE', `@${u.username}`, `${u.full_name} -> ${role}`);
+        await refreshAll(false);
+        notify(`@${u.username} changed to ${role}.`);
+      } catch (err) {
+        notify(`Role update failed: ${err.message}`);
+      }
+    };
+
+    const handleToggleUser = async (u, active) => {
+      try {
+        await sbFetch(`shop_users?id=eq.${encodeURIComponent(u.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ is_active: active, updated_at: Date.now() })
+        });
+        await logAudit('UPDATE_USER_STATUS', `@${u.username}`, `${u.full_name} active -> ${active}`);
+        await refreshAll(false);
+        notify(`@${u.username} ${active ? 'activated' : 'suspended'}.`);
+      } catch (err) {
+        notify(`User update failed: ${err.message}`);
+      }
+    };
+
+    const handleDeleteUser = async (u) => {
+      if (!window.confirm(`Remove user "${u.full_name}" (@${u.username})?`)) return;
+      try {
+        await sbFetch(`shop_users?id=eq.${encodeURIComponent(u.id)}`, { method: 'DELETE' });
+        await logAudit('DELETE_USER', `@${u.username}`, `Removed ${u.full_name}`);
+        await refreshAll(false);
+        notify(`Removed @${u.username}.`);
+      } catch (err) {
+        notify(`Delete user failed: ${err.message}`);
+      }
+    };
+
+    const handleIssueManualCode = async (e) => {
+      e.preventDefault();
+      const username = genForm.username.trim().toLowerCase();
+      const phone = genForm.phone.trim();
+      if (!username || normalizePhoneLast9(phone).length < 7) {
+        notify('Enter valid created @username and registered phone number.');
+        return;
+      }
+      const calc = calculateSubscriptionFee(genForm.branches, genForm.workers, genForm.months, genForm.devices, payConfig.per_device_fee_rwf);
+      const amount = Number(genForm.amount) >= 0 ? Number(genForm.amount) : calc.total;
+      const code = await generateBB2UnlockCode(username, phone, calc.tier, calc.days, session.secret);
+      const adminLabel = `${session.fullName} (${session.email})`;
+
+      try {
+        await sbFetch('unlock_codes', {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            id: crypto.randomUUID(),
+            unlock_code: code,
+            shop_username: username,
+            shop_phone: phone,
+            device_challenge: '',
+            tier_code: calc.tier,
+            plan_days: calc.days,
+            amount_rwf: amount,
+            status: 'ISSUED',
+            issued_by_admin: adminLabel,
+            issued_at: Date.now()
+          })
+        });
+        await extendOrActivateShop(computeShopKey(username, phone), {
+          addDays: calc.days,
+          branches: genForm.branches,
+          workers: genForm.workers,
+          deviceLimit: genForm.devices,
+          monthlyFee: calc.monthly,
+          markAutoUnlock: false
+        });
+        await logAudit('ISSUE_CODE', username, `Issued ${code} (+${calc.days}d, ${amount} FRw, ${genForm.devices} dev)`);
+        setLatestGenerated({
+          mode: 'CODE',
+          code,
+          shopName: genForm.shopName || 'BeBoss Shop',
+          username,
+          phone,
+          days: calc.days,
+          tier: `${calc.tier} (${amount.toLocaleString()} FRw)`
+        });
+        await refreshAll(false);
+        notify(`Issued unlock code ${code} for @${username}`);
+      } catch (err) {
+        notify(`Failed issuing code: ${err.message}`);
+      }
+    };
+
+    const handleRevokeCode = async (c) => {
+      try {
+        await sbFetch(`unlock_codes?id=eq.${encodeURIComponent(c.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'REVOKED' })
+        });
+        await logAudit('REVOKE_CODE', c.unlock_code, `Revoked token for @${c.shop_username}`);
+        await refreshAll(false);
+        notify(`Revoked ${c.unlock_code}`);
+      } catch (err) {
+        notify(`Revoke failed: ${err.message}`);
+      }
+    };
+
+    const handleDeleteSnapshot = async (sn) => {
+      if (!window.confirm(`Delete snapshot "${sn.branch_name}" (${sn.device_id})?`)) return;
+      try {
+        await sbFetch(`branch_sync_snapshots?id=eq.${encodeURIComponent(sn.id)}`, { method: 'DELETE' });
+        await logAudit('DELETE_SNAPSHOT', sn.device_id, `Removed ${sn.branch_name} (${sn.shop_name})`);
+        await refreshAll(false);
+        notify('Branch snapshot deleted.');
+      } catch (err) {
+        notify(`Delete snapshot failed: ${err.message}`);
+      }
+    };
+
+    const handleSavePayConfig = async (e) => {
+      e.preventDefault();
+      try {
+        const payload = {
+          id: 'global',
+          admin_whatsapp_number: String(payConfig.admin_whatsapp_number || '').trim(),
+          mtn_momo_code: String(payConfig.mtn_momo_code || '').trim(),
+          mtn_momo_phone: String(payConfig.mtn_momo_phone || '').trim(),
+          mtn_recipient_name: String(payConfig.mtn_recipient_name || 'BeBoss Pay').trim(),
+          airtel_money_phone: String(payConfig.airtel_money_phone || '').trim(),
+          airtel_recipient_name: String(payConfig.airtel_recipient_name || 'BeBoss Pay').trim(),
+          per_device_fee_rwf: Math.max(0, Number(payConfig.per_device_fee_rwf) || 2000),
+          apk_download_url: String(payConfig.apk_download_url || '').trim(),
+          apk_version: String(payConfig.apk_version || '2.0.0').trim() || '2.0.0',
+          updated_at: Date.now()
+        };
+        await sbFetch('app_config?on_conflict=id', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify(payload)
+        });
+        await logAudit(
+          'SAVE_APP_CONFIG',
+          'global',
+          `WhatsApp=${payload.admin_whatsapp_number}, MTN=${payload.mtn_momo_code}/${payload.mtn_momo_phone}, DevFee=${payload.per_device_fee_rwf}, APK=${payload.apk_version}`
+        );
+        await refreshAll(false);
+        notify('Global Payment, WhatsApp & Public APK Config saved to Supabase!');
+      } catch (err) {
+        notify(`Save config failed: ${err.message}`);
+      }
+    };
+
+    const stats = useMemo(() => {
+      const now = Date.now();
+      const pending = requests.filter(r => r.status === 'PENDING_VERIFICATION');
+      const approved = requests.filter(r => r.status === 'APPROVED' || r.status === 'REDEEMED');
+      const pendingSum = pending.reduce((s, r) => s + (Number(r.amount_rwf) || 0), 0);
+      const revSum = approved.reduce((s, r) => s + (Number(r.amount_rwf) || 0), 0);
+      let activePaid = 0;
+      let activeTrials = 0;
+      let locked = 0;
+      let mrr = 0;
+      shops.forEach(s => {
+        const exp = Number(s.subscription_expires_at || 0);
+        const isSusp = s.subscription_status === 'SUSPENDED';
+        if (isSusp || s.subscription_status === 'EXPIRED' || exp <= now) {
+          locked++;
+        } else if (s.subscription_status === 'TRIAL') {
+          activeTrials++;
+        } else {
+          activePaid++;
+          mrr += Number(s.monthly_fee_rwf || 5000);
+        }
+      });
+      const extraDevicesActive = devices.filter(d => !d.is_owner_primary && d.is_active !== false);
+      const deviceMrr = extraDevicesActive.reduce((s, d) => s + Number(d.monthly_fee_addon_rwf || 2000), 0);
+      return {
+        pendingCount: pending.length,
+        pendingSum,
+        revSum,
+        activePaid,
+        activeTrials,
+        locked,
+        mrr,
+        extraDevicesCount: extraDevicesActive.length,
+        deviceMrr
+      };
+    }, [requests, shops, devices]);
+
+    const navItems = [
+      { id: 'overview', label: 'Overview', pill: null },
+      { id: 'queue', label: 'USSD Payment Queue', pill: stats.pendingCount },
+      { id: 'shops', label: 'Shops & Quotas', pill: shops.length },
+      { id: 'devices', label: 'Shop Devices (+2k)', pill: devices.length },
+      { id: 'users', label: 'Users Directory', pill: users.length },
+      { id: 'codes', label: 'BB2 Codes & Engine', pill: codes.length },
+      { id: 'snapshots', label: 'Branch Sync', pill: snapshots.length },
+      { id: 'config', label: 'Payment, WA & APK', pill: null },
+      { id: 'audit', label: 'Audit Logs', pill: audits.length }
+    ];
+
+    const viewTitle = navItems.find(n => n.id === activeView)?.label || 'BeBoss Master Admin';
+
+    const filteredQueue = requests.filter(r => {
+      const stOk = queueStatusFilter === 'ALL' || r.status === queueStatusFilter;
+      const q = queueSearch.trim().toLowerCase();
+      const qOk = !q || [r.shop_name, r.owner_username, r.owner_phone, r.payer_phone, r.payer_full_name, r.telco_reference]
+        .some(v => String(v || '').toLowerCase().includes(q));
+      return stOk && qOk;
+    });
+
+    const filteredShops = shops.filter(s => {
+      const exp = Number(s.subscription_expires_at || 0);
+      const derived = s.subscription_status === 'SUSPENDED'
+        ? 'SUSPENDED'
+        : (s.subscription_status === 'EXPIRED' || exp <= Date.now() ? 'EXPIRED' : (s.subscription_status === 'TRIAL' ? 'TRIAL' : 'ACTIVE'));
+      const stOk = shopStatusFilter === 'ALL' || derived === shopStatusFilter;
+      const q = shopSearch.trim().toLowerCase();
+      const qOk = !q || [s.shop_name, s.owner_name, s.owner_username, s.owner_phone].some(v => String(v || '').toLowerCase().includes(q));
+      return stOk && qOk;
+    });
+
+    const filteredDevices = devices.filter(d => {
+      const q = deviceSearch.trim().toLowerCase();
+      return !q || [d.device_name, d.shop_name, d.assigned_username, d.join_code, d.branch_name, d.role]
+        .some(v => String(v || '').toLowerCase().includes(q));
+    });
+
+    const filteredUsers = users.filter(u => {
+      const q = userSearch.trim().toLowerCase();
+      return !q || [u.full_name, u.username, u.shop_name, u.role, u.phone]
+        .some(v => String(v || '').toLowerCase().includes(q));
+    });
+
+    const filteredCodes = codes.filter(c => {
+      const stOk = codeStatusFilter === 'ALL' || c.status === codeStatusFilter;
+      const q = codeSearch.trim().toLowerCase();
+      const qOk = !q || [c.unlock_code, c.shop_username, c.shop_phone, c.tier_code]
+        .some(v => String(v || '').toLowerCase().includes(q));
+      return stOk && qOk;
+    });
+
+    const genCalc = calculateSubscriptionFee(
+      genForm.branches,
+      genForm.workers,
+      genForm.months,
+      genForm.devices,
+      payConfig.per_device_fee_rwf
+    );
+
+    return (
+      <div className="app-shell">
+        <aside className="sidebar">
+          <div className="brand">
+            <div className="brand-mark">BB</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 900, fontSize: 15 }}>BeBoss Admin</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {session.email}
+              </div>
+            </div>
+          </div>
+
+          {navItems.map(item => (
+            <button
+              key={item.id}
+              type="button"
+              className={`nav-btn ${activeView === item.id ? 'active' : ''}`}
+              onClick={() => setActiveView(item.id)}
+            >
+              <span>{item.label}</span>
+              {item.pill !== null && <span className="nav-pill">{item.pill}</span>}
+            </button>
+          ))}
+
+          <div style={{ marginTop: 'auto', paddingTop: 14, borderTop: '1px solid var(--border)', display: 'grid', gap: 8 }}>
+            <button type="button" className="btn btn-blue btn-sm" onClick={onBackToPublic}>
+              ← Public App Site
+            </button>
+            <button type="button" className="btn btn-dark btn-sm" onClick={onShowSql}>
+              View SQL Schema
+            </button>
+            <button type="button" className="btn btn-red btn-sm" onClick={() => signOut(false)}>
+              Sign Out Master Admin
+            </button>
+          </div>
+        </aside>
+
+        <div className="main-area">
+          <div className="mobile-nav">
+            {navItems.map(item => (
+              <button
+                key={item.id}
+                type="button"
+                className={`nav-btn ${activeView === item.id ? 'active' : ''}`}
+                onClick={() => setActiveView(item.id)}
+              >
+                <span>{item.label}</span>
+                {item.pill !== null && <span className="nav-pill">{item.pill}</span>}
+              </button>
+            ))}
+          </div>
+
+          <header className="topbar">
+            <div>
+              <div style={{ fontSize: 17, fontWeight: 900 }}>{viewTitle}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+                {lastSyncedAt ? `Live Supabase Sync: ${new Date(lastSyncedAt).toLocaleTimeString()}` : 'Connecting...'}
+                {payConfig.admin_whatsapp_number ? ` • Support WA: ${payConfig.admin_whatsapp_number}` : ''}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn-dark btn-sm" onClick={onBackToPublic}>
+                Public Site & QR
+              </button>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)', cursor: 'pointer' }}>
+                <input type="checkbox" checked={autoPoll} onChange={e => setAutoPoll(e.target.checked)} />
+                Auto-Sync (15s)
+              </label>
+              <button type="button" className="btn btn-primary btn-sm" disabled={loading} onClick={() => refreshAll(true)}>
+                {loading ? 'Syncing...' : 'Sync All'}
+              </button>
+            </div>
+          </header>
+
+          <main className="content">
+            {latestGenerated && (
+              <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(16,185,129,0.5)', background: 'linear-gradient(90deg, rgba(16,185,129,0.12), var(--card))' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: '#34d399', textTransform: 'uppercase' }}>
+                      {latestGenerated.mode === 'DIRECT' ? 'Direct Auto-Unlock Completed' : `Latest Issued BB2 Unlock Code (@${latestGenerated.username})`}
+                    </div>
+                    <div className="mono" style={{ fontSize: 16, fontWeight: 900, marginTop: 4 }}>{latestGenerated.code}</div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                      {latestGenerated.shopName} ({latestGenerated.phone}) • {latestGenerated.tier} • +{latestGenerated.days} days
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {latestGenerated.mode === 'CODE' && (
+                      <button className="btn btn-dark btn-sm" onClick={() => copyAndNotify(latestGenerated.code, 'Unlock code copied!')}>
+                        Copy BB2 Code
+                      </button>
+                    )}
+                    <a
+                      className="btn btn-green btn-sm"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      href={buildWhatsAppUrl(
+                        latestGenerated.phone,
+                        latestGenerated.mode === 'DIRECT'
+                          ? buildDirectAutoUnlockReplyText(latestGenerated.shopName, latestGenerated.username, latestGenerated.days, latestGenerated.tier)
+                          : buildUnlockReplyText(latestGenerated.shopName, latestGenerated.username, latestGenerated.code, latestGenerated.days, latestGenerated.tier)
+                      )}
+                    >
+                      Send via WhatsApp
+                    </a>
+                    <button className="btn btn-dark btn-sm" onClick={() => setLatestGenerated(null)}>Dismiss</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeView === 'overview' && (
+              <div>
+                <div className="kpi-grid">
+                  <div className="kpi-card">
+                    <div className="kpi-label">Pending USSD Claims</div>
+                    <div className="kpi-value" style={{ color: stats.pendingCount ? 'var(--amber)' : 'var(--green)' }}>{stats.pendingCount}</div>
+                    <div className="kpi-sub">{stats.pendingSum.toLocaleString()} FRw waiting verification</div>
+                  </div>
+                  <div className="kpi-card">
+                    <div className="kpi-label">Verified Collections</div>
+                    <div className="kpi-value" style={{ color: 'var(--green)' }}>{stats.revSum.toLocaleString()} FRw</div>
+                    <div className="kpi-sub">Cumulative approved payments</div>
+                  </div>
+                  <div className="kpi-card">
+                    <div className="kpi-label">Active Monthly MRR</div>
+                    <div className="kpi-value" style={{ color: 'var(--orange)' }}>{stats.mrr.toLocaleString()} FRw</div>
+                    <div className="kpi-sub">{stats.activePaid} paid shops • {stats.activeTrials} on 4d trial • {stats.locked} locked</div>
+                  </div>
+                  <div className="kpi-card">
+                    <div className="kpi-label">Multi-Device Sync Terminals</div>
+                    <div className="kpi-value" style={{ color: 'var(--blue)' }}>{devices.length}</div>
+                    <div className="kpi-sub">{stats.extraDevicesCount} extra devices (+{stats.deviceMrr.toLocaleString()} FRw/mo)</div>
+                  </div>
+                </div>
+
+                <div className="grid-2">
+                  <div className="card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <h3 style={{ margin: 0, fontSize: 15 }}>Pending Payment Claims</h3>
+                      <button className="btn btn-dark btn-sm" onClick={() => setActiveView('queue')}>Open Full Queue</button>
+                    </div>
+                    {requests.filter(r => r.status === 'PENDING_VERIFICATION').slice(0, 5).map(r => (
+                      <div key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontWeight: 700 }}>{r.shop_name} <span className="mono" style={{ color: '#fdba74' }}>@{r.owner_username}</span></div>
+                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                            Sender: <strong>{r.payer_full_name || 'Not entered'}</strong> ({r.payer_phone}) • {Number(r.amount_rwf || 0).toLocaleString()} FRw • {r.device_count || 1} dev
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button className="btn btn-green btn-sm" onClick={() => handleApproveWithCode(r)}>BB2 Code</button>
+                          <button className="btn btn-primary btn-sm" onClick={() => handleDirectAutoUnlock(r)}>Auto-Unlock</button>
+                        </div>
+                      </div>
+                    ))}
+                    {requests.filter(r => r.status === 'PENDING_VERIFICATION').length === 0 && (
+                      <div style={{ color: 'var(--muted)', fontSize: 13 }}>All submitted USSD/WhatsApp claims are verified.</div>
+                    )}
+                  </div>
+
+                  <div className="card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <h3 style={{ margin: 0, fontSize: 15 }}>Live Payment, WhatsApp & Public APK</h3>
+                      <button className="btn btn-dark btn-sm" onClick={() => setActiveView('config')}>Edit Config</button>
+                    </div>
+                    <div style={{ display: 'grid', gap: 8, fontSize: 13 }}>
+                      <div><strong>Admin WhatsApp:</strong> <span className="mono" style={{ color: '#34d399' }}>{payConfig.admin_whatsapp_number || 'Not configured'}</span></div>
+                      <div><strong>MTN MoMo:</strong> <span className="mono">{buildMtnUssd(5000, payConfig)}</span> ({payConfig.mtn_recipient_name})</div>
+                      <div><strong>Airtel Money:</strong> <span className="mono">{buildAirtelUssd(5000, payConfig)}</span> ({payConfig.airtel_recipient_name})</div>
+                      <div><strong>Extra Device Add-on:</strong> <span className="badge b-orange">+{Number(payConfig.per_device_fee_rwf || 2000).toLocaleString()} FRw/mo per added device</span></div>
+                      <div><strong>Public APK Version:</strong> <span className="mono">v{payConfig.apk_version || '2.0.0'}</span> • <span style={{ color: 'var(--muted)' }}>{payConfig.apk_download_url || './BeBoss-POS-v2.0.0.apk (Built-in)'}</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeView === 'queue' && (
+              <div>
+                <div className="card" style={{ marginBottom: 14, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input
+                    className="input"
+                    style={{ flex: '1 1 260px' }}
+                    placeholder="Search shop, @username, registered phone, sender MoMo phone, sender name, telco ref..."
+                    value={queueSearch}
+                    onChange={e => setQueueSearch(e.target.value)}
+                  />
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {['ALL', 'PENDING_VERIFICATION', 'APPROVED', 'REJECTED'].map(st => (
+                      <button
+                        key={st}
+                        type="button"
+                        className={`btn btn-sm ${queueStatusFilter === st ? 'btn-primary' : 'btn-dark'}`}
+                        onClick={() => setQueueStatusFilter(st)}
+                      >
+                        {st === 'PENDING_VERIFICATION' ? 'Pending' : st}
+                      </button>
+                    ))}
+                  </div>
+                  {stats.pendingCount > 1 && (
+                    <button type="button" className="btn btn-green btn-sm" onClick={handleBatchApprove}>
+                      Batch Issue BB2 ({stats.pendingCount})
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: 'grid', gap: 12 }}>
+                  {filteredQueue.length === 0 && (
+                    <div className="card" style={{ textAlign: 'center', color: 'var(--muted)' }}>No payment claims match this filter.</div>
+                  )}
+                  {filteredQueue.map(req => {
+                    const expected = calculateSubscriptionFee(req.branch_count, req.worker_count, req.duration_months, req.device_count || 1, payConfig.per_device_fee_rwf).total;
+                    const feeOk = Number(req.amount_rwf || 0) >= expected;
+                    const reqLast9 = normalizePhoneLast9(req.owner_phone);
+                    const matchedShop = shops.find(s =>
+                      String(s.owner_username || '').toLowerCase() === String(req.owner_username || '').toLowerCase() ||
+                      (reqLast9 && normalizePhoneLast9(s.owner_phone) === reqLast9)
+                    );
+                    const isDirect = req.status === 'APPROVED' && req.approval_mode === 'DIRECT_AUTO_UNLOCK';
+                    const hasCode = req.status === 'APPROVED' && Boolean(req.generated_unlock_code);
+
+                    return (
+                      <div key={req.id} className="card">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+                          <div>
+                            <div style={{ fontSize: 16, fontWeight: 800 }}>
+                              {req.shop_name} <span className="mono" style={{ color: '#fdba74', fontSize: 13 }}>@{req.owner_username}</span>
+                            </div>
+                            <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
+                              Registered Shop Phone: <strong style={{ color: 'var(--ink)' }}>{req.owner_phone}</strong> • Device Code: <span className="mono">{req.device_challenge || '—'}</span>
+                            </div>
+                            <div style={{ fontSize: 13, marginTop: 4 }}>
+                              Sender MoMo Name: <strong style={{ color: '#fdba74' }}>{req.payer_full_name || 'Not entered'}</strong> • Sender Phone: <strong>{req.payer_phone}</strong>
+                            </div>
+                            <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
+                              {req.provider} • <strong>{Number(req.amount_rwf || 0).toLocaleString()} FRw</strong> ({req.duration_months * 30}d • {req.branch_count} br / {req.worker_count} stf / {req.device_count || 1} dev) • USSD: <span className="mono">{req.ussd_code || 'Manual'}</span> • Ref: <span className="mono">{req.telco_reference || 'WhatsApp'}</span>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            <span className={`badge ${feeOk ? 'b-green' : 'b-amber'}`}>{feeOk ? 'FEE MATCH' : `EXPECT ${expected}`}</span>
+                            <span className={`badge ${req.status === 'APPROVED' ? 'b-green' : (req.status === 'REJECTED' ? 'b-red' : 'b-orange')}`}>
+                              {isDirect ? 'DIRECT AUTO-UNLOCKED' : req.status}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div style={{
+                          marginTop: 10,
+                          padding: 10,
+                          borderRadius: 10,
+                          background: matchedShop ? 'rgba(16,185,129,0.08)' : 'rgba(245,158,11,0.08)',
+                          border: `1px solid ${matchedShop ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.35)'}`,
+                          fontSize: 12
+                        }}>
+                          {matchedShop ? (
+                            <div>
+                              <strong style={{ color: '#34d399' }}>Matched Cloud Shop Account:</strong> {matchedShop.shop_name} ({matchedShop.owner_name}) • @{matchedShop.owner_username} ({matchedShop.owner_phone}) • Status: <strong>{matchedShop.subscription_status}</strong> • Quotas: {matchedShop.branch_count}br / {matchedShop.worker_count}stf / {matchedShop.device_limit || 1}dev ({Number(matchedShop.monthly_fee_rwf || 5000).toLocaleString()} FRw/mo)
+                            </div>
+                          ) : (
+                            <div style={{ color: '#fcd34d' }}>
+                              No matching shop_accounts record synced yet for @{req.owner_username} ({req.owner_phone}).
+                            </div>
+                          )}
+                        </div>
+
+                        {hasCode && (
+                          <div style={{ marginTop: 8, fontSize: 12.5 }}>
+                            Issued Unlock Code: <span className="mono" style={{ color: '#34d399', fontWeight: 800 }}>{req.generated_unlock_code}</span>
+                          </div>
+                        )}
+                        {req.status === 'REJECTED' && req.rejection_reason && (
+                          <div style={{ marginTop: 8, fontSize: 12, color: '#fca5a5' }}>Rejection Reason: {req.rejection_reason}</div>
+                        )}
+
+                        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          {req.status !== 'REJECTED' && (
+                            <button type="button" className="btn btn-green btn-sm" onClick={() => handleApproveWithCode(req)}>
+                              {hasCode ? 'Re-issue BB2 Unlock Code' : 'Option 1: Verify & Issue BB2 Code'}
+                            </button>
+                          )}
+                          {hasCode && (
+                            <a
+                              className="btn btn-dark btn-sm"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              href={buildWhatsAppUrl(
+                                req.owner_phone || req.payer_phone,
+                                buildUnlockReplyText(req.shop_name, req.owner_username, req.generated_unlock_code, req.duration_months * 30, `${req.amount_rwf} FRw`)
+                              )}
+                            >
+                              Send Code via WhatsApp
+                            </a>
+                          )}
+                          {!isDirect && req.status !== 'REJECTED' && (
+                            <button type="button" className="btn btn-primary btn-sm" onClick={() => handleDirectAutoUnlock(req)}>
+                              Option 2: Auto-Unlock Directly (No Code)
+                            </button>
+                          )}
+                          {req.status === 'PENDING_VERIFICATION' && (
+                            <button type="button" className="btn btn-red btn-sm" onClick={() => { setRejectTarget(req); setRejectReason('MoMo transaction reference mismatch'); }}>
+                              Reject
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {activeView === 'shops' && (
+              <div>
+                <div className="card" style={{ marginBottom: 14, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input
+                    className="input"
+                    style={{ flex: '1 1 260px' }}
+                    placeholder="Search shop name, owner, @username or phone..."
+                    value={shopSearch}
+                    onChange={e => setShopSearch(e.target.value)}
+                  />
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {['ALL', 'ACTIVE', 'TRIAL', 'EXPIRED', 'SUSPENDED'].map(st => (
+                      <button
+                        key={st}
+                        type="button"
+                        className={`btn btn-sm ${shopStatusFilter === st ? 'btn-primary' : 'btn-dark'}`}
+                        onClick={() => setShopStatusFilter(st)}
+                      >
+                        {st === 'SUSPENDED' ? 'LOCKED' : st}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Shop & Owner</th>
+                        <th>Plan & Status</th>
+                        <th>Quotas (Br / Stf / DevLimit)</th>
+                        <th>Admin Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredShops.length === 0 && (
+                        <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--muted)' }}>No shop accounts match filter.</td></tr>
+                      )}
+                      {filteredShops.map(s => {
+                        const exp = Number(s.subscription_expires_at || 0);
+                        const daysLeft = Math.max(0, Math.ceil((exp - Date.now()) / 86400000));
+                        const isSusp = s.subscription_status === 'SUSPENDED';
+                        const isTrial = s.subscription_status === 'TRIAL' && exp > Date.now();
+                        const isLocked = isSusp || s.subscription_status === 'EXPIRED' || exp <= Date.now();
+                        const draft = shopDraftLimits[s.id] || {
+                          branches: Number(s.branch_count || 1),
+                          workers: Number(s.worker_count || 1),
+                          devices: Number(s.device_limit || 1)
+                        };
+                        const draftPrice = calculateSubscriptionFee(draft.branches, draft.workers, 1, draft.devices, payConfig.per_device_fee_rwf).monthly;
+
+                        return (
+                          <tr key={s.id}>
+                            <td>
+                              <div style={{ fontWeight: 800 }}>{s.shop_name}</div>
+                              <div className="mono" style={{ fontSize: 12, color: '#fdba74' }}>@{s.owner_username}</div>
+                              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{s.owner_name} • {s.owner_phone}</div>
+                            </td>
+                            <td>
+                              <span className={`badge ${isLocked ? 'b-red' : (isTrial ? 'b-blue' : 'b-green')}`}>
+                                {isSusp ? 'SUSPENDED' : (isLocked ? 'EXPIRED (LOCKED)' : (isTrial ? `TRIAL • ${daysLeft}d` : `ACTIVE • ${daysLeft}d`))}
+                              </span>
+                              <div style={{ fontSize: 12, marginTop: 5, fontWeight: 700 }}>{Number(s.monthly_fee_rwf || 5000).toLocaleString()} FRw/mo</div>
+                              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.device_count || 1}/{s.device_limit || 1} devices</div>
+                              {Number(s.auto_unlocked_at || 0) > 0 && (
+                                <div style={{ fontSize: 10.5, color: '#34d399' }}>Auto-Unlocked {formatTime(s.auto_unlocked_at)}</div>
+                              )}
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                <div>
+                                  <span style={{ fontSize: 10, color: 'var(--muted)' }}>Br</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    className="input"
+                                    style={{ width: 62, padding: '6px 8px' }}
+                                    value={draft.branches}
+                                    onChange={e => setShopDraftLimits(m => ({ ...m, [s.id]: { ...draft, branches: Math.max(1, Number(e.target.value) || 1) } }))}
+                                  />
+                                </div>
+                                <div>
+                                  <span style={{ fontSize: 10, color: 'var(--muted)' }}>Stf</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    className="input"
+                                    style={{ width: 62, padding: '6px 8px' }}
+                                    value={draft.workers}
+                                    onChange={e => setShopDraftLimits(m => ({ ...m, [s.id]: { ...draft, workers: Math.max(1, Number(e.target.value) || 1) } }))}
+                                  />
+                                </div>
+                                <div>
+                                  <span style={{ fontSize: 10, color: 'var(--muted)' }}>Dev</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    className="input"
+                                    style={{ width: 62, padding: '6px 8px' }}
+                                    value={draft.devices}
+                                    onChange={e => setShopDraftLimits(m => ({ ...m, [s.id]: { ...draft, devices: Math.max(1, Number(e.target.value) || 1) } }))}
+                                  />
+                                </div>
+                              </div>
+                              <button type="button" className="btn btn-dark btn-sm" style={{ marginTop: 6, width: '100%' }} onClick={() => handleSaveShopLimits(s)}>
+                                Save ({draftPrice.toLocaleString()} FRw/mo)
+                              </button>
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                <button type="button" className="btn btn-blue btn-sm" onClick={() => handleResetTrial(s)}>4d Trial</button>
+                                <button type="button" className="btn btn-green btn-sm" onClick={() => handleShopExtend(s, 30)}>+30d</button>
+                                <button type="button" className="btn btn-dark btn-sm" onClick={() => handleShopExtend(s, 90)}>+90d</button>
+                                <button type="button" className="btn btn-primary btn-sm" onClick={() => handleShopAutoUnlockNow(s)}>Auto-Unlock</button>
+                                <button type="button" className="btn btn-dark btn-sm" onClick={() => {
+                                  setGenForm({
+                                    shopName: s.shop_name,
+                                    username: s.owner_username,
+                                    phone: s.owner_phone,
+                                    branches: s.branch_count || 1,
+                                    workers: s.worker_count || 1,
+                                    devices: s.device_limit || 1,
+                                    months: 1,
+                                    amount: s.monthly_fee_rwf || 5000
+                                  });
+                                  setActiveView('codes');
+                                }}>Issue BB2</button>
+                                <button type="button" className="btn btn-dark btn-sm" onClick={() => handleSetShopStatus(s, isLocked ? 'ACTIVE' : 'SUSPENDED')}>
+                                  {isLocked ? 'Unlock' : 'Lock'}
+                                </button>
+                                <button type="button" className="btn btn-red btn-sm" onClick={() => handleDeleteShop(s)}>Delete</button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {activeView === 'devices' && (
+              <div>
+                <div className="card" style={{ marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <input
+                    className="input"
+                    style={{ flex: '1 1 280px' }}
+                    placeholder="Search device name, shop, @assigned user, branch or join code..."
+                    value={deviceSearch}
+                    onChange={e => setDeviceSearch(e.target.value)}
+                  />
+                  <span className="badge b-orange">
+                    {stats.extraDevicesCount} Active Extra Devices = +{stats.deviceMrr.toLocaleString()} FRw/mo
+                  </span>
+                </div>
+
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Device & Join Code</th>
+                        <th>Shop</th>
+                        <th>Assigned Staff & Branch</th>
+                        <th>Billing Add-on</th>
+                        <th>Controls</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredDevices.length === 0 && (
+                        <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)' }}>No paired shop devices synced yet.</td></tr>
+                      )}
+                      {filteredDevices.map(dev => (
+                        <tr key={dev.id}>
+                          <td>
+                            <div style={{ fontWeight: 800 }}>{dev.device_name}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                              <span className="mono badge b-purple">{dev.join_code || 'PRIMARY'}</span>
+                              {dev.join_code && (
+                                <button type="button" className="btn btn-dark btn-sm" onClick={() => copyAndNotify(dev.join_code, 'Join code copied!')}>
+                                  Copy
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            <div style={{ fontWeight: 700 }}>{dev.shop_name}</div>
+                            <div className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{dev.shop_sync_key}</div>
+                          </td>
+                          <td>
+                            <div>{dev.assigned_user_name} <span className="mono" style={{ color: '#fdba74' }}>@{dev.assigned_username}</span></div>
+                            <div style={{ fontSize: 12, color: 'var(--muted)' }}>{dev.role} • {dev.branch_name}</div>
+                          </td>
+                          <td>
+                            <span className={`badge ${dev.is_owner_primary ? 'b-green' : 'b-orange'}`}>
+                              {dev.is_owner_primary ? 'PRIMARY (INCLUDED)' : `+${Number(dev.monthly_fee_addon_rwf || 2000).toLocaleString()} FRw/mo`}
+                            </span>
+                            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                              {dev.is_active !== false ? 'Active' : 'Paused'} • Sync: {formatTime(dev.last_synced_at || dev.updated_at)}
+                            </div>
+                          </td>
+                          <td>
+                            {dev.is_owner_primary ? (
+                              <span style={{ fontSize: 12, color: 'var(--muted)' }}>Owner Primary Terminal</span>
+                            ) : (
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button
+                                  type="button"
+                                  className={`btn btn-sm ${dev.is_active !== false ? 'btn-dark' : 'btn-green'}`}
+                                  onClick={() => handleToggleDevice(dev, dev.is_active === false)}
+                                >
+                                  {dev.is_active !== false ? 'Pause' : 'Enable'}
+                                </button>
+                                <button type="button" className="btn btn-red btn-sm" onClick={() => handleDeleteDevice(dev)}>
+                                  Remove
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {activeView === 'users' && (
+              <div>
+                <div className="card" style={{ marginBottom: 14 }}>
+                  <input
+                    className="input"
+                    placeholder="Search all users across all shops by name, @username, shop, phone or role..."
+                    value={userSearch}
+                    onChange={e => setUserSearch(e.target.value)}
+                  />
+                </div>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Full Name & Username</th>
+                        <th>Shop & Branch</th>
+                        <th>Role Control</th>
+                        <th>Access</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredUsers.length === 0 && (
+                        <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--muted)' }}>No synced shop users found.</td></tr>
+                      )}
+                      {filteredUsers.map(u => (
+                        <tr key={u.id}>
+                          <td>
+                            <div style={{ fontWeight: 800 }}>{u.full_name}</div>
+                            <div className="mono" style={{ fontSize: 12, color: '#fdba74' }}>@{u.username} • {u.phone || 'No phone'}</div>
+                          </td>
+                          <td>
+                            <div style={{ fontWeight: 700 }}>{u.shop_name}</div>
+                            <div style={{ fontSize: 12, color: 'var(--muted)' }}>{u.assigned_branch_name}</div>
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', gap: 5 }}>
+                              {['OWNER', 'MANAGER', 'CASHIER'].map(r => (
+                                <button
+                                  key={r}
+                                  type="button"
+                                  className={`btn btn-sm ${u.role === r ? 'btn-primary' : 'btn-dark'}`}
+                                  onClick={() => u.role !== r && handleUpdateUserRole(u, r)}
+                                >
+                                  {r}
+                                </button>
+                              ))}
+                            </div>
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                              <span className={`badge ${u.is_active !== false ? 'b-green' : 'b-red'}`}>
+                                {u.is_active !== false ? 'ACTIVE' : 'SUSPENDED'}
+                              </span>
+                              <button type="button" className="btn btn-dark btn-sm" onClick={() => handleToggleUser(u, u.is_active === false)}>
+                                {u.is_active !== false ? 'Suspend' : 'Activate'}
+                              </button>
+                              <button type="button" className="btn btn-red btn-sm" onClick={() => handleDeleteUser(u)}>
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {activeView === 'codes' && (
+              <div style={{ display: 'grid', gap: 16 }}>
+                <div className="card">
+                  <h3 style={{ margin: '0 0 10px', fontSize: 15 }}>Issue Account-Bound Cryptographic Unlock Code (BB2)</h3>
+                  {shops.length > 0 && (
+                    <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 10, marginBottom: 10 }}>
+                      {shops.map(s => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          className="btn btn-dark btn-sm"
+                          onClick={() => {
+                            const nextCalc = calculateSubscriptionFee(s.branch_count || 1, s.worker_count || 1, 1, s.device_limit || 1, payConfig.per_device_fee_rwf);
+                            setGenForm({
+                              shopName: s.shop_name,
+                              username: s.owner_username,
+                              phone: s.owner_phone,
+                              branches: s.branch_count || 1,
+                              workers: s.worker_count || 1,
+                              devices: s.device_limit || 1,
+                              months: 1,
+                              amount: nextCalc.total
+                            });
+                          }}
+                        >
+                          {s.shop_name} (@{s.owner_username})
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <form onSubmit={handleIssueManualCode} style={{ display: 'grid', gap: 12 }}>
+                    <div className="grid-3">
+                      <div>
+                        <label className="field-label">Shop Name</label>
+                        <input className="input" value={genForm.shopName} onChange={e => setGenForm(f => ({ ...f, shopName: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className="field-label">Owner Username *</label>
+                        <input className="input" required placeholder="jeanpaul" value={genForm.username} onChange={e => setGenForm(f => ({ ...f, username: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className="field-label">Owner Registered Phone *</label>
+                        <input className="input" required placeholder="0788123456" value={genForm.phone} onChange={e => setGenForm(f => ({ ...f, phone: e.target.value }))} />
+                      </div>
+                    </div>
+                    <div className="grid-3">
+                      <div>
+                        <label className="field-label">Branches</label>
+                        <input type="number" min={1} className="input" value={genForm.branches} onChange={e => {
+                          const branches = Math.max(1, Number(e.target.value) || 1);
+                          const c = calculateSubscriptionFee(branches, genForm.workers, genForm.months, genForm.devices, payConfig.per_device_fee_rwf);
+                          setGenForm(f => ({ ...f, branches, amount: c.total }));
+                        }} />
+                      </div>
+                      <div>
+                        <label className="field-label">Workers</label>
+                        <input type="number" min={1} className="input" value={genForm.workers} onChange={e => {
+                          const workers = Math.max(1, Number(e.target.value) || 1);
+                          const c = calculateSubscriptionFee(genForm.branches, workers, genForm.months, genForm.devices, payConfig.per_device_fee_rwf);
+                          setGenForm(f => ({ ...f, workers, amount: c.total }));
+                        }} />
+                      </div>
+                      <div>
+                        <label className="field-label">Paired Devices (+2k/extra)</label>
+                        <input type="number" min={1} className="input" value={genForm.devices} onChange={e => {
+                          const devices = Math.max(1, Number(e.target.value) || 1);
+                          const c = calculateSubscriptionFee(genForm.branches, genForm.workers, genForm.months, devices, payConfig.per_device_fee_rwf);
+                          setGenForm(f => ({ ...f, devices, amount: c.total }));
+                        }} />
+                      </div>
+                    </div>
+                    <div className="grid-2">
+                      <div>
+                        <label className="field-label">Months</label>
+                        <select className="select" value={genForm.months} onChange={e => {
+                          const months = Number(e.target.value);
+                          const c = calculateSubscriptionFee(genForm.branches, genForm.workers, months, genForm.devices, payConfig.per_device_fee_rwf);
+                          setGenForm(f => ({ ...f, months, amount: c.total }));
+                        }}>
+                          <option value={1}>1 Month (+30 days)</option>
+                          <option value={3}>3 Months (+90 days • 10% OFF)</option>
+                          <option value={6}>6 Months (+180 days)</option>
+                          <option value={12}>12 Months (+365 days • 20% OFF)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="field-label">Verified Amount (FRw)</label>
+                        <input type="number" min={0} className="input" value={genForm.amount} onChange={e => setGenForm(f => ({ ...f, amount: e.target.value }))} />
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <div style={{ fontSize: 12.5, color: '#fdba74', fontWeight: 700 }}>
+                        Calculated: {genCalc.tier} • +{genCalc.days}d • Monthly {genCalc.monthly.toLocaleString()} FRw • Discount {genCalc.discount}% • Total {genCalc.total.toLocaleString()} FRw
+                      </div>
+                      <button type="submit" className="btn btn-green">Generate Signed BB2 Unlock Code</button>
+                    </div>
+                  </form>
+                </div>
+
+                <div className="card" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input className="input" style={{ flex: '1 1 240px' }} placeholder="Search BB2 code, @username, phone or tier..." value={codeSearch} onChange={e => setCodeSearch(e.target.value)} />
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {['ALL', 'ISSUED', 'REDEEMED', 'REVOKED'].map(st => (
+                      <button key={st} type="button" className={`btn btn-sm ${codeStatusFilter === st ? 'btn-primary' : 'btn-dark'}`} onClick={() => setCodeStatusFilter(st)}>{st}</button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Unlock Code</th>
+                        <th>Shop Binding</th>
+                        <th>Plan & Amount</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredCodes.length === 0 && (
+                        <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)' }}>No unlock codes match filter.</td></tr>
+                      )}
+                      {filteredCodes.map(c => (
+                        <tr key={c.id}>
+                          <td className="mono" style={{ fontWeight: 800, color: '#fdba74' }}>{c.unlock_code}</td>
+                          <td>@{c.shop_username}<div style={{ fontSize: 12, color: 'var(--muted)' }}>{c.shop_phone}</div></td>
+                          <td>{c.tier_code} • +{c.plan_days}d<div style={{ fontSize: 12, color: 'var(--muted)' }}>{Number(c.amount_rwf || 0).toLocaleString()} FRw</div></td>
+                          <td>
+                            <span className={`badge ${c.status === 'REDEEMED' ? 'b-blue' : (c.status === 'REVOKED' ? 'b-red' : 'b-green')}`}>{c.status}</span>
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <button type="button" className="btn btn-dark btn-sm" onClick={() => copyAndNotify(c.unlock_code, 'Code copied!')}>Copy</button>
+                              <a className="btn btn-green btn-sm" target="_blank" rel="noopener noreferrer" href={buildWhatsAppUrl(c.shop_phone, buildUnlockReplyText('BeBoss Shop', c.shop_username, c.unlock_code, c.plan_days, `${c.tier_code} (${c.amount_rwf} FRw)`))}>
+                                WhatsApp
+                              </a>
+                              {c.status === 'ISSUED' && (
+                                <button type="button" className="btn btn-red btn-sm" onClick={() => handleRevokeCode(c)}>Revoke</button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {activeView === 'snapshots' && (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Shop</th>
+                      <th>Branch & Device</th>
+                      <th>Records Summary</th>
+                      <th>Last Synced</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {snapshots.length === 0 && (
+                      <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)' }}>No cloud branch sync snapshots uploaded yet.</td></tr>
+                    )}
+                    {snapshots.map(sn => (
+                      <tr key={sn.id}>
+                        <td>
+                          <strong>{sn.shop_name || sn.shop_sync_key}</strong>
+                          <div className="mono" style={{ fontSize: 11, color: '#fdba74' }}>{sn.shop_sync_key}</div>
+                        </td>
+                        <td>
+                          <div>{sn.branch_name}</div>
+                          <div className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>Device {sn.device_id}</div>
+                        </td>
+                        <td><span className="badge b-purple">{sn.records_summary || 'Synced'}</span></td>
+                        <td style={{ fontSize: 12, color: 'var(--muted)' }}>{formatTime(sn.updated_at)}</td>
+                        <td>
+                          <button type="button" className="btn btn-red btn-sm" onClick={() => handleDeleteSnapshot(sn)}>Remove</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {activeView === 'config' && (
+              <div className="card" style={{ maxWidth: 820 }}>
+                <h3 style={{ margin: '0 0 6px', fontSize: 16 }}>Global Admin WhatsApp, MTN/Airtel USSD, Multi-Device Fee & Public APK Config</h3>
+                <p style={{ margin: '0 0 14px', fontSize: 12.5, color: 'var(--muted)' }}>
+                  Saved directly to <span className="mono">public.app_config (id = 'global')</span>. Android apps pull these payment numbers automatically, and the Public Download Page uses this APK URL & version.
+                </p>
+                <form onSubmit={handleSavePayConfig} style={{ display: 'grid', gap: 12 }}>
+                  <div className="grid-2">
+                    <div>
+                      <label className="field-label">Admin WhatsApp Number *</label>
+                      <input
+                        className="input"
+                        required
+                        placeholder="+250788123456"
+                        value={payConfig.admin_whatsapp_number}
+                        onChange={e => setPayConfig(c => ({ ...c, admin_whatsapp_number: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="field-label">Per Extra Device Monthly Fee (FRw)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        className="input"
+                        value={payConfig.per_device_fee_rwf}
+                        onChange={e => setPayConfig(c => ({ ...c, per_device_fee_rwf: Number(e.target.value) || 0 }))}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid-3">
+                    <div>
+                      <label className="field-label">MTN MoMo Code (*182*8*1#)</label>
+                      <input className="input" value={payConfig.mtn_momo_code} onChange={e => setPayConfig(c => ({ ...c, mtn_momo_code: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="field-label">MTN MoMo Phone Fallback</label>
+                      <input className="input" value={payConfig.mtn_momo_phone} onChange={e => setPayConfig(c => ({ ...c, mtn_momo_phone: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="field-label">MTN Registered Name</label>
+                      <input className="input" value={payConfig.mtn_recipient_name} onChange={e => setPayConfig(c => ({ ...c, mtn_recipient_name: e.target.value }))} />
+                    </div>
+                  </div>
+
+                  <div className="grid-2">
+                    <div>
+                      <label className="field-label">Airtel Money Phone (*500#)</label>
+                      <input className="input" value={payConfig.airtel_money_phone} onChange={e => setPayConfig(c => ({ ...c, airtel_money_phone: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="field-label">Airtel Registered Name</label>
+                      <input className="input" value={payConfig.airtel_recipient_name} onChange={e => setPayConfig(c => ({ ...c, airtel_recipient_name: e.target.value }))} />
+                    </div>
+                  </div>
+
+                  <div className="grid-2">
+                    <div>
+                      <label className="field-label">Public APK Download URL (optional override; empty = ./BeBoss-POS-v2.0.0.apk)</label>
+                      <input
+                        className="input"
+                        placeholder="./BeBoss-POS-v2.0.0.apk or https://cdn.../BeBoss.apk"
+                        value={payConfig.apk_download_url || ''}
+                        onChange={e => setPayConfig(c => ({ ...c, apk_download_url: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="field-label">Public APK Version Label</label>
+                      <input
+                        className="input"
+                        placeholder="2.0.0"
+                        value={payConfig.apk_version || '2.0.0'}
+                        onChange={e => setPayConfig(c => ({ ...c, apk_version: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#090e1a', border: '1px solid var(--border)', borderRadius: 12, padding: 12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--orange)', marginBottom: 4 }}>LIVE USSD PREVIEW (5,000 FRw Example)</div>
+                    <div className="mono" style={{ fontSize: 12.5 }}>MTN: {buildMtnUssd(5000, payConfig)} ({payConfig.mtn_recipient_name})</div>
+                    <div className="mono" style={{ fontSize: 12.5 }}>Airtel: {buildAirtelUssd(5000, payConfig)} ({payConfig.airtel_recipient_name})</div>
+                    <div style={{ fontSize: 12, color: '#34d399', marginTop: 4 }}>
+                      WhatsApp Proof Receiver: {payConfig.admin_whatsapp_number || 'Not set'} • +{Number(payConfig.per_device_fee_rwf || 2000).toLocaleString()} FRw/extra device
+                    </div>
+                  </div>
+
+                  <button type="submit" className="btn btn-green">Save Global Config to Supabase</button>
+                </form>
+              </div>
+            )}
+
+            {activeView === 'audit' && (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>Admin</th>
+                      <th>Action</th>
+                      <th>Target</th>
+                      <th>Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {audits.length === 0 && (
+                      <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)' }}>No admin audit events recorded yet.</td></tr>
+                    )}
+                    {audits.map(a => (
+                      <tr key={a.id}>
+                        <td style={{ fontSize: 12, color: 'var(--muted)' }}>{formatTime(a.created_at)}</td>
+                        <td>{a.admin_email}</td>
+                        <td><span className="badge b-purple">{a.action}</span></td>
+                        <td className="mono" style={{ fontSize: 12 }}>{a.target_id}</td>
+                        <td>{a.details}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </main>
+        </div>
+
+        {rejectTarget && (
+          <div className="modal-backdrop" onClick={() => setRejectTarget(null)}>
+            <div className="modal-card" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+              <h3 style={{ margin: '0 0 6px', color: '#fca5a5' }}>Reject Payment Claim</h3>
+              <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>
+                {rejectTarget.shop_name} (@{rejectTarget.owner_username}) • {Number(rejectTarget.amount_rwf || 0).toLocaleString()} FRw
+              </div>
+              <label className="field-label">Rejection Reason</label>
+              <input className="input" value={rejectReason} onChange={e => setRejectReason(e.target.value)} />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+                <button type="button" className="btn btn-dark" onClick={() => setRejectTarget(null)}>Cancel</button>
+                <button type="button" className="btn btn-red" onClick={handleConfirmReject}>Confirm Reject</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  global.BeBossCore = {
+    MASTER_ADMIN_EMAIL,
+    STORAGE_KEY,
+    DEFAULT_HMAC_SECRET,
+    SCHEMA_SQL,
+    normalizePhoneLast9,
+    computeShopKey,
+    generateBB2UnlockCode,
+    calculateSubscriptionFee,
+    buildWhatsAppUrl,
+    buildUnlockReplyText,
+    buildDirectAutoUnlockReplyText,
+    formatTime,
+    buildMtnUssd,
+    buildAirtelUssd,
+    loadInitialSession,
+    fetchPublicPayConfig
+  };
+  global.BeBossAdminLoginModal = AdminLoginModal;
+  global.BeBossAdminConsole = BeBossAdminConsole;
+})(window);

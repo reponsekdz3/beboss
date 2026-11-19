@@ -625,6 +625,8 @@ object SupabaseAdminClient {
                     airtelMoneyPhone = o.optString("airtel_money_phone", "0738765432"),
                     airtelRecipientName = o.optString("airtel_recipient_name", "BeBoss Pay"),
                     perDeviceFeeRwf = o.optInt("per_device_fee_rwf", 2000),
+                    apkDownloadUrl = o.optString("apk_download_url", ""),
+                    apkVersion = o.optString("apk_version", "2.0.0").ifBlank { "2.0.0" },
                     updatedAt = o.optLong("updated_at", 0L)
                 )
             }
@@ -647,6 +649,8 @@ object SupabaseAdminClient {
                 put("airtel_money_phone", config.airtelMoneyPhone.trim())
                 put("airtel_recipient_name", config.airtelRecipientName.trim())
                 put("per_device_fee_rwf", config.perDeviceFeeRwf.coerceAtLeast(0))
+                put("apk_download_url", config.apkDownloadUrl.trim())
+                put("apk_version", config.apkVersion.trim().ifBlank { "2.0.0" })
                 put("updated_at", now)
             }
             val req = buildRestRequest("app_config?on_conflict=id", useAdminJwtIfAvailable = true)

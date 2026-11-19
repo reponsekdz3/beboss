@@ -18,6 +18,8 @@ data class AdminPaymentConfig(
     val airtelMoneyPhone: String = "0738765432",
     val airtelRecipientName: String = "BeBoss Pay",
     val perDeviceFeeRwf: Int = 2000,
+    val apkDownloadUrl: String = "",
+    val apkVersion: String = "2.0.0",
     val updatedAt: Long = 0L
 )
 
@@ -72,6 +74,8 @@ object OfflineSubscriptionManager {
     private const val KEY_AIRTEL_PHONE = "airtel_money_phone"
     private const val KEY_AIRTEL_NAME = "airtel_recipient_name"
     private const val KEY_PER_DEVICE_FEE = "per_device_fee_rwf"
+    private const val KEY_APK_URL = "apk_download_url"
+    private const val KEY_APK_VERSION = "apk_version"
     private const val KEY_UPDATED_AT = "updated_at"
 
     const val PER_EXTRA_DEVICE_FEE_RWF = 2000
@@ -98,6 +102,8 @@ object OfflineSubscriptionManager {
             airtelMoneyPhone = prefs.getString(KEY_AIRTEL_PHONE, "0738765432").orEmpty().ifBlank { "0738765432" },
             airtelRecipientName = prefs.getString(KEY_AIRTEL_NAME, "BeBoss Pay").orEmpty().ifBlank { "BeBoss Pay" },
             perDeviceFeeRwf = prefs.getInt(KEY_PER_DEVICE_FEE, PER_EXTRA_DEVICE_FEE_RWF).coerceAtLeast(0),
+            apkDownloadUrl = prefs.getString(KEY_APK_URL, "").orEmpty(),
+            apkVersion = prefs.getString(KEY_APK_VERSION, "2.0.0").orEmpty().ifBlank { "2.0.0" },
             updatedAt = prefs.getLong(KEY_UPDATED_AT, 0L)
         )
     }
@@ -111,7 +117,9 @@ object OfflineSubscriptionManager {
             mtnRecipientName = config.mtnRecipientName.trim().ifBlank { "BeBoss Pay" },
             airtelMoneyPhone = config.airtelMoneyPhone.trim().ifBlank { "0738765432" },
             airtelRecipientName = config.airtelRecipientName.trim().ifBlank { "BeBoss Pay" },
-            perDeviceFeeRwf = config.perDeviceFeeRwf.coerceAtLeast(0)
+            perDeviceFeeRwf = config.perDeviceFeeRwf.coerceAtLeast(0),
+            apkDownloadUrl = config.apkDownloadUrl.trim(),
+            apkVersion = config.apkVersion.trim().ifBlank { "2.0.0" }
         )
         cachedConfig = effective
         context?.applicationContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)?.edit()?.apply {
@@ -122,6 +130,8 @@ object OfflineSubscriptionManager {
             putString(KEY_AIRTEL_PHONE, effective.airtelMoneyPhone)
             putString(KEY_AIRTEL_NAME, effective.airtelRecipientName)
             putInt(KEY_PER_DEVICE_FEE, effective.perDeviceFeeRwf)
+            putString(KEY_APK_URL, effective.apkDownloadUrl)
+            putString(KEY_APK_VERSION, effective.apkVersion)
             putLong(KEY_UPDATED_AT, effective.updatedAt)
             apply()
         }
