@@ -23,6 +23,7 @@ import com.example.data.model.PurchaseRecord
 import com.example.data.model.PurchaseSummary
 import com.example.data.model.Sale
 import com.example.data.model.SaleWithItems
+import com.example.data.model.ShopDevice
 import com.example.data.model.ShopProfile
 import com.example.data.model.StockTransfer
 import com.example.data.model.TopProductReport
@@ -33,6 +34,7 @@ import com.example.ui.viewmodel.coordinators.AuthSessionCoordinator
 import com.example.ui.viewmodel.coordinators.DatabaseMaintenanceCoordinator
 import com.example.ui.viewmodel.coordinators.PosCartCoordinator
 import com.example.ui.viewmodel.coordinators.SyncCoordinator
+import com.example.util.AdminPaymentConfig
 import com.example.util.AppLanguage
 import com.example.util.BeBossNotificationManager
 import com.example.util.CloudSyncReport
@@ -51,6 +53,7 @@ import com.example.util.SupabaseAuditLogDto
 import com.example.util.SupabaseBranchSnapshotDto
 import com.example.util.SupabasePaymentRequestDto
 import com.example.util.SupabaseShopAccountDto
+import com.example.util.SupabaseShopDeviceDto
 import com.example.util.SupabaseShopUserDto
 import com.example.util.SupabaseUnlockCodeDto
 import com.example.util.SyncAuditLog
@@ -207,6 +210,10 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
     )
 
+    val shopDevices: StateFlow<List<ShopDevice>> = repository.allShopDevices.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
+
     val allStockTransfers: StateFlow<List<StockTransfer>> = repository.allStockTransfers.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
     )
@@ -338,7 +345,11 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         repository = repository,
         scope = viewModelScope,
         language = currentLanguage,
-        emitSnackbar = { msg -> _snackbarMessage.emit(msg) }
+        emitSnackbar = { msg -> _snackbarMessage.emit(msg) },
+        onRegistrationCloudSync = {
+            adminCoordinator.syncAdminDataToSupabaseSuspended(silent = true)
+            syncCoordinator.syncToCloudNow()
+        }
     )
 
     private lateinit var adminCoordinator: AdminConsoleCoordinator
@@ -479,9 +490,11 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     val adminPaymentRequests: StateFlow<List<SupabasePaymentRequestDto>> = adminCoordinator.adminPaymentRequests
     val adminShopAccounts: StateFlow<List<SupabaseShopAccountDto>> = adminCoordinator.adminShopAccounts
     val adminShopUsers: StateFlow<List<SupabaseShopUserDto>> = adminCoordinator.adminShopUsers
+    val adminShopDevices: StateFlow<List<SupabaseShopDeviceDto>> = adminCoordinator.adminShopDevices
     val adminBranchSnapshots: StateFlow<List<SupabaseBranchSnapshotDto>> = adminCoordinator.adminBranchSnapshots
     val adminUnlockCodes: StateFlow<List<SupabaseUnlockCodeDto>> = adminCoordinator.adminUnlockCodes
     val adminAuditLogs: StateFlow<List<SupabaseAuditLogDto>> = adminCoordinator.adminAuditLogs
+    val adminPaymentConfig: StateFlow<AdminPaymentConfig> = adminCoordinator.adminPaymentConfig
     val isAdminLoading: StateFlow<Boolean> = adminCoordinator.isAdminLoading
     val adminLastSyncedAt: StateFlow<Long> = adminCoordinator.adminLastSyncedAt
 
@@ -541,6 +554,80 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         shopName, currencyCode, currencySymbol, address, phone,
         ownerFullName, username, pin, password
     )
+
+    fun joinExistingShopFromCloud(
+        ownerUsername: String,
+        ownerPhone: String,
+        deviceJoinCode: String,
+        thisDeviceName: String,
+        pin: String,
+        password: String
+    ) = authCoordinator.joinExistingShopFromCloud(
+        ownerUsername = ownerUsername,
+        ownerPhone = ownerPhone,
+        deviceJoinCode = deviceJoinCode,
+        thisDeviceName = thisDeviceName,
+        pin = pin,
+        password = password
+    )
+
+    fun addSecondaryShopDevice(
+        deviceName: String,
+        assignedUser: User,
+        branch: Branch?,
+        onCreated: (ShopDevice) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                val created = repository.addSecondaryShopDevice(
+                    deviceName = deviceName,
+                    assignedUser = assignedUser,
+                    branch = branch,
+                    actor = currentUser.value
+                )
+                scheduleAutoBranchSync()
+                _snackbarMessage.emit(
+                    "Added device '${created.deviceName}' (Join Code: ${created.joinCode} • +2,000 FRw/mo)"
+                )
+                onCreated(created)
+            } catch (e: SecurityException) {
+                _snackbarMessage.emit(e.message ?: "Permission denied")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Device error: ${e.message}")
+            }
+        }
+    }
+
+    fun toggleShopDeviceActive(deviceId: String, isActive: Boolean) {
+        viewModelScope.launch {
+            try {
+                repository.toggleShopDeviceActive(deviceId, isActive, actor = currentUser.value)
+                scheduleAutoBranchSync()
+                _snackbarMessage.emit(
+                    if (isActive) "Shop device enabled (+2,000 FRw/mo when active)."
+                    else "Shop device paused."
+                )
+            } catch (e: SecurityException) {
+                _snackbarMessage.emit(e.message ?: "Permission denied")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Device toggle error: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteShopDevice(deviceId: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteShopDevice(deviceId, actor = currentUser.value)
+                scheduleAutoBranchSync()
+                _snackbarMessage.emit("Secondary shop device removed.")
+            } catch (e: SecurityException) {
+                _snackbarMessage.emit(e.message ?: "Permission denied")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Remove device error: ${e.message}")
+            }
+        }
+    }
 
     fun loginWithPin(pin: String): Boolean = authCoordinator.loginWithPin(pin)
     fun loginWithCredentials(username: String, pinOrPass: String): Boolean = authCoordinator.loginWithCredentials(username, pinOrPass)
@@ -616,10 +703,21 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         branchCount: Int,
         workerCount: Int,
         telcoReference: String = "",
+        payerFullName: String = "",
+        deviceCount: Int = 1,
         onSubmitted: (PaymentVerificationRequest, Boolean) -> Unit = { _, _ -> }
     ) = adminCoordinator.submitUssdPaymentProof(
-        provider, payerPhone, username, registeredPhone, durationMonths,
-        branchCount, workerCount, telcoReference, onSubmitted
+        provider = provider,
+        payerPhone = payerPhone,
+        username = username,
+        registeredPhone = registeredPhone,
+        durationMonths = durationMonths,
+        branchCount = branchCount,
+        workerCount = workerCount,
+        telcoReference = telcoReference,
+        payerFullName = payerFullName,
+        deviceCount = deviceCount,
+        onSubmitted = onSubmitted
     )
 
     fun syncAdminDataToSupabase(silent: Boolean = false) = adminCoordinator.syncAdminDataToSupabase(silent)
@@ -627,6 +725,8 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun refreshAdminDashboardData() = adminCoordinator.refreshAdminDashboardData()
     fun adminApproveAndGenerateCode(request: SupabasePaymentRequestDto, onGenerated: (Boolean, String) -> Unit) =
         adminCoordinator.adminApproveAndGenerateCode(request, onGenerated)
+    fun adminDirectAutoUnlockPayment(request: SupabasePaymentRequestDto, onDone: (Boolean) -> Unit = {}) =
+        adminCoordinator.adminDirectAutoUnlockPayment(request, onDone)
     fun adminApproveBatchPendingPayments(onDone: (Int, Int) -> Unit = { _, _ -> }) =
         adminCoordinator.adminApproveBatchPendingPayments(onDone)
     fun adminRejectPayment(request: SupabasePaymentRequestDto, reason: String, onDone: (Boolean) -> Unit = {}) =
@@ -645,8 +745,18 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun adminResetShopTrial(shop: SupabaseShopAccountDto, trialDays: Int = ShopProfile.FREE_TRIAL_DAYS) =
         adminCoordinator.adminResetShopTrial(shop, trialDays)
     fun adminSetShopStatus(shop: SupabaseShopAccountDto, status: String) = adminCoordinator.adminSetShopStatus(shop, status)
-    fun adminUpdateShopLimits(shop: SupabaseShopAccountDto, branchCount: Int, workerCount: Int) =
-        adminCoordinator.adminUpdateShopLimits(shop, branchCount, workerCount)
+    fun adminUpdateShopLimits(
+        shop: SupabaseShopAccountDto,
+        branchCount: Int,
+        workerCount: Int,
+        deviceLimit: Int = shop.deviceLimit.coerceAtLeast(1)
+    ) = adminCoordinator.adminUpdateShopLimits(shop, branchCount, workerCount, deviceLimit)
+    fun adminSavePaymentConfig(config: AdminPaymentConfig, onDone: (Boolean) -> Unit = {}) =
+        adminCoordinator.adminSavePaymentConfig(config, onDone)
+    fun adminToggleShopDeviceActive(device: SupabaseShopDeviceDto, isActive: Boolean) =
+        adminCoordinator.adminToggleShopDeviceActive(device, isActive)
+    fun adminDeleteShopDevice(device: SupabaseShopDeviceDto) =
+        adminCoordinator.adminDeleteShopDevice(device)
     fun adminDeleteShopAccount(shop: SupabaseShopAccountDto) = adminCoordinator.adminDeleteShopAccount(shop)
     fun adminUpdateShopUserRole(user: SupabaseShopUserDto, newRole: String) = adminCoordinator.adminUpdateShopUserRole(user, newRole)
     fun adminToggleShopUserActive(user: SupabaseShopUserDto, newActive: Boolean) = adminCoordinator.adminToggleShopUserActive(user, newActive)
@@ -670,9 +780,11 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 repository.saveBranch(branch, actor = currentUser.value)
                 val allBranches = db.branchDao().getAllActiveBranchesList()
                 val allStaff = db.userDao().getAllActiveUsersList()
+                val activeDevices = repository.getActiveDevicesCount()
                 val newPricing = OfflineSubscriptionManager.calculateSubscriptionPrice(
                     branchCount = allBranches.size.coerceAtLeast(1),
-                    workerCount = allStaff.size.coerceAtLeast(1)
+                    workerCount = allStaff.size.coerceAtLeast(1),
+                    deviceCount = activeDevices
                 )
                 repository.updateShopProfile(
                     shopProfile.value.copy(
@@ -699,9 +811,11 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 repository.deleteBranch(branchId, actor = currentUser.value)
                 val allBranches = db.branchDao().getAllActiveBranchesList()
                 val allStaff = db.userDao().getAllActiveUsersList()
+                val activeDevices = repository.getActiveDevicesCount()
                 val newPricing = OfflineSubscriptionManager.calculateSubscriptionPrice(
                     branchCount = allBranches.size.coerceAtLeast(1),
-                    workerCount = allStaff.size.coerceAtLeast(1)
+                    workerCount = allStaff.size.coerceAtLeast(1),
+                    deviceCount = activeDevices
                 )
                 repository.updateShopProfile(
                     shopProfile.value.copy(
@@ -771,9 +885,11 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 repository.saveUser(user, actor = currentUser.value)
                 val allBranches = db.branchDao().getAllActiveBranchesList()
                 val allStaff = db.userDao().getAllActiveUsersList()
+                val activeDevices = repository.getActiveDevicesCount()
                 val newPricing = OfflineSubscriptionManager.calculateSubscriptionPrice(
                     branchCount = allBranches.size.coerceAtLeast(1),
-                    workerCount = allStaff.size.coerceAtLeast(1)
+                    workerCount = allStaff.size.coerceAtLeast(1),
+                    deviceCount = activeDevices
                 )
                 repository.updateShopProfile(
                     shopProfile.value.copy(
@@ -808,9 +924,11 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
                 repository.deleteUser(userId, actor = currentUser.value)
                 val allBranches = db.branchDao().getAllActiveBranchesList()
                 val allStaff = db.userDao().getAllActiveUsersList()
+                val activeDevices = repository.getActiveDevicesCount()
                 val newPricing = OfflineSubscriptionManager.calculateSubscriptionPrice(
                     branchCount = allBranches.size.coerceAtLeast(1),
-                    workerCount = allStaff.size.coerceAtLeast(1)
+                    workerCount = allStaff.size.coerceAtLeast(1),
+                    deviceCount = activeDevices
                 )
                 repository.updateShopProfile(
                     shopProfile.value.copy(

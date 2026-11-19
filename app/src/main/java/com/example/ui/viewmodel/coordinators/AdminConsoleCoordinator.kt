@@ -7,6 +7,9 @@ import com.example.data.model.ShopProfile
 import com.example.data.model.User
 import com.example.data.model.UserRole
 import com.example.data.repository.BeBossRepository
+import com.example.util.AdminPaymentConfig
+import com.example.util.BeBossNotificationManager
+import com.example.util.CloudSyncScheduler
 import com.example.util.OfflineSubscriptionManager
 import com.example.util.PaymentProcessingResult
 import com.example.util.ShopDataTransferManager
@@ -18,6 +21,7 @@ import com.example.util.SupabaseAuditLogDto
 import com.example.util.SupabaseBranchSnapshotDto
 import com.example.util.SupabasePaymentRequestDto
 import com.example.util.SupabaseShopAccountDto
+import com.example.util.SupabaseShopDeviceDto
 import com.example.util.SupabaseShopUserDto
 import com.example.util.SupabaseUnlockCodeDto
 import kotlinx.coroutines.CoroutineScope
@@ -57,6 +61,9 @@ class AdminConsoleCoordinator(
     private val _adminShopUsers = MutableStateFlow<List<SupabaseShopUserDto>>(emptyList())
     val adminShopUsers: StateFlow<List<SupabaseShopUserDto>> = _adminShopUsers.asStateFlow()
 
+    private val _adminShopDevices = MutableStateFlow<List<SupabaseShopDeviceDto>>(emptyList())
+    val adminShopDevices: StateFlow<List<SupabaseShopDeviceDto>> = _adminShopDevices.asStateFlow()
+
     private val _adminBranchSnapshots = MutableStateFlow<List<SupabaseBranchSnapshotDto>>(emptyList())
     val adminBranchSnapshots: StateFlow<List<SupabaseBranchSnapshotDto>> = _adminBranchSnapshots.asStateFlow()
 
@@ -65,6 +72,11 @@ class AdminConsoleCoordinator(
 
     private val _adminAuditLogs = MutableStateFlow<List<SupabaseAuditLogDto>>(emptyList())
     val adminAuditLogs: StateFlow<List<SupabaseAuditLogDto>> = _adminAuditLogs.asStateFlow()
+
+    private val _adminPaymentConfig = MutableStateFlow(
+        OfflineSubscriptionManager.getCurrentPaymentConfig()
+    )
+    val adminPaymentConfig: StateFlow<AdminPaymentConfig> = _adminPaymentConfig.asStateFlow()
 
     private val _isAdminLoading = MutableStateFlow(false)
     val isAdminLoading: StateFlow<Boolean> = _isAdminLoading.asStateFlow()
@@ -132,6 +144,7 @@ class AdminConsoleCoordinator(
             _adminPaymentRequests.value = emptyList()
             _adminShopAccounts.value = emptyList()
             _adminShopUsers.value = emptyList()
+            _adminShopDevices.value = emptyList()
             _adminBranchSnapshots.value = emptyList()
             _adminUnlockCodes.value = emptyList()
             _adminAuditLogs.value = emptyList()
@@ -186,15 +199,19 @@ class AdminConsoleCoordinator(
         branchCount: Int,
         workerCount: Int,
         telcoReference: String = "",
+        payerFullName: String = "",
+        deviceCount: Int = 1,
         onSubmitted: (PaymentVerificationRequest, Boolean) -> Unit = { _, _ -> }
     ) {
         scope.launch {
             val profile = shopProfile.value
             val owner = resolveOwnerUser()
+            val safeDevices = deviceCount.coerceAtLeast(1)
             val breakdown = OfflineSubscriptionManager.calculateSubscriptionPrice(
                 branchCount = branchCount,
                 workerCount = workerCount,
-                durationMonths = durationMonths
+                durationMonths = durationMonths,
+                deviceCount = safeDevices
             )
             val ussd = if (provider.contains("AIRTEL", ignoreCase = true)) breakdown.ussdAirtelCode else breakdown.ussdMtnCode
             val cleanUsername = username.trim().lowercase().ifBlank { owner?.username ?: "owner" }
@@ -207,15 +224,20 @@ class AdminConsoleCoordinator(
                 provider = provider,
                 ussdCode = ussd,
                 payerPhone = payerPhone.trim().ifBlank { cleanRegPhone },
+                payerFullName = payerFullName.trim(),
                 amountRwf = breakdown.totalPayable,
                 durationMonths = durationMonths,
                 branchCount = branchCount.coerceAtLeast(1),
                 workerCount = workerCount.coerceAtLeast(1),
+                deviceCount = safeDevices,
                 telcoReference = telcoReference.trim().uppercase(),
                 status = "PENDING_VERIFICATION",
                 syncedToSupabase = false
             )
             val synced = repository.submitPaymentVerificationRequest(req, profile, owner)
+            if (!synced) {
+                CloudSyncScheduler.enqueueImmediateSync(application)
+            }
             repository.logSyncEvent(
                 type = "SUPABASE_ADMIN",
                 status = if (synced) "SUCCESS" else "QUEUED",
@@ -234,13 +256,24 @@ class AdminConsoleCoordinator(
         val owner = resolveOwnerUser()
         val branchCount = branches.value.size.coerceAtLeast(1)
         val workerCount = allUsers.value.size.coerceAtLeast(1)
+        val activeDevices = repository.getActiveDevicesCount()
         val res = repository.syncPendingAdminDataWithSupabase(
             shopProfile = profile,
             ownerUser = owner,
             branchCount = branchCount,
-            workerCount = workerCount
+            workerCount = workerCount,
+            deviceCount = activeDevices,
+            context = application
         )
-        if (!silent || res.approvedCodesFound.isNotEmpty()) {
+        _adminPaymentConfig.value = OfflineSubscriptionManager.getCurrentPaymentConfig()
+        if (res.directAutoUnlocked) {
+            BeBossNotificationManager.sendDirectAutoUnlockNotification(
+                context = application,
+                shopName = profile.shopName,
+                daysRemaining = shopProfile.value.daysRemaining
+            )
+            emitSnackbar(res.message)
+        } else if (!silent || res.approvedCodesFound.isNotEmpty()) {
             emitSnackbar(res.message)
         }
     }
@@ -269,9 +302,14 @@ class AdminConsoleCoordinator(
             _adminPaymentRequests.value = SupabaseAdminClient.fetchAllPaymentRequests()
             _adminShopAccounts.value = SupabaseAdminClient.fetchAllShopAccounts()
             _adminShopUsers.value = SupabaseAdminClient.fetchAllShopUsers()
+            _adminShopDevices.value = SupabaseAdminClient.fetchAllShopDevices()
             _adminBranchSnapshots.value = SupabaseAdminClient.fetchAllBranchSnapshots()
             _adminUnlockCodes.value = SupabaseAdminClient.fetchAllUnlockCodes()
             _adminAuditLogs.value = SupabaseAdminClient.fetchAdminAuditLogs()
+            SupabaseAdminClient.fetchPublicAppConfig()?.let { cfg ->
+                OfflineSubscriptionManager.saveDynamicPaymentConfig(application, cfg)
+                _adminPaymentConfig.value = cfg
+            }
             _adminLastSyncedAt.value = System.currentTimeMillis()
             _isAdminLoading.value = false
         }
@@ -300,6 +338,33 @@ class AdminConsoleCoordinator(
             }
             _isAdminLoading.value = false
             onGenerated(ok, code)
+        }
+    }
+
+    fun adminDirectAutoUnlockPayment(
+        request: SupabasePaymentRequestDto,
+        onDone: (Boolean) -> Unit = {}
+    ) {
+        scope.launch {
+            _isAdminLoading.value = true
+            val adminName = _adminSession.value?.fullName ?: currentUser.value?.name ?: "BeBoss Master Admin"
+            val ok = SupabaseAdminClient.approvePaymentDirectAutoUnlock(request, adminName)
+            if (ok) {
+                repository.recordLocalAudit(
+                    actorName = adminName,
+                    actorRole = "MASTER_ADMIN",
+                    action = "ADMIN_DIRECT_AUTO_UNLOCK",
+                    targetId = request.ownerUsername,
+                    details = "Auto-unlocked ${request.shopName} (${request.amountRwf} FRw, ${request.deviceCount} devices) without code"
+                )
+                refreshAdminDashboardData()
+                syncAdminDataToSupabaseSuspended(silent = true)
+                emitSnackbar("Auto-Unlocked ${request.shopName} (@${request.ownerUsername}) directly in cloud!")
+            } else {
+                emitSnackbar("Direct Auto-Unlock failed — check Master Admin session.")
+            }
+            _isAdminLoading.value = false
+            onDone(ok)
         }
     }
 
@@ -452,22 +517,71 @@ class AdminConsoleCoordinator(
         }
     }
 
-    fun adminUpdateShopLimits(shop: SupabaseShopAccountDto, branchCount: Int, workerCount: Int) {
+    fun adminUpdateShopLimits(
+        shop: SupabaseShopAccountDto,
+        branchCount: Int,
+        workerCount: Int,
+        deviceLimit: Int = shop.deviceLimit.coerceAtLeast(1)
+    ) {
         scope.launch {
             _isAdminLoading.value = true
-            val ok = SupabaseAdminClient.adminUpdateShopLimits(shop, branchCount, workerCount)
+            val ok = SupabaseAdminClient.adminUpdateShopLimits(shop, branchCount, workerCount, deviceLimit)
             if (ok) {
                 repository.recordLocalAudit(
                     actorName = _adminSession.value?.fullName ?: "MASTER_ADMIN",
                     actorRole = "MASTER_ADMIN",
                     action = "ADMIN_UPDATE_SHOP_LIMITS",
                     targetId = shop.ownerUsername,
-                    details = "${shop.shopName}: $branchCount branches / $workerCount workers"
+                    details = "${shop.shopName}: $branchCount br / $workerCount stf / $deviceLimit dev"
                 )
                 refreshAdminDashboardData()
-                emitSnackbar("Updated quotas for ${shop.shopName} ($branchCount br / $workerCount workers).")
+                emitSnackbar("Updated quotas for ${shop.shopName} ($branchCount br / $workerCount stf / $deviceLimit dev).")
             } else {
                 emitSnackbar("Failed updating shop quotas.")
+            }
+            _isAdminLoading.value = false
+        }
+    }
+
+    fun adminSavePaymentConfig(config: AdminPaymentConfig, onDone: (Boolean) -> Unit = {}) {
+        scope.launch {
+            _isAdminLoading.value = true
+            val ok = SupabaseAdminClient.adminSaveAppConfig(config)
+            if (ok) {
+                OfflineSubscriptionManager.saveDynamicPaymentConfig(application, config.copy(updatedAt = System.currentTimeMillis()))
+                _adminPaymentConfig.value = OfflineSubscriptionManager.getCurrentPaymentConfig()
+                emitSnackbar("Saved Admin WhatsApp & MoMo/Airtel USSD numbers globally!")
+            } else {
+                emitSnackbar("Failed saving payment config to Supabase.")
+            }
+            _isAdminLoading.value = false
+            onDone(ok)
+        }
+    }
+
+    fun adminToggleShopDeviceActive(device: SupabaseShopDeviceDto, isActive: Boolean) {
+        scope.launch {
+            _isAdminLoading.value = true
+            val ok = SupabaseAdminClient.adminToggleShopDeviceActive(device, isActive)
+            if (ok) {
+                refreshAdminDashboardData()
+                emitSnackbar("Device '${device.deviceName}' ${if (isActive) "activated" else "disabled"}.")
+            } else {
+                emitSnackbar("Failed updating device in Supabase.")
+            }
+            _isAdminLoading.value = false
+        }
+    }
+
+    fun adminDeleteShopDevice(device: SupabaseShopDeviceDto) {
+        scope.launch {
+            _isAdminLoading.value = true
+            val ok = SupabaseAdminClient.deleteShopDeviceInCloud(device.shopSyncKey, device.id, useAdmin = true)
+            if (ok) {
+                refreshAdminDashboardData()
+                emitSnackbar("Removed device '${device.deviceName}'.")
+            } else {
+                emitSnackbar("Failed deleting device from Supabase.")
             }
             _isAdminLoading.value = false
         }

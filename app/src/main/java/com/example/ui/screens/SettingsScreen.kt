@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DataObject
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Group
@@ -142,6 +143,7 @@ import com.example.data.model.Customer
 import com.example.data.model.CustomerPayment
 import com.example.data.model.Product
 import com.example.data.model.Sale
+import com.example.data.model.ShopDevice
 import com.example.data.model.ShopProfile
 import com.example.data.model.User
 import com.example.data.model.UserRole
@@ -152,6 +154,7 @@ import com.example.ui.theme.LossRed
 import com.example.ui.theme.OrangeLight
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
+import com.example.util.AdminPaymentConfig
 import com.example.util.AppLanguage
 import com.example.util.BranchPeerSyncEvent
 import com.example.util.DiscoveredBranchHub
@@ -169,6 +172,7 @@ import com.example.util.SupabaseAdminSession
 import com.example.util.SupabaseAuditLogDto
 import com.example.util.SupabasePaymentRequestDto
 import com.example.util.SupabaseShopAccountDto
+import com.example.util.SupabaseShopDeviceDto
 import com.example.util.SupabaseUnlockCodeDto
 import java.io.File
 import java.util.UUID
@@ -180,6 +184,8 @@ fun SettingsScreen(
     currentUser: User? = null,
     allUsers: List<User> = emptyList(),
     branches: List<com.example.data.model.Branch> = emptyList(),
+    shopDevices: List<ShopDevice> = emptyList(),
+    livePaymentConfig: AdminPaymentConfig = OfflineSubscriptionManager.getCurrentPaymentConfig(),
     products: List<Product> = emptyList(),
     customers: List<Customer> = emptyList(),
     sales: List<Sale> = emptyList(),
@@ -209,6 +215,9 @@ fun SettingsScreen(
     onSyncWithLocalHub: (String) -> Unit = {},
     onSaveBranch: (com.example.data.model.Branch) -> Unit = {},
     onDeleteBranch: (String) -> Unit = {},
+    onAddShopDevice: (deviceName: String, assignedUser: User, branch: com.example.data.model.Branch?, onCreated: (ShopDevice) -> Unit) -> Unit = { _, _, _, _ -> },
+    onToggleShopDeviceActive: (deviceId: String, isActive: Boolean) -> Unit = { _, _ -> },
+    onDeleteShopDevice: (deviceId: String) -> Unit = {},
     stockTransfers: List<com.example.data.model.StockTransfer> = emptyList(),
     onCreateStockTransfer: (productId: String, fromBranchId: String, fromBranchName: String, toBranchId: String, toBranchName: String, quantity: Double, notes: String) -> Unit = { _, _, _, _, _, _, _ -> },
     onDeleteStockTransfer: (String) -> Unit = {},
@@ -240,7 +249,7 @@ fun SettingsScreen(
     onStopLanDiscovery: () -> Unit = {},
     onGenerateBranchShareToken: ((String?, (String) -> Unit) -> Unit)? = null,
     onExportFullBranchPackage: ((String?, (File) -> Unit) -> Unit)? = null,
-    onSubmitPaymentVerification: ((provider: String, payerPhone: String, username: String, registeredPhone: String, durationMonths: Int, branchCount: Int, workerCount: Int, telcoRef: String, onDone: (PaymentVerificationRequest, Boolean) -> Unit) -> Unit)? = null,
+    onSubmitPaymentVerification: ((provider: String, payerPhone: String, payerFullName: String, username: String, registeredPhone: String, durationMonths: Int, branchCount: Int, workerCount: Int, deviceCount: Int, telcoRef: String, onDone: (PaymentVerificationRequest, Boolean) -> Unit) -> Unit)? = null,
     onCheckCloudApproval: () -> Unit = {},
     adminSession: SupabaseAdminSession? = null,
     adminAuthError: String? = null,
@@ -248,6 +257,7 @@ fun SettingsScreen(
     adminPaymentRequests: List<SupabasePaymentRequestDto> = emptyList(),
     adminShopAccounts: List<SupabaseShopAccountDto> = emptyList(),
     adminShopUsers: List<com.example.util.SupabaseShopUserDto> = emptyList(),
+    adminShopDevices: List<SupabaseShopDeviceDto> = emptyList(),
     adminBranchSnapshots: List<com.example.util.SupabaseBranchSnapshotDto> = emptyList(),
     adminUnlockCodes: List<SupabaseUnlockCodeDto> = emptyList(),
     adminAuditLogs: List<SupabaseAuditLogDto> = emptyList(),
@@ -258,6 +268,10 @@ fun SettingsScreen(
     onAdminSignOut: () -> Unit = {},
     onRefreshAdminDashboard: () -> Unit = {},
     onAdminApprovePayment: ((SupabasePaymentRequestDto, (Boolean, String) -> Unit) -> Unit)? = null,
+    onAdminDirectAutoUnlock: ((SupabasePaymentRequestDto, (Boolean) -> Unit) -> Unit)? = null,
+    onAdminSavePaymentConfig: ((AdminPaymentConfig, (Boolean) -> Unit) -> Unit)? = null,
+    onAdminToggleShopDevice: (SupabaseShopDeviceDto, Boolean) -> Unit = { _, _ -> },
+    onAdminDeleteShopDevice: (SupabaseShopDeviceDto) -> Unit = {},
     onAdminApproveBatch: ((Int, Int) -> Unit) -> Unit = { _ -> },
     onAdminRejectPayment: (SupabasePaymentRequestDto, String) -> Unit = { _, _ -> },
     onAdminIssueManualCode: ((username: String, registeredPhone: String, tierCode: String, days: Int, amountRwf: Int, onDone: (Boolean, String) -> Unit) -> Unit)? = null,
@@ -265,7 +279,7 @@ fun SettingsScreen(
     onAdminExtendShopSubscription: (SupabaseShopAccountDto, Int) -> Unit = { _, _ -> },
     onAdminResetShopTrial: (SupabaseShopAccountDto) -> Unit = {},
     onAdminSetShopStatus: (SupabaseShopAccountDto, String) -> Unit = { _, _ -> },
-    onAdminUpdateShopLimits: (SupabaseShopAccountDto, Int, Int) -> Unit = { _, _, _ -> },
+    onAdminUpdateShopLimits: (SupabaseShopAccountDto, Int, Int, Int) -> Unit = { _, _, _, _ -> },
     onAdminDeleteShopAccount: (SupabaseShopAccountDto) -> Unit = {},
     onAdminUpdateShopUserRole: (com.example.util.SupabaseShopUserDto, String) -> Unit = { _, _ -> },
     onAdminToggleShopUserActive: (com.example.util.SupabaseShopUserDto, Boolean) -> Unit = { _, _ -> },
@@ -307,6 +321,7 @@ fun SettingsScreen(
     var currencyExpanded by remember { mutableStateOf(false) }
     var showStaffDialog by remember { mutableStateOf(false) }
     var showBranchDialog by remember { mutableStateOf(false) }
+    var showShopDevicesDialog by remember { mutableStateOf(false) }
     var showSyncHubDialog by remember { mutableStateOf(false) }
     var showDataTransferDialog by remember { mutableStateOf(false) }
     var showSubscriptionDialog by remember { mutableStateOf(false) }
@@ -762,6 +777,27 @@ fun SettingsScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
+                    OutlinedButton(
+                        onClick = { showShopDevicesDialog = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag("settings_shop_devices_btn"),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, ProfitGreen.copy(alpha = 0.55f))
+                    ) {
+                        Icon(Icons.Default.Devices, contentDescription = null, modifier = Modifier.size(17.dp), tint = ProfitGreen)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "${Localization.get("shop_devices_title", language)} (${shopDevices.count { it.isActive }.coerceAtLeast(1)}) • +2,000 FRw/extra",
+                            fontSize = 12.sp,
+                            color = ProfitGreen,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -942,10 +978,12 @@ fun SettingsScreen(
             val daysRemaining = shopProfile.daysRemaining
             val activeBranchCount = branches.size.coerceAtLeast(1)
             val activeWorkerCount = allUsers.size.coerceAtLeast(1)
+            val activeDeviceCount = shopDevices.count { it.isActive }.coerceAtLeast(1)
             val currentPricing = OfflineSubscriptionManager.calculateSubscriptionPrice(
                 branchCount = activeBranchCount,
                 workerCount = activeWorkerCount,
-                durationMonths = 1
+                durationMonths = 1,
+                deviceCount = activeDeviceCount
             )
             val ownerAccount = remember(currentUser, allUsers) {
                 allUsers.firstOrNull { it.role == UserRole.OWNER } ?: currentUser ?: allUsers.firstOrNull()
@@ -1023,13 +1061,15 @@ fun SettingsScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Account Binding Summary (sent to Admin on WhatsApp after USSD payment)
+                    // Account Binding Summary & Live Admin USSD/WhatsApp Config
+                    val liveWhatsApp = livePaymentConfig.adminWhatsAppNumber.trim()
+                        .ifBlank { shopProfile.adminWhatsAppNumber.trim() }
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(
                                 text = "Account: @${ownerAccount?.username?.ifBlank { "owner" } ?: "owner"} • Phone: ${ownerAccount?.phone?.ifBlank { shopProfile.phone } ?: shopProfile.phone}",
                                 fontSize = 11.sp,
@@ -1037,9 +1077,27 @@ fun SettingsScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Device ID: $deviceCode • Admin WhatsApp: ${OfflineSubscriptionManager.defaultSupportWhatsApp}",
+                                text = "Devices: $activeDeviceCount paired (${currentPricing.deviceTierName}) • Device ID: $deviceCode",
                                 fontSize = 10.5.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Admin WhatsApp: ${liveWhatsApp.ifBlank { "Configure in Admin Console -> Pay Config" }}",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (liveWhatsApp.isNotBlank()) ProfitGreen else OrangePrimary
+                            )
+                            Text(
+                                text = "MTN: ${currentPricing.ussdMtnCode} • Airtel: ${currentPricing.ussdAirtelCode}",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Background WorkManager Cloud Auto-Sync: Active even when app is closed",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = ProfitGreen
                             )
                         }
                     }
@@ -2861,6 +2919,21 @@ fun SettingsScreen(
         )
     }
 
+    // Shop Devices Multi-Terminal Auto-Sync Dialog (+2,000 FRw/added device)
+    if (showShopDevicesDialog) {
+        ShopDevicesManagementDialog(
+            shopProfile = shopProfile,
+            shopDevices = shopDevices,
+            allUsers = allUsers,
+            branches = branches,
+            language = language,
+            onAddDevice = onAddShopDevice,
+            onToggleDeviceActive = onToggleShopDeviceActive,
+            onDeleteDevice = onDeleteShopDevice,
+            onDismiss = { showShopDevicesDialog = false }
+        )
+    }
+
     // Shop Owner Branch & Worker Sync Hub Dialog
     if (showSyncHubDialog) {
         ShopOwnerSyncHubDialog(
@@ -2942,8 +3015,10 @@ fun SettingsScreen(
                         shopProfile = shopProfile,
                         branches = branches,
                         allUsers = allUsers,
+                        shopDevices = shopDevices,
                         currentUser = currentUser,
                         paymentRequests = paymentVerificationRequests,
+                        livePaymentConfig = livePaymentConfig,
                         language = language,
                         onActivateVoucher = { code ->
                             onActivateVoucher(code)
@@ -2968,10 +3043,12 @@ fun SettingsScreen(
             paymentRequests = adminPaymentRequests,
             shopAccounts = adminShopAccounts,
             shopUsers = adminShopUsers,
+            shopDevices = adminShopDevices,
             branchSnapshots = adminBranchSnapshots,
             unlockCodes = adminUnlockCodes,
             auditLogs = adminAuditLogs,
             localAuditLogs = localAuditLogs,
+            paymentConfig = livePaymentConfig,
             isLoading = isAdminLoading,
             language = language,
             lastSyncedAt = adminLastSyncedAt,
@@ -2984,6 +3061,18 @@ fun SettingsScreen(
                     onAdminApprovePayment(req, onDone)
                 }
             },
+            onDirectAutoUnlock = { req, onDone ->
+                if (onAdminDirectAutoUnlock != null) {
+                    onAdminDirectAutoUnlock(req, onDone)
+                }
+            },
+            onSavePaymentConfig = { cfg, onDone ->
+                if (onAdminSavePaymentConfig != null) {
+                    onAdminSavePaymentConfig(cfg, onDone)
+                }
+            },
+            onToggleShopDeviceActive = onAdminToggleShopDevice,
+            onDeleteShopDevice = onAdminDeleteShopDevice,
             onBatchApprovePending = onAdminApproveBatch,
             onRejectPayment = onAdminRejectPayment,
             onIssueManualCode = { username, regPhone, tierCode, days, amountRwf, onDone ->
@@ -3194,3 +3283,312 @@ fun SettingsScreen(
         )
     }
 }
+
+@Composable
+private fun ShopDevicesManagementDialog(
+    shopProfile: ShopProfile,
+    shopDevices: List<ShopDevice>,
+    allUsers: List<User>,
+    branches: List<com.example.data.model.Branch>,
+    language: AppLanguage,
+    onAddDevice: (deviceName: String, assignedUser: User, branch: com.example.data.model.Branch?, onCreated: (ShopDevice) -> Unit) -> Unit,
+    onToggleDeviceActive: (deviceId: String, isActive: Boolean) -> Unit,
+    onDeleteDevice: (deviceId: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var deviceNameInput by remember { mutableStateOf("") }
+    var selectedUser by remember(allUsers) {
+        mutableStateOf(allUsers.firstOrNull { it.role != UserRole.OWNER } ?: allUsers.firstOrNull())
+    }
+    var selectedBranch by remember(branches) { mutableStateOf(branches.firstOrNull()) }
+    var latestCreatedDevice by remember { mutableStateOf<ShopDevice?>(null) }
+
+    val ownerUser = remember(allUsers) { allUsers.firstOrNull { it.role == UserRole.OWNER } ?: allUsers.firstOrNull() }
+    val activeCount = shopDevices.count { it.isActive }.coerceAtLeast(1)
+    val extraFee = (activeCount - 1).coerceAtLeast(0) * OfflineSubscriptionManager.PER_EXTRA_DEVICE_FEE_RWF
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .widthIn(max = 620.dp)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(vertical = 12.dp),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Surface(
+                            shape = CircleShape,
+                            color = ProfitGreen.copy(alpha = 0.14f),
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Devices, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(22.dp))
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = Localization.get("shop_devices_title", language),
+                                fontWeight = FontWeight.Black,
+                                fontSize = 15.5.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "$activeCount Active • +$extraFee FRw/mo Multi-Device Add-on",
+                                fontSize = 11.sp,
+                                color = OrangePrimary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = Localization.get("close", language))
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = ProfitGreen.copy(alpha = 0.1f),
+                    border = BorderStroke(1.dp, ProfitGreen.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = Localization.get("device_fee_addon_note", language),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+
+                // Add New Paired Device Card
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = Localization.get("add_shop_device", language),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        OutlinedTextField(
+                            value = deviceNameInput,
+                            onValueChange = { deviceNameInput = it },
+                            label = { Text("Terminal / Phone Name *") },
+                            placeholder = { Text("e.g. Kigali Counter 2, Warehouse Tablet") },
+                            leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null, tint = OrangePrimary) },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("add_device_name_input"),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+
+                        if (allUsers.isNotEmpty()) {
+                            Text("Assign Staff Operator:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(allUsers) { usr ->
+                                    val picked = selectedUser?.id == usr.id
+                                    FilterChip(
+                                        selected = picked,
+                                        onClick = { selectedUser = usr },
+                                        label = { Text("${usr.name} (${usr.role.name})", fontSize = 11.sp) }
+                                    )
+                                }
+                            }
+                        }
+
+                        if (branches.isNotEmpty()) {
+                            Text("Assign Branch:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(branches) { br ->
+                                    val picked = selectedBranch?.id == br.id
+                                    FilterChip(
+                                        selected = picked,
+                                        onClick = { selectedBranch = br },
+                                        label = { Text(br.name, fontSize = 11.sp) }
+                                    )
+                                }
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                val userToAssign = selectedUser ?: return@Button
+                                val cleanName = deviceNameInput.trim().ifBlank { "${userToAssign.name} Device" }
+                                onAddDevice(cleanName, userToAssign, selectedBranch) { created ->
+                                    latestCreatedDevice = created
+                                    deviceNameInput = ""
+                                }
+                            },
+                            enabled = selectedUser != null,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .testTag("add_shop_device_submit_btn"),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = ProfitGreen)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(Localization.get("add_shop_device", language), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                if (latestCreatedDevice != null) {
+                    val created = latestCreatedDevice!!
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = OrangePrimary.copy(alpha = 0.1f),
+                        border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Device Ready to Pair!", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = OrangePrimary)
+                            Text(
+                                text = "Join Code: ${created.joinCode}",
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "On the new device, tap Create/Register Shop -> 'Join Existing Shop' -> enter Owner @${ownerUser?.username ?: "owner"}, Phone ${shopProfile.phone}, and Join Code ${created.joinCode}.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+
+                Text(
+                    text = "Paired Shop Terminals (${shopDevices.size})",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                shopDevices.forEach { dev ->
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        border = BorderStroke(1.dp, if (dev.isActive) ProfitGreen.copy(alpha = 0.35f) else LossRed.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(dev.deviceName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text(
+                                        text = "@${dev.assignedUsername} (${dev.role}) • ${dev.branchName}",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (dev.isOwnerPrimary) OrangePrimary.copy(alpha = 0.14f) else ProfitGreen.copy(alpha = 0.14f)
+                                ) {
+                                    Text(
+                                        text = if (dev.isOwnerPrimary) "PRIMARY FREE" else "+${dev.monthlyFeeAddonRwf} FRw/mo",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (dev.isOwnerPrimary) OrangePrimary else ProfitGreen,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+
+                            if (!dev.isOwnerPrimary) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Join Code: ${dev.joinCode}",
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = OrangePrimary
+                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(
+                                            onClick = {
+                                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                cm.setPrimaryClip(ClipData.newPlainText("Join Code", dev.joinCode))
+                                                Toast.makeText(context, "Copied Join Code: ${dev.joinCode}", Toast.LENGTH_SHORT).show()
+                                            },
+                                            modifier = Modifier.size(44.dp)
+                                        ) {
+                                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy Join Code", tint = OrangePrimary, modifier = Modifier.size(17.dp))
+                                        }
+                                        IconButton(
+                                            onClick = {
+                                                val pairingMsg = """
+                                                    *BEBOSS DEVICE PAIRING INVITE*
+                                                    Shop: ${shopProfile.shopName}
+                                                    Device Name: ${dev.deviceName}
+                                                    Assigned Staff: ${dev.assignedUserName} (@${dev.assignedUsername}, ${dev.role})
+                                                    Branch: ${dev.branchName}
+
+                                                    Open BeBoss App -> Create/Register Shop -> *Join Existing Shop*:
+                                                    • Owner Username: ${ownerUser?.username ?: "owner"}
+                                                    • Owner Phone: ${shopProfile.phone}
+                                                    • Device Join Code: ${dev.joinCode}
+                                                """.trimIndent()
+                                                PdfReportGenerator.sendWhatsAppDirect(context, "", pairingMsg)
+                                            },
+                                            modifier = Modifier.size(44.dp)
+                                        ) {
+                                            Icon(Icons.Default.Share, contentDescription = "Share Pairing Info", tint = ProfitGreen, modifier = Modifier.size(17.dp))
+                                        }
+                                        Switch(
+                                            checked = dev.isActive,
+                                            onCheckedChange = { checked -> onToggleDeviceActive(dev.id, checked) },
+                                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = ProfitGreen)
+                                        )
+                                        IconButton(
+                                            onClick = { onDeleteDevice(dev.id) },
+                                            modifier = Modifier.size(44.dp)
+                                        ) {
+                                            Icon(Icons.Default.Delete, contentDescription = "Remove device", tint = LossRed, modifier = Modifier.size(18.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

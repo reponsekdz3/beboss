@@ -13,10 +13,12 @@ import com.example.data.model.StockTransfer
 import com.example.data.model.User
 import com.example.data.repository.BeBossRepository
 import com.example.util.CloudSyncReport
+import com.example.util.CloudSyncScheduler
 import com.example.util.ConnectivityStatus
 import com.example.util.EndpointPingResult
 import com.example.util.LocalNetworkSyncServer
 import com.example.util.NetworkConnectivityObserver
+import com.example.util.OfflineSubscriptionManager
 import com.example.util.ShopDataTransferManager
 import com.example.util.ShopImportSummary
 import kotlinx.coroutines.CoroutineScope
@@ -74,6 +76,8 @@ class SyncCoordinator(
     val peerSyncEvents = localNetworkSyncServer.peerSyncEvents
 
     fun setupAutoCloudSyncOnInternet() {
+        OfflineSubscriptionManager.initConfigCache(application)
+        CloudSyncScheduler.schedulePeriodicSync(application)
         scope.launch {
             repository.ensureDefaultBranches()
             connectivityStatus.collect { status ->
@@ -95,11 +99,15 @@ class SyncCoordinator(
     }
 
     fun scheduleAutoBranchSync(delayMs: Long = 1600L) {
+        // Always schedule OS-level network-constrained background sync so offline writes upload
+        // automatically even if the app is closed before internet returns.
+        CloudSyncScheduler.enqueueImmediateSync(application)
         if (connectivityStatus.value != ConnectivityStatus.AVAILABLE) return
         autoBranchSyncJob?.cancel()
         autoBranchSyncJob = scope.launch {
             delay(delayMs)
             if (connectivityStatus.value == ConnectivityStatus.AVAILABLE && !_isSyncing.value) {
+                syncAdminCloud(true)
                 val report = repository.performSync(
                     activeBranchId = selectedBranchId.value,
                     deviceId = deviceId

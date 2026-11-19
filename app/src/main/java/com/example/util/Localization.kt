@@ -582,6 +582,84 @@ object Localization {
             "Kora Kode Nyayo ya BB2 Ihujwe n'Konti",
             "Générer un Code BB2 Lié au Compte",
             "Tengeneza Msimbo Halisi wa BB2 wa Akaunti"
+        ),
+        "shop_devices_title" to entry(
+            "Shop Devices",
+            "Telefoni z'Ububiko",
+            "Appareils Boutique",
+            "Vifaa vya Duka"
+        ),
+        "add_shop_device" to entry(
+            "Add Device (+2,000 FRw/mo)",
+            "Ongeraho Telefoni (+2,000 FRw/ukwezi)",
+            "Ajouter Appareil (+2 000 FRw/mois)",
+            "Ongeza Kifaa (+2,000 FRw/mwezi)"
+        ),
+        "join_existing_shop" to entry(
+            "Join Existing Shop",
+            "Injira mu Duka Ririho",
+            "Rejoindre Boutique",
+            "Jiunge na Duka"
+        ),
+        "create_new_shop" to entry(
+            "Create New Shop",
+            "Fungura Duka Rishya",
+            "Créer Nouvelle Boutique",
+            "Unda Duka Jipya"
+        ),
+        "device_join_code" to entry(
+            "Device Join Code",
+            "Kode yo Kwinjira",
+            "Code d'Appairage",
+            "Msimbo wa Kujiunga"
+        ),
+        "device_fee_addon_note" to entry(
+            "1st owner device is included free. Each extra paired device with a user adds 2,000 FRw/month and auto-syncs all shop data.",
+            "Telefoni ya mbere y'umuyobozi iri mu ifatabuguzi. Buri telefoni nshya n'umukozi yongeraho 2,000 FRw/ukwezi kandi ihuza amakuru yose.",
+            "Le 1er appareil propriétaire est inclus. Chaque appareil supplémentaire avec utilisateur ajoute 2 000 FRw/mois avec synchronisation auto.",
+            "Kifaa cha kwanza cha mmiliki kimejumuishwa. Kila kifaa cha ziada na mtumiaji huongeza 2,000 FRw/mwezi na kusawazisha data zote."
+        ),
+        "payer_full_name_label" to entry(
+            "Full Names on Sender Phone (MoMo/Airtel) *",
+            "Amazina Yuzuye ku Murongo Wohereje Amafaranga *",
+            "Nom Complet sur le Numéro Payeur *",
+            "Majina Kamili Kwenye Namba Iliyotuma *"
+        ),
+        "direct_auto_unlock_badge" to entry(
+            "Auto-Unlocked Directly by Admin (No Code Needed)",
+            "Yafunguwe na Admin Ako Kanya (Nta Kode Ikenewe)",
+            "Déverrouillé Directement par Admin (Sans Code)",
+            "Imefunguliwa Moja kwa Moja na Msimamizi (Bila Msimbo)"
+        ),
+        "admin_whatsapp_label" to entry(
+            "Admin WhatsApp Number",
+            "Nimero ya WhatsApp ya Admin",
+            "Numéro WhatsApp Admin",
+            "Namba ya WhatsApp ya Msimamizi"
+        ),
+        "mtn_ussd_config_label" to entry(
+            "MTN MoMo Merchant Code & Phone (*182#)",
+            "Kode ya MTN MoMo & Nimero (*182#)",
+            "Code Marchand MTN MoMo & Tél (*182#)",
+            "Msimbo wa MTN MoMo na Simu (*182#)"
+        ),
+        "airtel_ussd_config_label" to entry(
+            "Airtel Money Phone (*500#)",
+            "Nimero ya Airtel Money (*500#)",
+            "Numéro Airtel Money (*500#)",
+            "Namba ya Airtel Money (*500#)"
+        ),
+        "admin_tab_devices" to entry(
+            "Devices",
+            "Telefoni",
+            "Appareils",
+            "Vifaa"
+        ),
+        "admin_tab_payconfig" to entry(
+            "Pay Config",
+            "Igenamiterere USSD",
+            "Config Paiement",
+            "Mipangilio Malipo"
         )
     )
 

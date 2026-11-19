@@ -14,6 +14,7 @@ import com.example.data.dao.ProductDao
 import com.example.data.dao.PurchaseDao
 import com.example.data.dao.RedeemedVoucherDao
 import com.example.data.dao.SaleDao
+import com.example.data.dao.ShopDeviceDao
 import com.example.data.dao.ShopProfileDao
 import com.example.data.dao.StockTransferDao
 import com.example.data.dao.SyncQueueDao
@@ -29,6 +30,7 @@ import com.example.data.model.PurchaseRecord
 import com.example.data.model.RedeemedVoucher
 import com.example.data.model.Sale
 import com.example.data.model.SaleItem
+import com.example.data.model.ShopDevice
 import com.example.data.model.ShopProfile
 import com.example.data.model.StockTransfer
 import com.example.data.model.SyncQueueItem
@@ -55,9 +57,10 @@ import java.io.File
         RedeemedVoucher::class,
         PaymentVerificationRequest::class,
         LocalAuditLog::class,
-        SyncTombstone::class
+        SyncTombstone::class,
+        ShopDevice::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -75,6 +78,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun paymentVerificationDao(): PaymentVerificationDao
     abstract fun localAuditLogDao(): LocalAuditLogDao
     abstract fun syncTombstoneDao(): SyncTombstoneDao
+    abstract fun shopDeviceDao(): ShopDeviceDao
 
     companion object {
         const val DATABASE_NAME = "beboss_database.db"

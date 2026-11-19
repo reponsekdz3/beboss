@@ -89,8 +89,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import com.example.BuildConfig
 import com.example.data.model.LocalAuditLog
 import com.example.data.model.ShopProfile
@@ -99,20 +105,22 @@ import com.example.ui.theme.LossRed
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
 import com.example.ui.theme.WarningAmber
+import com.example.util.AdminPaymentConfig
+import com.example.util.AppLanguage
 import com.example.util.ClockGuard
 import com.example.util.CryptoKeyManager
 import com.example.util.DeviceSecurityManager
+import com.example.util.Localization
 import com.example.util.OfflineSubscriptionManager
 import com.example.util.PdfReportGenerator
+import com.example.util.SubscriptionSecurityManager
 import com.example.util.SupabaseAdminClient
 import com.example.util.SupabaseAdminSession
 import com.example.util.SupabaseAuditLogDto
 import com.example.util.SupabaseBranchSnapshotDto
 import com.example.util.SupabasePaymentRequestDto
-import com.example.util.AppLanguage
-import com.example.util.Localization
-import com.example.util.SubscriptionSecurityManager
 import com.example.util.SupabaseShopAccountDto
+import com.example.util.SupabaseShopDeviceDto
 import com.example.util.SupabaseShopUserDto
 import com.example.util.SupabaseUnlockCodeDto
 import java.text.SimpleDateFormat
@@ -128,10 +136,12 @@ fun AdminVerificationConsoleDialog(
     paymentRequests: List<SupabasePaymentRequestDto>,
     shopAccounts: List<SupabaseShopAccountDto>,
     shopUsers: List<SupabaseShopUserDto> = emptyList(),
+    shopDevices: List<SupabaseShopDeviceDto> = emptyList(),
     branchSnapshots: List<SupabaseBranchSnapshotDto> = emptyList(),
     unlockCodes: List<SupabaseUnlockCodeDto>,
     auditLogs: List<SupabaseAuditLogDto>,
     localAuditLogs: List<LocalAuditLog> = emptyList(),
+    paymentConfig: AdminPaymentConfig = OfflineSubscriptionManager.getCurrentPaymentConfig(),
     isLoading: Boolean,
     language: AppLanguage = AppLanguage.ENGLISH,
     lastSyncedAt: Long = 0L,
@@ -140,6 +150,10 @@ fun AdminVerificationConsoleDialog(
     onSignOutAdmin: () -> Unit,
     onRefresh: () -> Unit,
     onApprovePayment: (SupabasePaymentRequestDto, (Boolean, String) -> Unit) -> Unit,
+    onDirectAutoUnlock: (SupabasePaymentRequestDto, (Boolean) -> Unit) -> Unit = { _, _ -> },
+    onSavePaymentConfig: (AdminPaymentConfig, (Boolean) -> Unit) -> Unit = { _, _ -> },
+    onToggleShopDeviceActive: (SupabaseShopDeviceDto, Boolean) -> Unit = { _, _ -> },
+    onDeleteShopDevice: (SupabaseShopDeviceDto) -> Unit = {},
     onBatchApprovePending: ((Int, Int) -> Unit) -> Unit = { _ -> },
     onRejectPayment: (SupabasePaymentRequestDto, String) -> Unit,
     onIssueManualCode: (username: String, registeredPhone: String, tierCode: String, days: Int, amountRwf: Int, onDone: (Boolean, String) -> Unit) -> Unit,
@@ -147,7 +161,7 @@ fun AdminVerificationConsoleDialog(
     onExtendShopSubscription: (SupabaseShopAccountDto, Int) -> Unit = { _, _ -> },
     onResetShopTrial: (SupabaseShopAccountDto) -> Unit = {},
     onSetShopStatus: (SupabaseShopAccountDto, String) -> Unit = { _, _ -> },
-    onUpdateShopLimits: (SupabaseShopAccountDto, Int, Int) -> Unit = { _, _, _ -> },
+    onUpdateShopLimits: (SupabaseShopAccountDto, Int, Int, Int) -> Unit = { _, _, _, _ -> },
     onDeleteShopAccount: (SupabaseShopAccountDto) -> Unit = {},
     onUpdateShopUserRole: (SupabaseShopUserDto, String) -> Unit = { _, _ -> },
     onToggleShopUserActive: (SupabaseShopUserDto, Boolean) -> Unit = { _, _ -> },
@@ -171,10 +185,11 @@ fun AdminVerificationConsoleDialog(
     var adminFullName by remember { mutableStateOf("BeBoss Master Admin") }
     var showAdminPassword by remember { mutableStateOf(false) }
 
-    // Queue, Users, Shops, Codes, Audit Filters
+    // Queue, Users, Devices, Shops, Codes, Audit Filters
     var queueStatusFilter by remember { mutableStateOf("ALL") }
     var queueSearchQuery by remember { mutableStateOf("") }
     var userSearchQuery by remember { mutableStateOf("") }
+    var deviceSearchQuery by remember { mutableStateOf("") }
     var shopSearchQuery by remember { mutableStateOf("") }
     var shopStatusFilter by remember { mutableStateOf("ALL") }
     var codeSearchQuery by remember { mutableStateOf("") }
@@ -568,7 +583,7 @@ fun AdminVerificationConsoleDialog(
                                     )
                                 }
                                 Text(
-                                    text = "${shopAccounts.size} shops • ${shopUsers.size} users • ${unlockCodes.size} codes",
+                                    text = "${shopAccounts.size} shops • ${shopDevices.size} dev • ${shopUsers.size} users",
                                     fontSize = 10.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -618,6 +633,18 @@ fun AdminVerificationConsoleDialog(
                             selected = selectedTab == 6,
                             onClick = { selectedTab = 6 },
                             text = { Text("${Localization.get("admin_tab_audit", language)} (${auditLogs.size + localAuditLogs.size})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
+                        )
+                        Tab(
+                            selected = selectedTab == 7,
+                            onClick = { selectedTab = 7 },
+                            modifier = Modifier.testTag("admin_tab_devices"),
+                            text = { Text("Devices (${shopDevices.size})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
+                        )
+                        Tab(
+                            selected = selectedTab == 8,
+                            onClick = { selectedTab = 8 },
+                            modifier = Modifier.testTag("admin_tab_pay_config"),
+                            text = { Text("Pay Config", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
                         )
                     }
 
@@ -761,6 +788,7 @@ fun AdminVerificationConsoleDialog(
                                     req.ownerUsername.lowercase(Locale.ROOT).contains(q) ||
                                     req.ownerPhone.contains(q) ||
                                     req.payerPhone.contains(q) ||
+                                    req.payerFullName.lowercase(Locale.ROOT).contains(q) ||
                                     req.telcoReference.lowercase(Locale.ROOT).contains(q)
                                 statusMatch && searchMatch
                             }
@@ -774,14 +802,23 @@ fun AdminVerificationConsoleDialog(
                                 )
                             } else {
                                 filteredQueue.forEach { req ->
-                                    val isApproved = req.status == "APPROVED" && req.generatedUnlockCode.isNotBlank()
+                                    val hasCodeIssued = req.status == "APPROVED" && req.generatedUnlockCode.isNotBlank()
+                                    val isDirectUnlocked = req.status == "APPROVED" && req.approvalMode == "DIRECT_AUTO_UNLOCK"
+                                    val isApprovedAny = req.status == "APPROVED"
                                     val isRejected = req.status == "REJECTED"
+                                    val effectiveDevices = req.deviceCount.coerceAtLeast(1)
                                     val expectedFee = OfflineSubscriptionManager.calculateSubscriptionPrice(
                                         branchCount = req.branchCount.coerceAtLeast(1),
                                         workerCount = req.workerCount.coerceAtLeast(1),
-                                        durationMonths = req.durationMonths.coerceAtLeast(1)
+                                        durationMonths = req.durationMonths.coerceAtLeast(1),
+                                        deviceCount = effectiveDevices
                                     ).totalPayable
                                     val feeOk = req.amountRwf >= expectedFee
+                                    val reqPhoneLast9 = SubscriptionSecurityManager.normalizePhoneLast9(req.ownerPhone)
+                                    val matchedShop = shopAccounts.firstOrNull { acc ->
+                                        acc.ownerUsername.equals(req.ownerUsername, ignoreCase = true) ||
+                                            (reqPhoneLast9.isNotBlank() && SubscriptionSecurityManager.normalizePhoneLast9(acc.ownerPhone) == reqPhoneLast9)
+                                    }
 
                                     Surface(
                                         shape = RoundedCornerShape(12.dp),
@@ -789,7 +826,7 @@ fun AdminVerificationConsoleDialog(
                                         border = BorderStroke(
                                             1.dp,
                                             when {
-                                                isApproved -> ProfitGreen.copy(alpha = 0.45f)
+                                                isApprovedAny -> ProfitGreen.copy(alpha = 0.45f)
                                                 isRejected -> LossRed.copy(alpha = 0.45f)
                                                 else -> OrangePrimary.copy(alpha = 0.4f)
                                             }
@@ -819,11 +856,11 @@ fun AdminVerificationConsoleDialog(
                                                         )
                                                     }
                                                     Text(
-                                                        text = req.status,
+                                                        text = if (isDirectUnlocked) "AUTO-UNLOCKED" else req.status,
                                                         fontSize = 10.sp,
                                                         fontWeight = FontWeight.Black,
                                                         color = when {
-                                                            isApproved -> ProfitGreen
+                                                            isApprovedAny -> ProfitGreen
                                                             isRejected -> LossRed
                                                             else -> OrangePrimary
                                                         }
@@ -832,27 +869,74 @@ fun AdminVerificationConsoleDialog(
                                             }
 
                                             Text(
-                                                text = "User: @${req.ownerUsername} • Reg Phone: ${req.ownerPhone}",
+                                                text = "Account: @${req.ownerUsername} • Reg Phone: ${req.ownerPhone}",
                                                 fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                             Text(
-                                                text = "${req.provider} • ${req.amountRwf} FRw (${req.durationMonths * 30}d, ${req.branchCount} br / ${req.workerCount} stf)",
+                                                text = "Sender Name: ${req.payerFullName.ifBlank { "Not specified" }} • Sender Phone: ${req.payerPhone}",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = OrangePrimary
+                                            )
+                                            Text(
+                                                text = "${req.provider} • ${req.amountRwf} FRw (${req.durationMonths * 30}d • ${req.branchCount} br / ${req.workerCount} stf / $effectiveDevices dev)",
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
                                             Text(
-                                                text = "Payer: ${req.payerPhone} • Ref: ${req.telcoReference.ifBlank { "WhatsApp Proof" }}",
+                                                text = "USSD: ${req.ussdCode.ifBlank { "Manual" }} • Ref: ${req.telcoReference.ifBlank { "WhatsApp Proof" }}",
                                                 fontSize = 10.5.sp,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
 
-                                            if (isApproved) {
+                                            // Matching System Account Inspector (Compare WhatsApp Proof vs Cloud Shop Account)
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = if (matchedShop != null) ProfitGreen.copy(alpha = 0.08f) else WarningAmber.copy(alpha = 0.10f),
+                                                border = BorderStroke(1.dp, (if (matchedShop != null) ProfitGreen else WarningAmber).copy(alpha = 0.35f)),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                if (matchedShop != null) {
+                                                    val matchedDays = ((matchedShop.subscriptionExpiresAt - nowMs).coerceAtLeast(0L) / 86_400_000L).toInt()
+                                                    Column(modifier = Modifier.padding(8.dp)) {
+                                                        Text(
+                                                            text = "Matched Shop: ${matchedShop.shopName} (${matchedShop.ownerName}) • @${matchedShop.ownerUsername}",
+                                                            fontSize = 10.5.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = ProfitGreen
+                                                        )
+                                                        Text(
+                                                            text = "Status: ${matchedShop.subscriptionStatus} (${matchedDays}d left) • Quotas: ${matchedShop.branchCount}br/${matchedShop.workerCount}stf/${matchedShop.deviceLimit}dev (${matchedShop.monthlyFeeRwf} FRw/mo)",
+                                                            fontSize = 10.sp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                } else {
+                                                    Text(
+                                                        text = "No matching shop_accounts row yet — ask owner to sync internet or verify @${req.ownerUsername} / ${req.ownerPhone}.",
+                                                        fontSize = 10.sp,
+                                                        color = WarningAmber,
+                                                        fontWeight = FontWeight.Medium,
+                                                        modifier = Modifier.padding(8.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            if (hasCodeIssued) {
                                                 Text(
                                                     text = "Code: ${req.generatedUnlockCode}",
                                                     fontFamily = FontFamily.Monospace,
                                                     fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = ProfitGreen
+                                                )
+                                            } else if (isDirectUnlocked) {
+                                                Text(
+                                                    text = "Direct Auto-Unlocked by Admin (No Code Required) • Unlocks automatically on client sync.",
+                                                    fontSize = 10.5.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = ProfitGreen
                                                 )
@@ -866,7 +950,8 @@ fun AdminVerificationConsoleDialog(
                                             }
 
                                             Spacer(modifier = Modifier.height(4.dp))
-                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            // Option 1: Issue BB2 Unlock Code (+ WhatsApp reply button if issued)
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                                                 Button(
                                                     onClick = {
                                                         onApprovePayment(req) { _, code ->
@@ -878,31 +963,77 @@ fun AdminVerificationConsoleDialog(
                                                         }
                                                     },
                                                     modifier = Modifier
-                                                        .weight(1.4f)
-                                                        .heightIn(min = 48.dp),
-                                                    colors = ButtonDefaults.buttonColors(containerColor = if (isApproved) DarkNavy else ProfitGreen)
+                                                        .weight(1.3f)
+                                                        .heightIn(min = 48.dp)
+                                                        .testTag("admin_issue_bb2_btn_${req.id}"),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = if (hasCodeIssued) DarkNavy else ProfitGreen)
                                                 ) {
-                                                    Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(15.dp))
+                                                    Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(15.dp))
                                                     Spacer(modifier = Modifier.width(4.dp))
                                                     Text(
-                                                        text = if (isApproved) "Re-send Code" else "Verify & Issue BB2",
-                                                        fontSize = 11.sp,
+                                                        text = if (hasCodeIssued) "Re-send BB2" else "Verify & Issue BB2",
+                                                        fontSize = 10.5.sp,
                                                         fontWeight = FontWeight.Bold
                                                     )
                                                 }
 
-                                                if (!isApproved && !isRejected) {
+                                                if (hasCodeIssued) {
+                                                    IconButton(
+                                                        onClick = {
+                                                            val msg = OfflineSubscriptionManager.buildAdminUnlockReplyWhatsAppMessage(
+                                                                shopName = req.shopName,
+                                                                username = req.ownerUsername,
+                                                                unlockCode = req.generatedUnlockCode,
+                                                                daysAdded = req.durationMonths * 30,
+                                                                tierName = "${req.branchCount}br/${req.workerCount}stf/$effectiveDevices dev (${req.amountRwf} FRw)"
+                                                            )
+                                                            PdfReportGenerator.sendWhatsAppDirect(context, req.ownerPhone, msg)
+                                                        },
+                                                        modifier = Modifier.size(48.dp)
+                                                    ) {
+                                                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send BB2 code on WhatsApp", tint = ProfitGreen)
+                                                    }
+                                                }
+
+                                                // Option 2: Auto-Unlock Directly Without Code
+                                                if (!isDirectUnlocked && !isRejected) {
+                                                    Button(
+                                                        onClick = {
+                                                            onDirectAutoUnlock(req) { ok ->
+                                                                if (ok) {
+                                                                    Toast.makeText(
+                                                                        context,
+                                                                        "Shop @${req.ownerUsername} auto-unlocked directly!",
+                                                                        Toast.LENGTH_SHORT
+                                                                    ).show()
+                                                                }
+                                                            }
+                                                        },
+                                                        modifier = Modifier
+                                                            .weight(1.3f)
+                                                            .heightIn(min = 48.dp)
+                                                            .testTag("admin_direct_unlock_btn_${req.id}"),
+                                                        colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary)
+                                                    ) {
+                                                        Icon(Icons.Default.FlashOn, contentDescription = null, modifier = Modifier.size(15.dp))
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Text("Auto-Unlock", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+
+                                                if (!isApprovedAny && !isRejected) {
                                                     OutlinedButton(
                                                         onClick = {
                                                             requestToReject = req
                                                             rejectReasonInput = "MoMo transaction reference mismatch"
                                                         },
                                                         modifier = Modifier
-                                                            .weight(1f)
+                                                            .weight(0.9f)
                                                             .heightIn(min = 48.dp),
+                                                        contentPadding = PaddingValues(horizontal = 4.dp),
                                                         border = BorderStroke(1.dp, LossRed.copy(alpha = 0.6f))
                                                     ) {
-                                                        Text("Reject", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LossRed)
+                                                        Text("Reject", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = LossRed)
                                                     }
                                                 }
                                             }
@@ -1178,16 +1309,25 @@ fun AdminVerificationConsoleDialog(
                                                 }
                                             }
                                             Text(
-                                                text = "Phone: ${acc.ownerPhone} • ${acc.branchCount} br / ${acc.workerCount} stf • ${acc.monthlyFeeRwf} FRw/mo",
+                                                text = "Phone: ${acc.ownerPhone} • ${acc.branchCount} br / ${acc.workerCount} stf / ${acc.deviceCount}/${acc.deviceLimit} dev • ${acc.monthlyFeeRwf} FRw/mo",
                                                 fontSize = 11.sp,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
+                                            if (acc.autoUnlockedAt > 0L) {
+                                                Text(
+                                                    text = "Direct Auto-Unlocked: ${dateFormatter.format(Date(acc.autoUnlockedAt))}",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = ProfitGreen
+                                                )
+                                            }
 
                                             var draftBranches by remember(acc.ownerUsername, acc.branchCount) { mutableIntStateOf(acc.branchCount.coerceAtLeast(1)) }
                                             var draftWorkers by remember(acc.ownerUsername, acc.workerCount) { mutableIntStateOf(acc.workerCount.coerceAtLeast(1)) }
+                                            var draftDevices by remember(acc.ownerUsername, acc.deviceLimit) { mutableIntStateOf(acc.deviceLimit.coerceAtLeast(1)) }
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Surface(
@@ -1196,22 +1336,22 @@ fun AdminVerificationConsoleDialog(
                                                     modifier = Modifier.weight(1f)
                                                 ) {
                                                     Row(
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                                                         horizontalArrangement = Arrangement.SpaceBetween,
                                                         verticalAlignment = Alignment.CenterVertically
                                                     ) {
                                                         IconButton(
                                                             onClick = { if (draftBranches > 1) draftBranches-- },
-                                                            modifier = Modifier.size(36.dp)
+                                                            modifier = Modifier.size(34.dp)
                                                         ) {
-                                                            Icon(Icons.Default.Remove, contentDescription = "Decrease branch limit", modifier = Modifier.size(16.dp))
+                                                            Icon(Icons.Default.Remove, contentDescription = "Decrease branch limit", modifier = Modifier.size(15.dp))
                                                         }
-                                                        Text("Br: $draftBranches", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                        Text("Br:$draftBranches", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
                                                         IconButton(
                                                             onClick = { draftBranches++ },
-                                                            modifier = Modifier.size(36.dp)
+                                                            modifier = Modifier.size(34.dp)
                                                         ) {
-                                                            Icon(Icons.Default.Add, contentDescription = "Increase branch limit", modifier = Modifier.size(16.dp))
+                                                            Icon(Icons.Default.Add, contentDescription = "Increase branch limit", modifier = Modifier.size(15.dp))
                                                         }
                                                     }
                                                 }
@@ -1221,32 +1361,62 @@ fun AdminVerificationConsoleDialog(
                                                     modifier = Modifier.weight(1f)
                                                 ) {
                                                     Row(
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                                                         horizontalArrangement = Arrangement.SpaceBetween,
                                                         verticalAlignment = Alignment.CenterVertically
                                                     ) {
                                                         IconButton(
                                                             onClick = { if (draftWorkers > 1) draftWorkers-- },
-                                                            modifier = Modifier.size(36.dp)
+                                                            modifier = Modifier.size(34.dp)
                                                         ) {
-                                                            Icon(Icons.Default.Remove, contentDescription = "Decrease worker limit", modifier = Modifier.size(16.dp))
+                                                            Icon(Icons.Default.Remove, contentDescription = "Decrease worker limit", modifier = Modifier.size(15.dp))
                                                         }
-                                                        Text("Stf: $draftWorkers", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                        Text("Stf:$draftWorkers", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
                                                         IconButton(
                                                             onClick = { draftWorkers++ },
-                                                            modifier = Modifier.size(36.dp)
+                                                            modifier = Modifier.size(34.dp)
                                                         ) {
-                                                            Icon(Icons.Default.Add, contentDescription = "Increase worker limit", modifier = Modifier.size(16.dp))
+                                                            Icon(Icons.Default.Add, contentDescription = "Increase worker limit", modifier = Modifier.size(15.dp))
                                                         }
                                                     }
                                                 }
-                                                OutlinedButton(
-                                                    onClick = { onUpdateShopLimits(acc, draftBranches, draftWorkers) },
-                                                    modifier = Modifier.heightIn(min = 42.dp),
-                                                    contentPadding = PaddingValues(horizontal = 8.dp)
+                                                Surface(
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = MaterialTheme.colorScheme.surface,
+                                                    modifier = Modifier.weight(1f)
                                                 ) {
-                                                    Text("Save Quotas", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        IconButton(
+                                                            onClick = { if (draftDevices > 1) draftDevices-- },
+                                                            modifier = Modifier.size(34.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Remove, contentDescription = "Decrease device limit", modifier = Modifier.size(15.dp))
+                                                        }
+                                                        Text("Dev:$draftDevices", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                                                        IconButton(
+                                                            onClick = { draftDevices++ },
+                                                            modifier = Modifier.size(34.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Add, contentDescription = "Increase device limit", modifier = Modifier.size(15.dp))
+                                                        }
+                                                    }
                                                 }
+                                            }
+                                            OutlinedButton(
+                                                onClick = { onUpdateShopLimits(acc, draftBranches, draftWorkers, draftDevices) },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .heightIn(min = 42.dp)
+                                            ) {
+                                                Text(
+                                                    text = "Save Quotas (${OfflineSubscriptionManager.calculateSubscriptionPrice(draftBranches, draftWorkers, 1, draftDevices).totalPayable} FRw/mo)",
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
                                             }
 
                                             // Quick Duration Extension Row (+4d Trial, +30d, +90d, +365d)
@@ -1389,7 +1559,8 @@ fun AdminVerificationConsoleDialog(
                                                     val calc = OfflineSubscriptionManager.calculateSubscriptionPrice(
                                                         branchCount = acc.branchCount.coerceAtLeast(1),
                                                         workerCount = acc.workerCount.coerceAtLeast(1),
-                                                        durationMonths = months
+                                                        durationMonths = months,
+                                                        deviceCount = acc.deviceLimit.coerceAtLeast(1)
                                                     )
                                                     manualAmountText = calc.totalPayable.toString()
                                                 },
@@ -1768,7 +1939,7 @@ fun AdminVerificationConsoleDialog(
                             }
                         }
 
-                        else -> {
+                        6 -> {
                             // Unified Cloud + Local Security Audit Trail + Hardware Security Diagnostics
                             Row(
                                 modifier = Modifier
@@ -1947,6 +2118,309 @@ fun AdminVerificationConsoleDialog(
                                             }
                                         }
                                     }
+                                }
+                            }
+                        }
+
+                        7 -> {
+                            // SHOP DEVICES REGISTRY (+2,000 FRw/mo per added secondary device)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = deviceSearchQuery,
+                                    onValueChange = { deviceSearchQuery = it },
+                                    label = { Text("Search devices by shop, @user, device name or join code") },
+                                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                    singleLine = true,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("admin_device_search_input"),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+
+                                val extraDevicesActive = shopDevices.count { !it.isOwnerPrimary && it.isActive }
+                                val totalDeviceAddonMrr = shopDevices.filter { it.isActive && !it.isOwnerPrimary }
+                                    .sumOf { it.monthlyFeeAddonRwf }
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = OrangePrimary.copy(alpha = 0.09f),
+                                    border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.3f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = "${shopDevices.size} Registered Terminals • $extraDevicesActive Active Extra Devices (+${totalDeviceAddonMrr} FRw/mo)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = OrangePrimary,
+                                        modifier = Modifier.padding(10.dp)
+                                    )
+                                }
+
+                                val filteredDevices = shopDevices.filter { dev ->
+                                    val q = deviceSearchQuery.trim().lowercase(Locale.ROOT)
+                                    q.isBlank() ||
+                                        dev.deviceName.lowercase(Locale.ROOT).contains(q) ||
+                                        dev.shopName.lowercase(Locale.ROOT).contains(q) ||
+                                        dev.assignedUsername.lowercase(Locale.ROOT).contains(q) ||
+                                        dev.joinCode.lowercase(Locale.ROOT).contains(q) ||
+                                        dev.branchName.lowercase(Locale.ROOT).contains(q)
+                                }
+
+                                if (filteredDevices.isEmpty()) {
+                                    Text(
+                                        text = "No paired shop devices synced to Supabase yet.",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(8.dp)
+                                    )
+                                } else {
+                                    filteredDevices.forEach { dev ->
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                            border = BorderStroke(
+                                                1.dp,
+                                                when {
+                                                    dev.isOwnerPrimary -> ProfitGreen.copy(alpha = 0.4f)
+                                                    dev.isActive -> OrangePrimary.copy(alpha = 0.35f)
+                                                    else -> LossRed.copy(alpha = 0.4f)
+                                                }
+                                            ),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                        Icon(Icons.Default.Devices, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(16.dp))
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Text(dev.deviceName, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                                                    }
+                                                    Surface(
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        color = (if (dev.isOwnerPrimary) ProfitGreen else OrangePrimary).copy(alpha = 0.15f)
+                                                    ) {
+                                                        Text(
+                                                            text = if (dev.isOwnerPrimary) "PRIMARY FREE" else "+${dev.monthlyFeeAddonRwf} FRw/mo",
+                                                            fontSize = 9.5.sp,
+                                                            fontWeight = FontWeight.Black,
+                                                            color = if (dev.isOwnerPrimary) ProfitGreen else OrangePrimary,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        )
+                                                    }
+                                                }
+
+                                                Text(
+                                                    text = "${dev.shopName} • @${dev.assignedUsername} (${dev.role}) • ${dev.branchName}",
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                Text(
+                                                    text = "Join Code: ${dev.joinCode} • Last Sync: ${dateFormatter.format(Date(dev.lastSyncedAt.coerceAtLeast(dev.updatedAt)))}",
+                                                    fontSize = 10.5.sp,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+
+                                                if (!dev.isOwnerPrimary) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                            Switch(
+                                                                checked = dev.isActive,
+                                                                onCheckedChange = { checked -> onToggleShopDeviceActive(dev, checked) },
+                                                                colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = ProfitGreen)
+                                                            )
+                                                            Text(
+                                                                text = if (dev.isActive) "Active (Billed)" else "Paused",
+                                                                fontSize = 11.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = if (dev.isActive) ProfitGreen else LossRed
+                                                            )
+                                                        }
+
+                                                        IconButton(
+                                                            onClick = { onDeleteShopDevice(dev) },
+                                                            modifier = Modifier.size(48.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Delete, contentDescription = "Remove paired device", tint = LossRed)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        else -> {
+                            // TAB 8: GLOBAL PAYMENT NUMBERS, USSD & ADMIN WHATSAPP CONFIG
+                            var cfgWhatsApp by remember(paymentConfig) { mutableStateOf(paymentConfig.adminWhatsAppNumber) }
+                            var cfgMtnCode by remember(paymentConfig) { mutableStateOf(paymentConfig.mtnMoMoCode) }
+                            var cfgMtnPhone by remember(paymentConfig) { mutableStateOf(paymentConfig.mtnMoMoPhone) }
+                            var cfgMtnName by remember(paymentConfig) { mutableStateOf(paymentConfig.mtnRecipientName) }
+                            var cfgAirtelPhone by remember(paymentConfig) { mutableStateOf(paymentConfig.airtelMoneyPhone) }
+                            var cfgAirtelName by remember(paymentConfig) { mutableStateOf(paymentConfig.airtelRecipientName) }
+                            var cfgPerDeviceFee by remember(paymentConfig) { mutableStateOf(paymentConfig.perDeviceFeeRwf.toString()) }
+                            var savingCfg by remember { mutableStateOf(false) }
+
+                            val draftConfig = AdminPaymentConfig(
+                                adminWhatsAppNumber = cfgWhatsApp.trim(),
+                                mtnMoMoCode = cfgMtnCode.trim(),
+                                mtnMoMoPhone = cfgMtnPhone.trim(),
+                                mtnRecipientName = cfgMtnName.trim(),
+                                airtelMoneyPhone = cfgAirtelPhone.trim(),
+                                airtelRecipientName = cfgAirtelName.trim(),
+                                perDeviceFeeRwf = cfgPerDeviceFee.toIntOrNull() ?: 2000,
+                                updatedAt = System.currentTimeMillis()
+                            )
+
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text = "Global Payment, USSD & Admin WhatsApp Settings",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Changes saved here sync to Supabase (app_config) and automatically appear in every shop's Subscription USSD dialer & WhatsApp proof form.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                OutlinedTextField(
+                                    value = cfgWhatsApp,
+                                    onValueChange = { cfgWhatsApp = it },
+                                    label = { Text("Admin WhatsApp Number * (e.g. +250788123456)") },
+                                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, tint = ProfitGreen) },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                    singleLine = true,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("admin_cfg_whatsapp_input"),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedTextField(
+                                        value = cfgMtnCode,
+                                        onValueChange = { cfgMtnCode = it },
+                                        label = { Text("MTN MoMo Pay Code") },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    OutlinedTextField(
+                                        value = cfgMtnPhone,
+                                        onValueChange = { cfgMtnPhone = it },
+                                        label = { Text("MTN MoMo Phone") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                }
+
+                                OutlinedTextField(
+                                    value = cfgMtnName,
+                                    onValueChange = { cfgMtnName = it },
+                                    label = { Text("MTN Recipient Account Name") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedTextField(
+                                        value = cfgAirtelPhone,
+                                        onValueChange = { cfgAirtelPhone = it },
+                                        label = { Text("Airtel Money Phone") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    OutlinedTextField(
+                                        value = cfgPerDeviceFee,
+                                        onValueChange = { cfgPerDeviceFee = it.filter { ch -> ch.isDigit() } },
+                                        label = { Text("Fee/Device (FRw)") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        singleLine = true,
+                                        modifier = Modifier.weight(0.9f),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                }
+
+                                OutlinedTextField(
+                                    value = cfgAirtelName,
+                                    onValueChange = { cfgAirtelName = it },
+                                    label = { Text("Airtel Recipient Account Name") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+
+                                // Live USSD Preview Banner
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = DarkNavy,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        Text("LIVE USSD AUTO-FILL PREVIEW (5,000 FRw Example)", fontSize = 9.5.sp, fontWeight = FontWeight.Black, color = OrangePrimary)
+                                        Text(
+                                            text = "MTN: ${OfflineSubscriptionManager.buildMtnUssdCode(5000, draftConfig)} (${draftConfig.mtnRecipientName})",
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = Color.White
+                                        )
+                                        Text(
+                                            text = "Airtel: ${OfflineSubscriptionManager.buildAirtelUssdCode(5000, draftConfig)} (${draftConfig.airtelRecipientName})",
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = Color.White
+                                        )
+                                        Text(
+                                            text = "WhatsApp Target: ${draftConfig.adminWhatsAppNumber.ifBlank { "Not set" }} • +${draftConfig.perDeviceFeeRwf} FRw/extra device",
+                                            fontSize = 10.5.sp,
+                                            color = ProfitGreen
+                                        )
+                                    }
+                                }
+
+                                Button(
+                                    onClick = {
+                                        savingCfg = true
+                                        onSavePaymentConfig(draftConfig) { ok ->
+                                            savingCfg = false
+                                            Toast.makeText(
+                                                context,
+                                                if (ok) "Global payment & WhatsApp config saved to Supabase!"
+                                                else "Failed to save payment config to Supabase.",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    },
+                                    enabled = !savingCfg && cfgWhatsApp.isNotBlank(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 48.dp)
+                                        .testTag("admin_cfg_save_btn"),
+                                    colors = ButtonDefaults.buttonColors(containerColor = ProfitGreen)
+                                ) {
+                                    if (savingCfg) {
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+                                    } else {
+                                        Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    }
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Save Global Config to Supabase", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 }
                             }
                         }

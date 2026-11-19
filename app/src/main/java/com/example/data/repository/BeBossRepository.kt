@@ -21,6 +21,7 @@ import com.example.data.model.RedeemedVoucher
 import com.example.data.model.Sale
 import com.example.data.model.SaleItem
 import com.example.data.model.SaleWithItems
+import com.example.data.model.ShopDevice
 import com.example.data.model.ShopProfile
 import com.example.data.model.StockTransfer
 import com.example.data.model.SyncQueueItem
@@ -35,12 +36,15 @@ import com.example.domain.SalesManager
 import com.example.domain.StaffAuthManager
 import com.example.domain.SubscriptionManager
 import com.example.data.model.LocalAuditLog
+import com.example.util.ClockGuard
 import com.example.util.CloudSyncManager
 import com.example.util.CloudSyncReport
 import com.example.util.ConflictResolutionEngine
 import com.example.util.EndpointPingResult
+import com.example.util.OfflineSubscriptionManager
 import com.example.util.PaymentProcessingResult
 import com.example.util.SecurityUtils
+import com.example.util.ShopDataTransferManager
 import com.example.util.ShopImportSummary
 import com.example.util.SupabaseAdminClient
 import com.example.util.SupabaseSyncResult
@@ -52,6 +56,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
 import java.util.UUID
 
 data class BranchMergeResult(
@@ -70,6 +75,13 @@ data class BranchMergeResult(
         get() = mergedBranches + mergedUsers + mergedProducts + mergedCustomers +
             mergedSales + mergedSaleItems + mergedPayments + mergedPurchases + mergedTransfers
 }
+
+data class JoinShopCloudResult(
+    val success: Boolean,
+    val message: String,
+    val shopName: String = "",
+    val signedInUser: User? = null
+)
 
 /**
  * Enterprise Repository Facade coordinating Domain Managers, Room DAOs, Cloud Sync, and Local Storage.
@@ -91,6 +103,7 @@ class BeBossRepository(private val database: AppDatabase) {
     private val paymentVerificationDao = database.paymentVerificationDao()
     private val localAuditLogDao = database.localAuditLogDao()
     private val syncTombstoneDao = database.syncTombstoneDao()
+    private val shopDeviceDao = database.shopDeviceDao()
 
     // Domain Managers
     val salesManager = SalesManager(saleDao, productDao, customerDao, syncQueueDao, database, syncTombstoneDao)
@@ -447,6 +460,322 @@ class BeBossRepository(private val database: AppDatabase) {
     val redeemedVouchers: Flow<List<RedeemedVoucher>> = subscriptionManager.redeemedVouchers
     val allPaymentRequests: Flow<List<PaymentVerificationRequest>> = paymentVerificationDao.getAllRequests()
 
+    // -------------------------------------------------------------
+    // SINGLE-SHOP MULTI-DEVICE MANAGEMENT (+2,000 FRw/month/device)
+    // -------------------------------------------------------------
+    val allShopDevices: Flow<List<ShopDevice>> = shopDeviceDao.getAllDevices()
+
+    suspend fun getAllShopDevicesList(): List<ShopDevice> = shopDeviceDao.getAllDevicesList()
+
+    suspend fun getActiveDevicesCount(): Int = shopDeviceDao.getActiveDevicesCount().coerceAtLeast(1)
+
+    suspend fun ensureOwnerPrimaryDevice(
+        deviceId: String,
+        shopProfile: ShopProfile,
+        ownerUser: User?,
+        mainBranch: Branch?
+    ): ShopDevice = withContext(Dispatchers.IO) {
+        val existing = shopDeviceDao.getAllDevicesList()
+        val existingPrimary = existing.firstOrNull { it.isOwnerPrimary }
+        if (existingPrimary != null) return@withContext existingPrimary
+
+        val username = ownerUser?.username?.ifBlank { "owner" } ?: "owner"
+        val phone = ownerUser?.phone?.ifBlank { shopProfile.phone } ?: shopProfile.phone
+        val shopSyncKey = SupabaseAdminClient.computeShopSyncKey(username, phone)
+        val primary = ShopDevice(
+            id = "${shopSyncKey}::PRIMARY",
+            shopSyncKey = shopSyncKey,
+            deviceId = deviceId,
+            deviceName = android.os.Build.MODEL?.ifBlank { "Owner Terminal" } ?: "Owner Terminal",
+            joinCode = "OWNER",
+            assignedUserId = ownerUser?.id.orEmpty(),
+            assignedUsername = username,
+            assignedUserName = ownerUser?.name?.ifBlank { shopProfile.name } ?: shopProfile.name,
+            role = ownerUser?.role?.name ?: "OWNER",
+            branchId = mainBranch?.id ?: "main_branch",
+            branchName = mainBranch?.name ?: "Main Store",
+            isOwnerPrimary = true,
+            isActive = true,
+            monthlyFeeAddonRwf = 0
+        )
+        shopDeviceDao.insertOrUpdate(primary)
+        primary
+    }
+
+    suspend fun addSecondaryShopDevice(
+        deviceName: String,
+        assignedUser: User,
+        branch: Branch?,
+        actor: User? = null
+    ): ShopDevice = withContext(Dispatchers.IO) {
+        requirePermission(actor, "ADD_SHOP_DEVICE", deviceName) {
+            it.role == UserRole.OWNER || it.role == UserRole.MANAGER || it.canManageShopSettings
+        }
+        val profile = getShopProfileDirect()
+        val allUsers = userDao.getAllUsersDirect()
+        val ownerUser = allUsers.firstOrNull { it.role == UserRole.OWNER } ?: allUsers.firstOrNull()
+        val shopSyncKey = SupabaseAdminClient.computeShopSyncKey(
+            ownerUser?.username.orEmpty(),
+            ownerUser?.phone?.ifBlank { profile.phone } ?: profile.phone
+        )
+        val codeSuffix = UUID.randomUUID().toString().replace("-", "").take(6).uppercase(Locale.ROOT)
+        val joinCode = "BB-$codeSuffix"
+        val now = System.currentTimeMillis()
+        val newDev = ShopDevice(
+            id = UUID.randomUUID().toString(),
+            shopSyncKey = shopSyncKey,
+            deviceId = "",
+            deviceName = deviceName.trim().ifBlank { "${assignedUser.name}'s Terminal" },
+            joinCode = joinCode,
+            assignedUserId = assignedUser.id,
+            assignedUsername = assignedUser.username.trim().lowercase(Locale.ROOT),
+            assignedUserName = assignedUser.name,
+            role = assignedUser.role.name,
+            branchId = branch?.id ?: assignedUser.assignedBranchId.ifBlank { "main_branch" },
+            branchName = branch?.name ?: assignedUser.assignedBranchName.ifBlank { "Main Store" },
+            isOwnerPrimary = false,
+            isActive = true,
+            monthlyFeeAddonRwf = OfflineSubscriptionManager.PER_EXTRA_DEVICE_FEE_RWF,
+            syncedToSupabase = false,
+            createdAt = now,
+            updatedAt = now
+        )
+        shopDeviceDao.insertOrUpdate(newDev)
+
+        val branchesCount = branchDao.getBranchCount().coerceAtLeast(1)
+        val workersCount = allUsers.count { it.isActive }.coerceAtLeast(1)
+        val devicesCount = shopDeviceDao.getActiveDevicesCount().coerceAtLeast(1)
+        val newPricing = OfflineSubscriptionManager.calculateSubscriptionPrice(
+            branchCount = branchesCount,
+            workerCount = workersCount,
+            durationMonths = 1,
+            deviceCount = devicesCount
+        )
+        val updatedProf = profile.copy(
+            monthlyFeeRwf = newPricing.monthlySubtotal,
+            deviceCountLimit = maxOf(profile.deviceCountLimit, devicesCount),
+            updatedAt = now
+        )
+        shopProfileDao.insertOrUpdateProfile(updatedProf)
+
+        if (SupabaseAdminClient.isConfigured()) {
+            val pushed = SupabaseAdminClient.upsertShopDevice(shopSyncKey, updatedProf.shopName, newDev)
+            if (pushed) {
+                shopDeviceDao.insertOrUpdate(newDev.copy(syncedToSupabase = true))
+            }
+            SupabaseAdminClient.upsertShopAccount(
+                shopProfile = updatedProf,
+                ownerUser = ownerUser,
+                branchCount = branchesCount,
+                workerCount = workersCount,
+                deviceCount = devicesCount
+            )
+        }
+        recordLocalAudit(
+            actorName = actor?.name ?: "Owner",
+            actorRole = actor?.role?.name ?: "OWNER",
+            action = "ADD_SHOP_DEVICE",
+            targetId = newDev.deviceName,
+            details = "Added paired device for @${newDev.assignedUsername} (Join Code: $joinCode, +2,000 FRw/mo)"
+        )
+        newDev
+    }
+
+    suspend fun toggleShopDeviceActive(deviceId: String, isActive: Boolean, actor: User? = null) =
+        withContext(Dispatchers.IO) {
+            requirePermission(actor, "TOGGLE_SHOP_DEVICE", deviceId) {
+                it.role == UserRole.OWNER || it.canManageShopSettings
+            }
+            val existing = shopDeviceDao.getDeviceById(deviceId) ?: return@withContext
+            if (existing.isOwnerPrimary) return@withContext
+            val now = System.currentTimeMillis()
+            val updated = existing.copy(isActive = isActive, syncedToSupabase = false, updatedAt = now)
+            shopDeviceDao.insertOrUpdate(updated)
+
+            val profile = getShopProfileDirect()
+            val users = userDao.getAllUsersDirect()
+            val ownerUser = users.firstOrNull { it.role == UserRole.OWNER } ?: users.firstOrNull()
+            val devicesCount = shopDeviceDao.getActiveDevicesCount().coerceAtLeast(1)
+            val branchesCount = branchDao.getBranchCount().coerceAtLeast(1)
+            val workersCount = users.count { it.isActive }.coerceAtLeast(1)
+            val newPricing = OfflineSubscriptionManager.calculateSubscriptionPrice(branchesCount, workersCount, 1, devicesCount)
+            val updatedProf = profile.copy(monthlyFeeRwf = newPricing.monthlySubtotal, updatedAt = now)
+            shopProfileDao.insertOrUpdateProfile(updatedProf)
+
+            if (SupabaseAdminClient.isConfigured()) {
+                val ok = SupabaseAdminClient.upsertShopDevice(existing.shopSyncKey, profile.shopName, updated)
+                if (ok) shopDeviceDao.insertOrUpdate(updated.copy(syncedToSupabase = true))
+                SupabaseAdminClient.upsertShopAccount(updatedProf, ownerUser, branchesCount, workersCount, devicesCount)
+            }
+        }
+
+    suspend fun deleteShopDevice(deviceRecordId: String, actor: User? = null) = withContext(Dispatchers.IO) {
+        requirePermission(actor, "DELETE_SHOP_DEVICE", deviceRecordId) {
+            it.role == UserRole.OWNER || it.canManageShopSettings
+        }
+        val existing = shopDeviceDao.getDeviceById(deviceRecordId) ?: return@withContext
+        if (existing.isOwnerPrimary) return@withContext
+        shopDeviceDao.deleteById(deviceRecordId)
+        val profile = getShopProfileDirect()
+        val users = userDao.getAllUsersDirect()
+        val ownerUser = users.firstOrNull { it.role == UserRole.OWNER } ?: users.firstOrNull()
+        val devicesCount = shopDeviceDao.getActiveDevicesCount().coerceAtLeast(1)
+        val branchesCount = branchDao.getBranchCount().coerceAtLeast(1)
+        val workersCount = users.count { it.isActive }.coerceAtLeast(1)
+        val newPricing = OfflineSubscriptionManager.calculateSubscriptionPrice(branchesCount, workersCount, 1, devicesCount)
+        val updatedProf = profile.copy(monthlyFeeRwf = newPricing.monthlySubtotal, updatedAt = System.currentTimeMillis())
+        shopProfileDao.insertOrUpdateProfile(updatedProf)
+        if (SupabaseAdminClient.isConfigured()) {
+            SupabaseAdminClient.deleteShopDeviceInCloud(existing.shopSyncKey, deviceRecordId)
+            SupabaseAdminClient.upsertShopAccount(updatedProf, ownerUser, branchesCount, workersCount, devicesCount)
+        }
+    }
+
+    /**
+     * Pairs a new Android phone/tablet to an existing shop in Supabase using the shop owner's
+     * username, registered phone, and Device Join Code generated by the shop owner (+2,000 FRw/device/mo).
+     * Pulls all shop products, branches, sales, customers, users, and subscription state automatically.
+     */
+    suspend fun joinExistingShopFromCloud(
+        context: Context,
+        ownerUsername: String,
+        ownerPhone: String,
+        deviceJoinCode: String,
+        thisDeviceName: String,
+        assignedPin: String,
+        assignedPassword: String
+    ): JoinShopCloudResult = withContext(Dispatchers.IO) {
+        if (!SupabaseAdminClient.isConfigured()) {
+            return@withContext JoinShopCloudResult(
+                success = false,
+                message = "Supabase cloud configuration is required to pair this device."
+            )
+        }
+        try {
+            val cleanUser = ownerUsername.trim().lowercase(Locale.ROOT)
+            val cleanPhone = ownerPhone.trim()
+            val cleanJoin = deviceJoinCode.trim().uppercase(Locale.ROOT)
+            val shopSyncKey = SupabaseAdminClient.computeShopSyncKey(cleanUser, cleanPhone)
+
+            val remoteShop = SupabaseAdminClient.fetchShopAccountById(shopSyncKey)
+                ?: return@withContext JoinShopCloudResult(
+                    success = false,
+                    message = "Shop account '@$cleanUser' ($cleanPhone) not found in BeBoss Cloud. Ask owner to create account & sync online first."
+                )
+
+            val remoteDevices = SupabaseAdminClient.fetchShopDevicesForShop(shopSyncKey)
+            val matchedDevice = remoteDevices.firstOrNull {
+                it.joinCode.equals(cleanJoin, ignoreCase = true) && it.isActive
+            } ?: return@withContext JoinShopCloudResult(
+                success = false,
+                message = "Invalid or inactive Join Code '$cleanJoin'. Ask the shop owner to add this device in Settings -> Shop Devices."
+            )
+
+            val hardwareDeviceId = SupabaseAdminClient.getOrCreateDeviceId(context)
+            val appCfg = SupabaseAdminClient.fetchPublicAppConfig()
+            if (appCfg != null) {
+                OfflineSubscriptionManager.saveDynamicPaymentConfig(context, appCfg)
+            }
+
+            // Pull all existing branch snapshots for this shop and merge into local SQLite
+            val snapshots = SupabaseAdminClient.fetchShopBranchSnapshots(shopSyncKey)
+            for (snap in snapshots) {
+                try {
+                    val decoded = ShopDataTransferManager.parseShopPackageString(snap.payloadToken)
+                    mergeShopDataPackageLww(decoded)
+                } catch (_: Exception) {
+                }
+            }
+
+            // Ensure ShopProfile exists and mirrors cloud subscription state
+            val existingProfile = shopProfileDao.getShopProfileDirect() ?: ShopProfile()
+            val now = System.currentTimeMillis()
+            val syncedProfile = existingProfile.copy(
+                id = 1L,
+                shopName = remoteShop.shopName,
+                name = remoteShop.ownerName.ifBlank { existingProfile.name },
+                phone = remoteShop.ownerPhone.ifBlank { cleanPhone },
+                subscriptionStatus = remoteShop.subscriptionStatus,
+                subscriptionExpiresAt = remoteShop.subscriptionExpiresAt,
+                monthlyFeeRwf = remoteShop.monthlyFeeRwf,
+                deviceCountLimit = remoteShop.deviceLimit,
+                adminWhatsAppNumber = remoteShop.adminWhatsApp.ifBlank { appCfg?.adminWhatsAppNumber.orEmpty() },
+                autoUnlockedAt = remoteShop.autoUnlockedAt,
+                lastAppliedCloudUnlockAt = remoteShop.autoUnlockedAt,
+                lastSyncedAt = now,
+                updatedAt = now
+            )
+            shopProfileDao.insertOrUpdateProfile(syncedProfile)
+
+            // Sync remote devices list locally and register this hardware ID on the matched slot
+            for (rd in remoteDevices) {
+                val isMine = rd.id == matchedDevice.id
+                val localDev = ShopDevice(
+                    id = rd.id,
+                    shopSyncKey = rd.shopSyncKey,
+                    deviceId = if (isMine) hardwareDeviceId else rd.deviceId,
+                    deviceName = if (isMine) thisDeviceName.trim().ifBlank { rd.deviceName } else rd.deviceName,
+                    joinCode = rd.joinCode,
+                    assignedUserId = rd.assignedUserId,
+                    assignedUsername = rd.assignedUsername,
+                    assignedUserName = rd.assignedUserName,
+                    role = rd.role,
+                    branchId = rd.branchId,
+                    branchName = rd.branchName,
+                    isOwnerPrimary = rd.isOwnerPrimary,
+                    isActive = rd.isActive,
+                    monthlyFeeAddonRwf = rd.monthlyFeeAddonRwf,
+                    lastSyncedAt = if (isMine) now else rd.lastSyncedAt,
+                    syncedToSupabase = true,
+                    createdAt = rd.createdAt,
+                    updatedAt = if (isMine) now else rd.updatedAt
+                )
+                shopDeviceDao.insertOrUpdate(localDev)
+                if (isMine) {
+                    SupabaseAdminClient.upsertShopDevice(shopSyncKey, syncedProfile.shopName, localDev)
+                }
+            }
+
+            // Create / update the assigned staff user on this terminal with the operator's chosen PIN & password
+            val parsedRole = try { UserRole.valueOf(matchedDevice.role) } catch (_: Exception) { UserRole.CASHIER }
+            val existingUser = userDao.getUserById(matchedDevice.assignedUserId)
+                ?: userDao.getUserByUsername(matchedDevice.assignedUsername)
+            val baseUser = User.defaultForRole(
+                name = matchedDevice.assignedUserName.ifBlank { matchedDevice.assignedUsername },
+                username = matchedDevice.assignedUsername.ifBlank { "staff" },
+                role = parsedRole,
+                pin = "",
+                phone = ""
+            )
+            val pairedUser = (existingUser ?: baseUser).copy(
+                id = existingUser?.id ?: matchedDevice.assignedUserId.ifBlank { baseUser.id },
+                name = matchedDevice.assignedUserName.ifBlank { existingUser?.name ?: "Staff" },
+                username = matchedDevice.assignedUsername.ifBlank { existingUser?.username ?: "staff" },
+                role = parsedRole,
+                assignedBranchId = matchedDevice.branchId.ifBlank { "main_branch" },
+                assignedBranchName = matchedDevice.branchName.ifBlank { "Main Store" },
+                pinHash = SecurityUtils.hashPin(assignedPin),
+                password = SecurityUtils.hashPassword(assignedPassword),
+                isActive = true,
+                updatedAt = now
+            )
+            userDao.insertUser(pairedUser)
+            ensureDefaultBranches()
+
+            JoinShopCloudResult(
+                success = true,
+                message = "Device paired to '${remoteShop.shopName}'! All products, branches, sales & customers synced automatically.",
+                shopName = remoteShop.shopName,
+                signedInUser = pairedUser
+            )
+        } catch (e: Exception) {
+            JoinShopCloudResult(
+                success = false,
+                message = "Cloud pairing failed: ${e.message}"
+            )
+        }
+    }
+
     suspend fun redeemVoucher(
         voucherCode: String,
         shopProfile: ShopProfile,
@@ -488,15 +817,17 @@ class BeBossRepository(private val database: AppDatabase) {
         if (res.isValid) {
             val existingReqs = paymentVerificationDao.getAllRequestsList()
             existingReqs.filter { it.generatedUnlockCode.equals(cleanUpper, ignoreCase = true) }.forEach { req ->
-                paymentVerificationDao.updateCloudApproval(req.id, "REDEEMED", cleanUpper)
+                paymentVerificationDao.updateCloudApproval(req.id, "REDEEMED", cleanUpper, req.approvalMode)
             }
             if (SupabaseAdminClient.isConfigured()) {
                 val updatedProf = shopProfileDao.getShopProfileDirect() ?: shopProfile
+                val activeDevices = getActiveDevicesCount()
                 SupabaseAdminClient.upsertShopAccount(
                     shopProfile = updatedProf,
                     ownerUser = ownerUser,
                     branchCount = branchCount,
-                    workerCount = workerCount
+                    workerCount = workerCount,
+                    deviceCount = activeDevices
                 )
             }
         }
@@ -518,7 +849,8 @@ class BeBossRepository(private val database: AppDatabase) {
                 shopProfile = shopProfile,
                 ownerUser = ownerUser,
                 branchCount = request.branchCount,
-                workerCount = request.workerCount
+                workerCount = request.workerCount,
+                deviceCount = request.deviceCount.coerceAtLeast(1)
             )
             if (uploaded) {
                 paymentVerificationDao.markSynced(request.id)
@@ -532,7 +864,9 @@ class BeBossRepository(private val database: AppDatabase) {
         shopProfile: ShopProfile,
         ownerUser: User?,
         branchCount: Int,
-        workerCount: Int
+        workerCount: Int,
+        deviceCount: Int = 1,
+        context: Context? = null
     ): SupabaseSyncResult = withContext(Dispatchers.IO) {
         if (!SupabaseAdminClient.isConfigured()) {
             return@withContext SupabaseSyncResult(
@@ -544,18 +878,87 @@ class BeBossRepository(private val database: AppDatabase) {
             val username = ownerUser?.username?.trim().orEmpty().ifBlank { "owner" }
             val phone = ownerUser?.phone?.ifBlank { shopProfile.phone } ?: shopProfile.phone
             val shopSyncKey = SupabaseAdminClient.computeShopSyncKey(username, phone)
+            var directAutoUnlocked = false
 
             var effectiveProfile = shopProfile
-            val remoteShop = SupabaseAdminClient.fetchShopAccountById(shopSyncKey)
-            if (remoteShop != null && remoteShop.updatedAt > effectiveProfile.updatedAt) {
-                effectiveProfile = effectiveProfile.copy(
-                    subscriptionStatus = remoteShop.subscriptionStatus,
-                    subscriptionExpiresAt = remoteShop.subscriptionExpiresAt,
-                    updatedAt = remoteShop.updatedAt
-                )
-                shopProfileDao.insertOrUpdateProfile(effectiveProfile)
+
+            // 1. Fetch Admin's global live WhatsApp & MoMo/Airtel USSD numbers
+            val appCfg = SupabaseAdminClient.fetchPublicAppConfig()
+            if (appCfg != null) {
+                OfflineSubscriptionManager.saveDynamicPaymentConfig(context, appCfg)
+                if (appCfg.adminWhatsAppNumber.isNotBlank() && appCfg.adminWhatsAppNumber != effectiveProfile.adminWhatsAppNumber) {
+                    effectiveProfile = effectiveProfile.copy(adminWhatsAppNumber = appCfg.adminWhatsAppNumber)
+                    shopProfileDao.insertOrUpdateProfile(effectiveProfile)
+                }
             }
 
+            // 2. Fetch remote shop account & apply Admin direct auto-unlock / expiry extension / lock
+            val remoteShop = SupabaseAdminClient.fetchShopAccountById(shopSyncKey)
+            if (remoteShop != null) {
+                ClockGuard.observeTrustedEpoch(remoteShop.updatedAt)
+                val isDirectUnlockUpdate = remoteShop.autoUnlockedAt > effectiveProfile.lastAppliedCloudUnlockAt
+                val isRemoteExtension = remoteShop.subscriptionStatus == ShopProfile.STATUS_ACTIVE &&
+                    remoteShop.subscriptionExpiresAt > effectiveProfile.subscriptionExpiresAt + 60_000L
+                val isRemoteLock = (remoteShop.subscriptionStatus == ShopProfile.STATUS_SUSPENDED ||
+                    remoteShop.subscriptionStatus == ShopProfile.STATUS_EXPIRED) &&
+                    remoteShop.updatedAt > effectiveProfile.updatedAt &&
+                    remoteShop.autoUnlockedAt <= effectiveProfile.lastAppliedCloudUnlockAt
+
+                if (isDirectUnlockUpdate || isRemoteExtension || isRemoteLock || remoteShop.updatedAt > effectiveProfile.updatedAt) {
+                    if (isDirectUnlockUpdate || isRemoteExtension) directAutoUnlocked = true
+                    effectiveProfile = effectiveProfile.copy(
+                        subscriptionStatus = if (isDirectUnlockUpdate || isRemoteExtension) ShopProfile.STATUS_ACTIVE else remoteShop.subscriptionStatus,
+                        subscriptionExpiresAt = if (isRemoteLock) remoteShop.subscriptionExpiresAt else maxOf(effectiveProfile.subscriptionExpiresAt, remoteShop.subscriptionExpiresAt),
+                        deviceCountLimit = maxOf(effectiveProfile.deviceCountLimit, remoteShop.deviceLimit),
+                        adminWhatsAppNumber = remoteShop.adminWhatsApp.ifBlank { effectiveProfile.adminWhatsAppNumber },
+                        autoUnlockedAt = maxOf(effectiveProfile.autoUnlockedAt, remoteShop.autoUnlockedAt),
+                        lastAppliedCloudUnlockAt = if (isDirectUnlockUpdate) remoteShop.autoUnlockedAt else effectiveProfile.lastAppliedCloudUnlockAt,
+                        lastPaymentRef = if (isDirectUnlockUpdate) "ADMIN-DIRECT-UNLOCK" else effectiveProfile.lastPaymentRef,
+                        updatedAt = maxOf(effectiveProfile.updatedAt, remoteShop.updatedAt)
+                    )
+                    shopProfileDao.insertOrUpdateProfile(effectiveProfile)
+                }
+            }
+
+            // 3. Bidirectional Shop Devices sync (+2,000 FRw/device billing)
+            val remoteDevices = SupabaseAdminClient.fetchShopDevicesForShop(shopSyncKey)
+            for (rd in remoteDevices) {
+                val localDev = shopDeviceDao.getDeviceById(rd.id)
+                if (localDev == null || rd.updatedAt > localDev.updatedAt) {
+                    shopDeviceDao.insertOrUpdate(
+                        ShopDevice(
+                            id = rd.id,
+                            shopSyncKey = rd.shopSyncKey,
+                            deviceId = rd.deviceId,
+                            deviceName = rd.deviceName,
+                            joinCode = rd.joinCode,
+                            assignedUserId = rd.assignedUserId,
+                            assignedUsername = rd.assignedUsername,
+                            assignedUserName = rd.assignedUserName,
+                            role = rd.role,
+                            branchId = rd.branchId,
+                            branchName = rd.branchName,
+                            isOwnerPrimary = rd.isOwnerPrimary,
+                            isActive = rd.isActive,
+                            monthlyFeeAddonRwf = rd.monthlyFeeAddonRwf,
+                            lastSyncedAt = rd.lastSyncedAt,
+                            syncedToSupabase = true,
+                            createdAt = rd.createdAt,
+                            updatedAt = rd.updatedAt
+                        )
+                    )
+                }
+            }
+            val effectiveDeviceCount = maxOf(deviceCount, shopDeviceDao.getActiveDevicesCount()).coerceAtLeast(1)
+            for (ld in shopDeviceDao.getAllDevicesList()) {
+                if (!ld.syncedToSupabase) {
+                    if (SupabaseAdminClient.upsertShopDevice(shopSyncKey, effectiveProfile.shopName, ld)) {
+                        shopDeviceDao.insertOrUpdate(ld.copy(syncedToSupabase = true))
+                    }
+                }
+            }
+
+            // 4. Pull Admin-updated staff user roles / active states
             val remoteUsers = SupabaseAdminClient.fetchShopUsersForShop(shopSyncKey)
             for (ru in remoteUsers) {
                 val localUser = userDao.getUserById(ru.userId) ?: continue
@@ -573,11 +976,13 @@ class BeBossRepository(private val database: AppDatabase) {
                 }
             }
 
+            // 5. Push shop account & user directory cleanly to Supabase
             SupabaseAdminClient.upsertShopAccount(
                 shopProfile = effectiveProfile,
                 ownerUser = ownerUser,
                 branchCount = branchCount,
-                workerCount = workerCount
+                workerCount = workerCount,
+                deviceCount = effectiveDeviceCount
             )
             SupabaseAdminClient.upsertShopUsers(
                 shopSyncKey = shopSyncKey,
@@ -585,7 +990,7 @@ class BeBossRepository(private val database: AppDatabase) {
                 users = userDao.getAllUsersDirect()
             )
 
-            // Push all unsynced offline requests
+            // 6. Push all unsynced offline payment requests
             val unsynced = paymentVerificationDao.getUnsyncedRequests()
             var pushed = 0
             for (req in unsynced) {
@@ -595,7 +1000,7 @@ class BeBossRepository(private val database: AppDatabase) {
                 }
             }
 
-            // Pull approved unlock codes from Supabase for this account
+            // 7. Pull approved requests (either BB2 Unlock Code OR Admin Direct Auto-Unlock)
             val approvedDtos = SupabaseAdminClient.fetchApprovedRequestsForUser(username, phone)
             for (dto in approvedDtos) {
                 val local = paymentVerificationDao.getRequestById(dto.id)
@@ -604,6 +1009,7 @@ class BeBossRepository(private val database: AppDatabase) {
                         id = dto.id,
                         status = dto.status,
                         unlockCode = dto.generatedUnlockCode,
+                        approvalMode = dto.approvalMode,
                         updatedAt = dto.updatedAt
                     )
                 } else {
@@ -617,12 +1023,15 @@ class BeBossRepository(private val database: AppDatabase) {
                             provider = dto.provider,
                             ussdCode = dto.ussdCode,
                             payerPhone = dto.payerPhone,
+                            payerFullName = dto.payerFullName,
                             amountRwf = dto.amountRwf,
                             durationMonths = dto.durationMonths,
                             branchCount = dto.branchCount,
                             workerCount = dto.workerCount,
+                            deviceCount = dto.deviceCount,
                             telcoReference = dto.telcoReference,
                             status = dto.status,
+                            approvalMode = dto.approvalMode,
                             generatedUnlockCode = dto.generatedUnlockCode,
                             syncedToSupabase = true,
                             createdAt = dto.createdAt,
@@ -630,14 +1039,41 @@ class BeBossRepository(private val database: AppDatabase) {
                         )
                     )
                 }
+
+                // If Admin chose Option 2 (DIRECT_AUTO_UNLOCK), ensure local ShopProfile is unlocked even without a BB2 code!
+                if (dto.approvalMode == "DIRECT_AUTO_UNLOCK" && dto.updatedAt > effectiveProfile.lastAppliedCloudUnlockAt) {
+                    val now = System.currentTimeMillis()
+                    val daysAdded = dto.durationMonths.coerceAtLeast(1) * 30L
+                    val minExpiry = maxOf(effectiveProfile.subscriptionExpiresAt, now) + daysAdded * 86_400_000L
+                    val cloudExpiry = remoteShop?.subscriptionExpiresAt ?: 0L
+                    effectiveProfile = effectiveProfile.copy(
+                        subscriptionStatus = ShopProfile.STATUS_ACTIVE,
+                        subscriptionExpiresAt = maxOf(minExpiry, cloudExpiry),
+                        lastPaymentRef = "ADMIN-DIRECT-UNLOCK",
+                        lastPaymentAmount = dto.amountRwf,
+                        lastPaymentDate = dto.updatedAt,
+                        deviceCountLimit = maxOf(effectiveProfile.deviceCountLimit, dto.deviceCount),
+                        autoUnlockedAt = dto.updatedAt,
+                        lastAppliedCloudUnlockAt = dto.updatedAt,
+                        updatedAt = now
+                    )
+                    shopProfileDao.insertOrUpdateProfile(effectiveProfile)
+                    directAutoUnlocked = true
+                }
             }
 
-            val msg = if (approvedDtos.isNotEmpty()) {
-                "Synced $pushed request(s). ${approvedDtos.size} approved unlock code(s) ready from Admin!"
-            } else {
-                "Synced $pushed pending verification(s) with Supabase Admin Cloud."
+            val codeReadyCount = approvedDtos.count { it.generatedUnlockCode.isNotBlank() }
+            val msg = when {
+                directAutoUnlocked -> "Subscription Auto-Unlocked directly by BeBoss Admin! All features are now active."
+                codeReadyCount > 0 -> "Synced $pushed request(s). $codeReadyCount approved unlock code(s) ready from Admin!"
+                else -> "Synced shop account, $effectiveDeviceCount device(s), and $pushed request(s) with Supabase Cloud."
             }
-            SupabaseSyncResult(success = true, message = msg, approvedCodesFound = approvedDtos)
+            SupabaseSyncResult(
+                success = true,
+                message = msg,
+                approvedCodesFound = approvedDtos,
+                directAutoUnlocked = directAutoUnlocked
+            )
         } catch (e: Exception) {
             SupabaseSyncResult(success = false, message = "Supabase sync pending: ${e.message}")
         }

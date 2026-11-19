@@ -25,7 +25,8 @@ class AuthSessionCoordinator(
     private val repository: BeBossRepository,
     private val scope: CoroutineScope,
     private val language: StateFlow<AppLanguage>,
-    private val emitSnackbar: suspend (String) -> Unit
+    private val emitSnackbar: suspend (String) -> Unit,
+    private val onRegistrationCloudSync: suspend () -> Unit = {}
 ) {
     private val _currentUser = MutableStateFlow<User?>(null)
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
@@ -92,6 +93,7 @@ class AuthSessionCoordinator(
                 }
 
                 val now = com.example.util.ClockGuard.effectiveNowMs()
+                val liveConfig = com.example.util.OfflineSubscriptionManager.getCurrentPaymentConfig()
                 val profile = ShopProfile(
                     id = 1L,
                     name = ownerFullName.trim(),
@@ -107,6 +109,7 @@ class AuthSessionCoordinator(
                     trialStartedAt = now,
                     lastPaymentRef = "FREE-TRIAL-4D",
                     lastPaymentAmount = 0,
+                    adminWhatsAppNumber = liveConfig.adminWhatsAppNumber,
                     receiptFooter = Localization.get("default_receipt_footer", language.value)
                 )
                 repository.updateShopProfile(profile)
@@ -148,12 +151,21 @@ class AuthSessionCoordinator(
                 repository.saveBranch(mainBranch)
                 repository.deleteBranch("branch_kimironko")
                 repository.deleteBranch("branch_nyabugogo")
+
+                val hardwareId = com.example.util.SupabaseAdminClient.getOrCreateDeviceId(application)
+                repository.ensureOwnerPrimaryDevice(
+                    deviceId = hardwareId,
+                    shopProfile = profile,
+                    ownerUser = ownerUser,
+                    mainBranch = mainBranch
+                )
+
                 repository.recordLocalAudit(
                     actorName = ownerUser.name,
                     actorRole = ownerUser.role.name,
                     action = "SHOP_REGISTERED",
                     targetId = ownerUser.username,
-                    details = "Initialized shop '${profile.shopName}' on ${ShopProfile.FREE_TRIAL_DAYS}-Day Free Trial with PBKDF2 owner credentials"
+                    details = "Initialized shop '${profile.shopName}' on ${ShopProfile.FREE_TRIAL_DAYS}-Day Free Trial & scheduled Supabase Cloud save"
                 )
 
                 prefs.edit().putString("active_user_id", ownerUser.id).apply()
@@ -162,8 +174,76 @@ class AuthSessionCoordinator(
                 _isLocked.value = false
                 _authError.value = null
                 emitSnackbar("${shopName.trim()} — ${Localization.get("reg_success_trial", language.value)}")
+
+                // Immediately enqueue WorkManager (runs when internet connects) and push now if online
+                com.example.util.CloudSyncScheduler.enqueueImmediateSync(application)
+                try {
+                    onRegistrationCloudSync()
+                } catch (_: Exception) {
+                }
             } catch (e: Exception) {
                 _authError.value = "Registration failed: ${e.message}"
+            }
+        }
+    }
+
+    fun joinExistingShopFromCloud(
+        ownerUsername: String,
+        ownerPhone: String,
+        deviceJoinCode: String,
+        thisDeviceName: String,
+        pin: String,
+        password: String
+    ) {
+        scope.launch {
+            try {
+                val cleanPin = pin.trim()
+                val cleanPassword = password.trim()
+                val pinCheck = SecurityUtils.validatePinStrength(cleanPin)
+                if (!pinCheck.isValid) {
+                    _authError.value = pinCheck.message
+                    return@launch
+                }
+                val passCheck = SecurityUtils.validatePasswordStrength(cleanPassword)
+                if (!passCheck.isValid) {
+                    _authError.value = passCheck.message
+                    return@launch
+                }
+
+                val res = repository.joinExistingShopFromCloud(
+                    context = application,
+                    ownerUsername = ownerUsername,
+                    ownerPhone = ownerPhone,
+                    deviceJoinCode = deviceJoinCode,
+                    thisDeviceName = thisDeviceName,
+                    assignedPin = cleanPin,
+                    assignedPassword = cleanPassword
+                )
+                if (!res.success || res.signedInUser == null) {
+                    _authError.value = res.message
+                    return@launch
+                }
+
+                prefs.edit().putString("active_user_id", res.signedInUser.id).apply()
+                _currentUser.value = res.signedInUser
+                _isRegistrationNeeded.value = false
+                _isLocked.value = false
+                _authError.value = null
+                repository.recordLocalAudit(
+                    actorName = res.signedInUser.name,
+                    actorRole = res.signedInUser.role.name,
+                    action = "DEVICE_JOINED_SHOP",
+                    targetId = deviceJoinCode.trim().uppercase(),
+                    details = "Paired device '$thisDeviceName' to ${res.shopName} via cloud Join Code"
+                )
+                com.example.util.CloudSyncScheduler.enqueueImmediateSync(application)
+                try {
+                    onRegistrationCloudSync()
+                } catch (_: Exception) {
+                }
+                emitSnackbar(res.message)
+            } catch (e: Exception) {
+                _authError.value = "Join shop error: ${e.message}"
             }
         }
     }

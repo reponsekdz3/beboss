@@ -28,8 +28,14 @@ interface PaymentVerificationDao {
     @Query("UPDATE payment_verification_requests SET syncedToSupabase = 1, updatedAt = :updatedAt WHERE id = :id")
     suspend fun markSynced(id: String, updatedAt: Long = System.currentTimeMillis())
 
-    @Query("UPDATE payment_verification_requests SET status = :status, generatedUnlockCode = :unlockCode, syncedToSupabase = 1, updatedAt = :updatedAt WHERE id = :id")
-    suspend fun updateCloudApproval(id: String, status: String, unlockCode: String, updatedAt: Long = System.currentTimeMillis())
+    @Query("UPDATE payment_verification_requests SET status = :status, generatedUnlockCode = :unlockCode, approvalMode = :approvalMode, syncedToSupabase = 1, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateCloudApproval(
+        id: String,
+        status: String,
+        unlockCode: String,
+        approvalMode: String = "",
+        updatedAt: Long = System.currentTimeMillis()
+    )
 
     @Query("DELETE FROM payment_verification_requests")
     suspend fun clearAll()

@@ -230,18 +230,83 @@ class CloudSyncManager(private val database: AppDatabase) {
                 val shopSyncKey = SupabaseAdminClient.computeShopSyncKey(ownerUsername, ownerPhone)
                 val recordsSummary = "${branches.size} branches • ${products.size} items • ${sales.size} sales • ${customers.size} clients (${chunkedTokens.size} chunk(s))"
 
+                val appCfg = SupabaseAdminClient.fetchPublicAppConfig()
+                if (appCfg != null) {
+                    OfflineSubscriptionManager.saveDynamicPaymentConfig(null, appCfg)
+                    if (appCfg.adminWhatsAppNumber.isNotBlank() && appCfg.adminWhatsAppNumber != profile.adminWhatsAppNumber) {
+                        profile = profile.copy(adminWhatsAppNumber = appCfg.adminWhatsAppNumber)
+                        shopProfileDao.insertOrUpdateProfile(profile)
+                    }
+                }
+
                 val remoteShop = SupabaseAdminClient.fetchShopAccountById(shopSyncKey)
                 if (remoteShop != null) {
                     ClockGuard.observeTrustedEpoch(remoteShop.updatedAt)
-                    if (remoteShop.updatedAt > profile.updatedAt) {
+                    val isDirectUnlockUpdate = remoteShop.autoUnlockedAt > profile.lastAppliedCloudUnlockAt
+                    val isRemoteExtension = remoteShop.subscriptionStatus == ShopProfile.STATUS_ACTIVE &&
+                        remoteShop.subscriptionExpiresAt > profile.subscriptionExpiresAt + 60_000L
+                    val isRemoteLock = (remoteShop.subscriptionStatus == ShopProfile.STATUS_SUSPENDED ||
+                        remoteShop.subscriptionStatus == ShopProfile.STATUS_EXPIRED) &&
+                        remoteShop.updatedAt > profile.updatedAt &&
+                        remoteShop.autoUnlockedAt <= profile.lastAppliedCloudUnlockAt
+
+                    if (isDirectUnlockUpdate || isRemoteExtension || isRemoteLock || remoteShop.updatedAt > profile.updatedAt) {
                         val updatedProf = profile.copy(
-                            subscriptionStatus = remoteShop.subscriptionStatus,
-                            subscriptionExpiresAt = remoteShop.subscriptionExpiresAt,
-                            updatedAt = remoteShop.updatedAt
+                            subscriptionStatus = if (isDirectUnlockUpdate || isRemoteExtension) ShopProfile.STATUS_ACTIVE else remoteShop.subscriptionStatus,
+                            subscriptionExpiresAt = maxOf(profile.subscriptionExpiresAt, remoteShop.subscriptionExpiresAt).let {
+                                if (isRemoteLock) remoteShop.subscriptionExpiresAt else it
+                            },
+                            deviceCountLimit = maxOf(profile.deviceCountLimit, remoteShop.deviceLimit),
+                            adminWhatsAppNumber = remoteShop.adminWhatsApp.ifBlank { profile.adminWhatsAppNumber },
+                            autoUnlockedAt = maxOf(profile.autoUnlockedAt, remoteShop.autoUnlockedAt),
+                            lastAppliedCloudUnlockAt = if (isDirectUnlockUpdate) remoteShop.autoUnlockedAt else profile.lastAppliedCloudUnlockAt,
+                            lastPaymentRef = if (isDirectUnlockUpdate) "ADMIN-DIRECT-UNLOCK" else profile.lastPaymentRef,
+                            updatedAt = maxOf(profile.updatedAt, remoteShop.updatedAt)
                         )
                         shopProfileDao.insertOrUpdateProfile(updatedProf)
                         profile = updatedProf
                         itemsPulledCount++
+                    }
+                }
+
+                val shopDeviceDao = database.shopDeviceDao()
+                val remoteDevices = SupabaseAdminClient.fetchShopDevicesForShop(shopSyncKey)
+                for (rd in remoteDevices) {
+                    val localDev = shopDeviceDao.getDeviceById(rd.id)
+                    if (localDev == null || rd.updatedAt > localDev.updatedAt) {
+                        shopDeviceDao.insertOrUpdate(
+                            com.example.data.model.ShopDevice(
+                                id = rd.id,
+                                shopSyncKey = rd.shopSyncKey,
+                                deviceId = rd.deviceId,
+                                deviceName = rd.deviceName,
+                                joinCode = rd.joinCode,
+                                assignedUserId = rd.assignedUserId,
+                                assignedUsername = rd.assignedUsername,
+                                assignedUserName = rd.assignedUserName,
+                                role = rd.role,
+                                branchId = rd.branchId,
+                                branchName = rd.branchName,
+                                isOwnerPrimary = rd.isOwnerPrimary,
+                                isActive = rd.isActive,
+                                monthlyFeeAddonRwf = rd.monthlyFeeAddonRwf,
+                                lastSyncedAt = rd.lastSyncedAt,
+                                syncedToSupabase = true,
+                                createdAt = rd.createdAt,
+                                updatedAt = rd.updatedAt
+                            )
+                        )
+                        itemsPulledCount++
+                    }
+                }
+                val localDevices = shopDeviceDao.getAllDevicesList()
+                val activeDeviceCount = localDevices.count { it.isActive }.coerceAtLeast(1)
+                for (ld in localDevices) {
+                    if (!ld.syncedToSupabase || ld.deviceId == deviceId) {
+                        val toPush = if (ld.deviceId == deviceId) ld.copy(lastSyncedAt = now, syncedToSupabase = true) else ld.copy(syncedToSupabase = true)
+                        if (SupabaseAdminClient.upsertShopDevice(shopSyncKey, profile.shopName, toPush)) {
+                            shopDeviceDao.insertOrUpdate(toPush)
+                        }
                     }
                 }
 
@@ -305,7 +370,8 @@ class CloudSyncManager(private val database: AppDatabase) {
                     shopProfile = profile,
                     ownerUser = ownerUser,
                     branchCount = branches.size,
-                    workerCount = latestUsers.count { it.isActive }.coerceAtLeast(1)
+                    workerCount = latestUsers.count { it.isActive }.coerceAtLeast(1),
+                    deviceCount = activeDeviceCount
                 )
                 SupabaseAdminClient.upsertShopUsers(
                     shopSyncKey = shopSyncKey,

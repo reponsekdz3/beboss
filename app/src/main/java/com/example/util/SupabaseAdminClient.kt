@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.example.BuildConfig
 import com.example.data.model.PaymentVerificationRequest
+import com.example.data.model.ShopDevice
 import com.example.data.model.ShopProfile
 import com.example.data.model.User
 import kotlinx.coroutines.Dispatchers
@@ -42,9 +43,34 @@ data class SupabaseShopAccountDto(
     val deviceChallenge: String,
     val branchCount: Int,
     val workerCount: Int,
+    val deviceCount: Int = 1,
+    val deviceLimit: Int = 1,
+    val adminWhatsApp: String = "",
+    val autoUnlockedAt: Long = 0L,
     val monthlyFeeRwf: Int,
     val subscriptionStatus: String,
     val subscriptionExpiresAt: Long,
+    val updatedAt: Long
+)
+
+data class SupabaseShopDeviceDto(
+    val id: String,
+    val shopSyncKey: String,
+    val shopName: String,
+    val deviceId: String,
+    val deviceName: String,
+    val joinCode: String,
+    val assignedUserId: String,
+    val assignedUsername: String,
+    val assignedUserName: String,
+    val role: String,
+    val branchId: String,
+    val branchName: String,
+    val isOwnerPrimary: Boolean,
+    val isActive: Boolean,
+    val monthlyFeeAddonRwf: Int,
+    val lastSyncedAt: Long,
+    val createdAt: Long,
     val updatedAt: Long
 )
 
@@ -57,12 +83,15 @@ data class SupabasePaymentRequestDto(
     val provider: String,
     val ussdCode: String,
     val payerPhone: String,
+    val payerFullName: String = "",
     val amountRwf: Int,
     val durationMonths: Int,
     val branchCount: Int,
     val workerCount: Int,
+    val deviceCount: Int = 1,
     val telcoReference: String,
     val status: String,
+    val approvalMode: String = "",
     val generatedUnlockCode: String,
     val verifiedByAdmin: String,
     val rejectionReason: String = "",
@@ -125,7 +154,8 @@ data class SupabaseAuditLogDto(
 data class SupabaseSyncResult(
     val success: Boolean,
     val message: String,
-    val approvedCodesFound: List<SupabasePaymentRequestDto> = emptyList()
+    val approvedCodesFound: List<SupabasePaymentRequestDto> = emptyList(),
+    val directAutoUnlocked: Boolean = false
 )
 
 data class BatchApprovalResult(
@@ -576,13 +606,77 @@ object SupabaseAdminClient {
     }
 
     // -------------------------------------------------------------------------
+    // GLOBAL ADMIN PAYMENT & WHATSAPP CONFIG (`app_config`)
+    // -------------------------------------------------------------------------
+    suspend fun fetchPublicAppConfig(): AdminPaymentConfig? = withContext(Dispatchers.IO) {
+        if (!isConfigured()) return@withContext null
+        try {
+            val req = buildRestRequest("app_config?id=eq.global&limit=1").get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val arr = JSONArray(resp.body?.string().orEmpty().ifBlank { "[]" })
+                if (arr.length() == 0) return@withContext null
+                val o = arr.getJSONObject(0)
+                AdminPaymentConfig(
+                    adminWhatsAppNumber = o.optString("admin_whatsapp_number"),
+                    mtnMoMoCode = o.optString("mtn_momo_code", "054321"),
+                    mtnMoMoPhone = o.optString("mtn_momo_phone", "0788765432"),
+                    mtnRecipientName = o.optString("mtn_recipient_name", "BeBoss Pay"),
+                    airtelMoneyPhone = o.optString("airtel_money_phone", "0738765432"),
+                    airtelRecipientName = o.optString("airtel_recipient_name", "BeBoss Pay"),
+                    perDeviceFeeRwf = o.optInt("per_device_fee_rwf", 2000),
+                    updatedAt = o.optLong("updated_at", 0L)
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchPublicAppConfig error: ${e.message}")
+            null
+        }
+    }
+
+    suspend fun adminSaveAppConfig(config: AdminPaymentConfig): Boolean = withContext(Dispatchers.IO) {
+        if (!isConfigured() || ensureValidAdminSession() == null) return@withContext false
+        try {
+            val now = System.currentTimeMillis()
+            val payload = JSONObject().apply {
+                put("id", "global")
+                put("admin_whatsapp_number", config.adminWhatsAppNumber.trim())
+                put("mtn_momo_code", config.mtnMoMoCode.trim())
+                put("mtn_momo_phone", config.mtnMoMoPhone.trim())
+                put("mtn_recipient_name", config.mtnRecipientName.trim())
+                put("airtel_money_phone", config.airtelMoneyPhone.trim())
+                put("airtel_recipient_name", config.airtelRecipientName.trim())
+                put("per_device_fee_rwf", config.perDeviceFeeRwf.coerceAtLeast(0))
+                put("updated_at", now)
+            }
+            val req = buildRestRequest("app_config?on_conflict=id", useAdminJwtIfAvailable = true)
+                .addHeader("Prefer", "resolution=merge-duplicates,return=minimal")
+                .post(payload.toString().toRequestBody(jsonMediaType))
+                .build()
+            val ok = client.newCall(req).execute().use { it.isSuccessful }
+            if (ok) {
+                logAdminAudit(
+                    "UPDATE_PAYMENT_CONFIG",
+                    "global",
+                    "WhatsApp=${config.adminWhatsAppNumber}, MTN=${config.mtnMoMoCode}/${config.mtnMoMoPhone}, Airtel=${config.airtelMoneyPhone}, PerDevice=${config.perDeviceFeeRwf}"
+                )
+            }
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "adminSaveAppConfig error: ${e.message}")
+            false
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // SHOP ACCOUNTS & SUBSCRIPTION LICENSING
     // -------------------------------------------------------------------------
     suspend fun upsertShopAccount(
         shopProfile: ShopProfile,
         ownerUser: User?,
         branchCount: Int,
-        workerCount: Int
+        workerCount: Int,
+        deviceCount: Int = 1
     ): Boolean = withContext(Dispatchers.IO) {
         if (!isConfigured()) return@withContext false
         try {
@@ -590,7 +684,29 @@ object SupabaseAdminClient {
             val rawPhone = ownerUser?.phone?.ifBlank { shopProfile.phone } ?: shopProfile.phone
             val accountId = computeShopSyncKey(username, rawPhone)
             val deviceCode = SubscriptionSecurityManager.computeDeviceChallenge(shopProfile)
-            val pricing = OfflineSubscriptionManager.calculateSubscriptionPrice(branchCount, workerCount, 1)
+            val safeDevices = deviceCount.coerceAtLeast(1)
+            val pricing = OfflineSubscriptionManager.calculateSubscriptionPrice(branchCount, workerCount, 1, safeDevices)
+
+            // Check existing cloud shop account so offline client never overwrites a newer Admin Direct Auto-Unlock or status
+            val existingRemote = fetchShopAccountById(accountId)
+            val effectiveStatus = when {
+                existingRemote != null && existingRemote.autoUnlockedAt > shopProfile.lastAppliedCloudUnlockAt ->
+                    existingRemote.subscriptionStatus
+                existingRemote != null && existingRemote.subscriptionStatus == ShopProfile.STATUS_ACTIVE &&
+                    existingRemote.subscriptionExpiresAt > shopProfile.subscriptionExpiresAt ->
+                    existingRemote.subscriptionStatus
+                existingRemote != null && existingRemote.subscriptionStatus == ShopProfile.STATUS_SUSPENDED &&
+                    existingRemote.updatedAt >= shopProfile.updatedAt ->
+                    existingRemote.subscriptionStatus
+                shopProfile.isPaidActive -> ShopProfile.STATUS_ACTIVE
+                shopProfile.isFreeTrial -> ShopProfile.STATUS_TRIAL
+                shopProfile.isSuspended -> ShopProfile.STATUS_SUSPENDED
+                else -> ShopProfile.STATUS_EXPIRED
+            }
+            val effectiveExpiry = maxOf(
+                shopProfile.subscriptionExpiresAt,
+                existingRemote?.subscriptionExpiresAt ?: 0L
+            )
 
             val payload = JSONObject().apply {
                 put("id", accountId)
@@ -601,9 +717,12 @@ object SupabaseAdminClient {
                 put("device_challenge", deviceCode)
                 put("branch_count", branchCount.coerceAtLeast(1))
                 put("worker_count", workerCount.coerceAtLeast(1))
+                put("device_count", safeDevices)
+                put("device_limit", maxOf(shopProfile.deviceCountLimit, safeDevices, existingRemote?.deviceLimit ?: 1))
+                put("admin_whatsapp", shopProfile.adminWhatsAppNumber.ifBlank { existingRemote?.adminWhatsApp.orEmpty() })
                 put("monthly_fee_rwf", pricing.monthlySubtotal)
-                put("subscription_status", if (shopProfile.isSubscriptionActive) "ACTIVE" else "EXPIRED")
-                put("subscription_expires_at", shopProfile.subscriptionExpiresAt)
+                put("subscription_status", effectiveStatus)
+                put("subscription_expires_at", effectiveExpiry)
                 put("updated_at", System.currentTimeMillis())
             }
 
@@ -640,6 +759,131 @@ object SupabaseAdminClient {
             null
         }
     }
+
+    // -------------------------------------------------------------------------
+    // SINGLE-SHOP MULTI-DEVICE REGISTRY (`shop_devices`)
+    // -------------------------------------------------------------------------
+    suspend fun upsertShopDevice(
+        shopSyncKey: String,
+        shopName: String,
+        device: ShopDevice
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (!isConfigured() || shopSyncKey.isBlank()) return@withContext false
+        try {
+            val payload = JSONObject().apply {
+                put("id", device.id)
+                put("shop_sync_key", shopSyncKey)
+                put("shop_name", shopName)
+                put("device_id", device.deviceId)
+                put("device_name", device.deviceName)
+                put("join_code", device.joinCode.uppercase(Locale.ROOT))
+                put("assigned_user_id", device.assignedUserId)
+                put("assigned_username", device.assignedUsername.trim().lowercase(Locale.ROOT))
+                put("assigned_user_name", device.assignedUserName)
+                put("role", device.role)
+                put("branch_id", device.branchId)
+                put("branch_name", device.branchName)
+                put("is_owner_primary", device.isOwnerPrimary)
+                put("is_active", device.isActive)
+                put("monthly_fee_addon_rwf", if (device.isOwnerPrimary) 0 else device.monthlyFeeAddonRwf)
+                put("last_synced_at", device.lastSyncedAt)
+                put("created_at", device.createdAt)
+                put("updated_at", device.updatedAt)
+            }
+            val req = buildRestRequest("shop_devices?on_conflict=id", tenantSyncKey = shopSyncKey)
+                .addHeader("Prefer", "resolution=merge-duplicates,return=minimal")
+                .post(payload.toString().toRequestBody(jsonMediaType))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    Log.w(TAG, "upsertShopDevice HTTP ${resp.code}: ${resp.body?.string()}")
+                }
+                resp.isSuccessful
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "upsertShopDevice error: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun fetchShopDevicesForShop(shopSyncKey: String): List<SupabaseShopDeviceDto> = withContext(Dispatchers.IO) {
+        if (!isConfigured() || shopSyncKey.isBlank()) return@withContext emptyList()
+        try {
+            val enc = URLEncoder.encode(shopSyncKey, "UTF-8")
+            val req = buildRestRequest(
+                "shop_devices?shop_sync_key=eq.$enc&order=is_owner_primary.desc,created_at.asc&limit=100",
+                tenantSyncKey = shopSyncKey
+            ).get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext emptyList()
+                val arr = JSONArray(resp.body?.string().orEmpty().ifBlank { "[]" })
+                (0 until arr.length()).map { parseShopDeviceDto(arr.getJSONObject(it)) }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchShopDevicesForShop error: ${e.message}")
+            emptyList()
+        }
+    }
+
+    suspend fun deleteShopDeviceInCloud(shopSyncKey: String, deviceRecordId: String, useAdmin: Boolean = false): Boolean =
+        withContext(Dispatchers.IO) {
+            if (!isConfigured() || deviceRecordId.isBlank()) return@withContext false
+            try {
+                val req = buildRestRequest(
+                    "shop_devices?id=eq.${URLEncoder.encode(deviceRecordId, "UTF-8")}",
+                    useAdminJwtIfAvailable = useAdmin,
+                    tenantSyncKey = if (useAdmin) null else shopSyncKey
+                ).delete().build()
+                val ok = client.newCall(req).execute().use { it.isSuccessful }
+                if (ok && useAdmin) {
+                    logAdminAudit("DELETE_DEVICE", deviceRecordId, "Removed device $deviceRecordId")
+                }
+                ok
+            } catch (e: Exception) {
+                Log.e(TAG, "deleteShopDeviceInCloud error: ${e.message}")
+                false
+            }
+        }
+
+    suspend fun fetchAllShopDevices(): List<SupabaseShopDeviceDto> = withContext(Dispatchers.IO) {
+        if (!isConfigured() || ensureValidAdminSession() == null) return@withContext emptyList()
+        try {
+            val req = buildRestRequest("shop_devices?order=updated_at.desc&limit=250", useAdminJwtIfAvailable = true)
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext emptyList()
+                val arr = JSONArray(resp.body?.string().orEmpty().ifBlank { "[]" })
+                (0 until arr.length()).map { parseShopDeviceDto(arr.getJSONObject(it)) }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchAllShopDevices error: ${e.message}")
+            emptyList()
+        }
+    }
+
+    suspend fun adminToggleShopDeviceActive(device: SupabaseShopDeviceDto, isActive: Boolean): Boolean =
+        withContext(Dispatchers.IO) {
+            if (!isConfigured() || ensureValidAdminSession() == null) return@withContext false
+            try {
+                val patch = JSONObject().apply {
+                    put("is_active", isActive)
+                    put("updated_at", System.currentTimeMillis())
+                }
+                val req = buildRestRequest(
+                    "shop_devices?id=eq.${URLEncoder.encode(device.id, "UTF-8")}",
+                    useAdminJwtIfAvailable = true
+                ).patch(patch.toString().toRequestBody(jsonMediaType)).build()
+                val ok = client.newCall(req).execute().use { it.isSuccessful }
+                if (ok) {
+                    logAdminAudit("TOGGLE_DEVICE", device.deviceName, "${device.shopName}: is_active=$isActive")
+                }
+                ok
+            } catch (e: Exception) {
+                Log.e(TAG, "adminToggleShopDeviceActive error: ${e.message}")
+                false
+            }
+        }
 
     // -------------------------------------------------------------------------
     // SHOP USERS DIRECTORY SYNC (`shop_users`) — Metadata only (No PIN/Password)
@@ -714,12 +958,15 @@ object SupabaseAdminClient {
                 put("provider", request.provider)
                 put("ussd_code", request.ussdCode)
                 put("payer_phone", request.payerPhone)
+                put("payer_full_name", request.payerFullName.trim())
                 put("amount_rwf", request.amountRwf)
                 put("duration_months", request.durationMonths)
                 put("branch_count", request.branchCount)
                 put("worker_count", request.workerCount)
+                put("device_count", request.deviceCount.coerceAtLeast(1))
                 put("telco_reference", request.telcoReference)
                 put("status", request.status)
+                put("approval_mode", request.approvalMode)
                 put("generated_unlock_code", request.generatedUnlockCode)
                 put("created_at", request.createdAt)
                 put("updated_at", request.updatedAt)
@@ -988,7 +1235,8 @@ object SupabaseAdminClient {
             val recomputedBreakdown = OfflineSubscriptionManager.calculateSubscriptionPrice(
                 branchCount = request.branchCount.coerceAtLeast(1),
                 workerCount = request.workerCount.coerceAtLeast(1),
-                durationMonths = request.durationMonths.coerceAtLeast(1)
+                durationMonths = request.durationMonths.coerceAtLeast(1),
+                deviceCount = request.deviceCount.coerceAtLeast(1)
             )
             val verifiedAmountRwf = recomputedBreakdown.totalPayable
             val codePayload = JSONObject().apply {
@@ -1012,6 +1260,7 @@ object SupabaseAdminClient {
 
             val prPatch = JSONObject().apply {
                 put("status", "APPROVED")
+                put("approval_mode", "UNLOCK_CODE")
                 put("amount_rwf", verifiedAmountRwf)
                 put("generated_unlock_code", generatedCode)
                 put("verified_by_admin", operatorLabel)
@@ -1025,7 +1274,15 @@ object SupabaseAdminClient {
 
             if (codeOk && prOk) {
                 val shopKey = computeShopSyncKey(request.ownerUsername, request.ownerPhone)
-                extendShopExpiryInternal(shopKey, days)
+                extendShopExpiryInternal(
+                    shopId = shopKey,
+                    addDays = days,
+                    branchCount = request.branchCount,
+                    workerCount = request.workerCount,
+                    deviceLimit = request.deviceCount,
+                    monthlyFeeRwf = recomputedBreakdown.monthlySubtotal,
+                    markAutoUnlock = false
+                )
                 val varianceNote = if (request.amountRwf != verifiedAmountRwf) {
                     " [recomputed from ${request.amountRwf} FRw]"
                 } else ""
@@ -1039,6 +1296,66 @@ object SupabaseAdminClient {
         } catch (e: Exception) {
             Log.e(TAG, "approvePaymentAndIssueCode error: ${e.message}")
             Pair(false, generatedCode)
+        }
+    }
+
+    /**
+     * Option 2 Approval: Directly auto-unlock the shop in cloud without requiring an unlock code.
+     * The app detects `auto_unlocked_at` / `DIRECT_AUTO_UNLOCK` on background or foreground sync
+     * and activates all features automatically.
+     */
+    suspend fun approvePaymentDirectAutoUnlock(
+        request: SupabasePaymentRequestDto,
+        adminName: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        val session = ensureValidAdminSession()
+        if (!isConfigured() || session == null) return@withContext false
+        try {
+            val now = System.currentTimeMillis()
+            val days = request.durationMonths.coerceAtLeast(1) * 30
+            val operatorLabel = "${session.fullName} (${session.email})".ifBlank { adminName }
+            val recomputedBreakdown = OfflineSubscriptionManager.calculateSubscriptionPrice(
+                branchCount = request.branchCount.coerceAtLeast(1),
+                workerCount = request.workerCount.coerceAtLeast(1),
+                durationMonths = request.durationMonths.coerceAtLeast(1),
+                deviceCount = request.deviceCount.coerceAtLeast(1)
+            )
+            val verifiedAmountRwf = recomputedBreakdown.totalPayable
+
+            val prPatch = JSONObject().apply {
+                put("status", "APPROVED")
+                put("approval_mode", "DIRECT_AUTO_UNLOCK")
+                put("amount_rwf", verifiedAmountRwf)
+                put("generated_unlock_code", "")
+                put("verified_by_admin", operatorLabel)
+                put("updated_at", now)
+            }
+            val patchPrReq = buildRestRequest(
+                "payment_requests?id=eq.${URLEncoder.encode(request.id, "UTF-8")}",
+                useAdminJwtIfAvailable = true
+            ).patch(prPatch.toString().toRequestBody(jsonMediaType)).build()
+            val prOk = client.newCall(patchPrReq).execute().use { it.isSuccessful }
+            if (!prOk) return@withContext false
+
+            val shopKey = computeShopSyncKey(request.ownerUsername, request.ownerPhone)
+            extendShopExpiryInternal(
+                shopId = shopKey,
+                addDays = days,
+                branchCount = request.branchCount,
+                workerCount = request.workerCount,
+                deviceLimit = request.deviceCount,
+                monthlyFeeRwf = recomputedBreakdown.monthlySubtotal,
+                markAutoUnlock = true
+            )
+            logAdminAudit(
+                action = "DIRECT_AUTO_UNLOCK",
+                targetId = request.ownerUsername,
+                details = "Direct Auto-Unlocked ${request.shopName} (payer: ${request.payerFullName} / ${request.payerPhone}) for +${days}d ($verifiedAmountRwf FRw, ${request.deviceCount} device(s)) without code"
+            )
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "approvePaymentDirectAutoUnlock error: ${e.message}")
+            false
         }
     }
 
@@ -1260,17 +1577,21 @@ object SupabaseAdminClient {
     suspend fun adminUpdateShopLimits(
         shop: SupabaseShopAccountDto,
         branchCount: Int,
-        workerCount: Int
+        workerCount: Int,
+        deviceLimit: Int = shop.deviceLimit.coerceAtLeast(1)
     ): Boolean = withContext(Dispatchers.IO) {
         if (!isConfigured() || ensureValidAdminSession() == null) return@withContext false
         try {
             val safeBranches = branchCount.coerceAtLeast(1)
             val safeWorkers = workerCount.coerceAtLeast(1)
-            val pricing = OfflineSubscriptionManager.calculateSubscriptionPrice(safeBranches, safeWorkers, 1)
+            val safeDevices = deviceLimit.coerceAtLeast(1)
+            val pricing = OfflineSubscriptionManager.calculateSubscriptionPrice(safeBranches, safeWorkers, 1, safeDevices)
             val now = System.currentTimeMillis()
             val patch = JSONObject().apply {
                 put("branch_count", safeBranches)
                 put("worker_count", safeWorkers)
+                put("device_limit", safeDevices)
+                put("device_count", maxOf(shop.deviceCount, 1))
                 put("monthly_fee_rwf", pricing.monthlySubtotal)
                 put("updated_at", now)
             }
@@ -1283,7 +1604,7 @@ object SupabaseAdminClient {
                 logAdminAudit(
                     "UPDATE_SHOP_LIMITS",
                     "@${shop.ownerUsername}",
-                    "${shop.shopName}: branches=$safeBranches, workers=$safeWorkers, fee=${pricing.monthlySubtotal} FRw/mo"
+                    "${shop.shopName}: branches=$safeBranches, workers=$safeWorkers, devices=$safeDevices, fee=${pricing.monthlySubtotal} FRw/mo"
                 )
             }
             ok
@@ -1379,7 +1700,15 @@ object SupabaseAdminClient {
         }
     }
 
-    private fun extendShopExpiryInternal(shopId: String, addDays: Int) {
+    private fun extendShopExpiryInternal(
+        shopId: String,
+        addDays: Int,
+        branchCount: Int? = null,
+        workerCount: Int? = null,
+        deviceLimit: Int? = null,
+        monthlyFeeRwf: Int? = null,
+        markAutoUnlock: Boolean = false
+    ) {
         try {
             val enc = URLEncoder.encode(shopId, "UTF-8")
             val getReq = buildRestRequest("shop_accounts?id=eq.$enc&limit=1", useAdminJwtIfAvailable = true).get().build()
@@ -1400,6 +1729,11 @@ object SupabaseAdminClient {
             val patch = JSONObject().apply {
                 put("subscription_status", "ACTIVE")
                 put("subscription_expires_at", newExpiry)
+                if (branchCount != null) put("branch_count", branchCount.coerceAtLeast(1))
+                if (workerCount != null) put("worker_count", workerCount.coerceAtLeast(1))
+                if (deviceLimit != null) put("device_limit", deviceLimit.coerceAtLeast(1))
+                if (monthlyFeeRwf != null) put("monthly_fee_rwf", monthlyFeeRwf.coerceAtLeast(5000))
+                if (markAutoUnlock) put("auto_unlocked_at", now)
                 put("updated_at", now)
             }
             val patchReq = buildRestRequest("shop_accounts?id=eq.$enc", useAdminJwtIfAvailable = true)
@@ -1438,12 +1772,15 @@ object SupabaseAdminClient {
             provider = o.optString("provider"),
             ussdCode = o.optString("ussd_code"),
             payerPhone = o.optString("payer_phone"),
+            payerFullName = o.optString("payer_full_name"),
             amountRwf = o.optInt("amount_rwf", 0),
             durationMonths = o.optInt("duration_months", 1),
             branchCount = o.optInt("branch_count", 1),
             workerCount = o.optInt("worker_count", 1),
+            deviceCount = o.optInt("device_count", 1).coerceAtLeast(1),
             telcoReference = o.optString("telco_reference"),
             status = o.optString("status", "PENDING_VERIFICATION"),
+            approvalMode = o.optString("approval_mode"),
             generatedUnlockCode = o.optString("generated_unlock_code"),
             verifiedByAdmin = o.optString("verified_by_admin"),
             rejectionReason = o.optString("rejection_reason"),
@@ -1479,9 +1816,36 @@ object SupabaseAdminClient {
             deviceChallenge = o.optString("device_challenge"),
             branchCount = o.optInt("branch_count", 1),
             workerCount = o.optInt("worker_count", 1),
+            deviceCount = o.optInt("device_count", 1).coerceAtLeast(1),
+            deviceLimit = o.optInt("device_limit", 1).coerceAtLeast(1),
+            adminWhatsApp = o.optString("admin_whatsapp"),
+            autoUnlockedAt = o.optLong("auto_unlocked_at", 0L),
             monthlyFeeRwf = o.optInt("monthly_fee_rwf", 5000),
             subscriptionStatus = o.optString("subscription_status", "ACTIVE"),
             subscriptionExpiresAt = o.optLong("subscription_expires_at", 0L),
+            updatedAt = o.optLong("updated_at", 0L)
+        )
+    }
+
+    private fun parseShopDeviceDto(o: JSONObject): SupabaseShopDeviceDto {
+        return SupabaseShopDeviceDto(
+            id = o.optString("id"),
+            shopSyncKey = o.optString("shop_sync_key"),
+            shopName = o.optString("shop_name"),
+            deviceId = o.optString("device_id"),
+            deviceName = o.optString("device_name"),
+            joinCode = o.optString("join_code"),
+            assignedUserId = o.optString("assigned_user_id"),
+            assignedUsername = o.optString("assigned_username"),
+            assignedUserName = o.optString("assigned_user_name"),
+            role = o.optString("role", "CASHIER"),
+            branchId = o.optString("branch_id", "main_branch"),
+            branchName = o.optString("branch_name", "Main Store"),
+            isOwnerPrimary = o.optBoolean("is_owner_primary", false),
+            isActive = o.optBoolean("is_active", true),
+            monthlyFeeAddonRwf = o.optInt("monthly_fee_addon_rwf", 2000),
+            lastSyncedAt = o.optLong("last_synced_at", 0L),
+            createdAt = o.optLong("created_at", 0L),
             updatedAt = o.optLong("updated_at", 0L)
         )
     }

@@ -8,6 +8,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.db.AppDatabase
 import com.example.data.db.DatabaseMigrations
 import com.example.data.model.LocalAuditLog
+import com.example.data.model.ShopDevice
 import com.example.data.model.SyncTombstone
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -375,15 +376,24 @@ class DatabaseMigrationTest {
                 )
                 """.trimIndent()
             )
+            db.execSQL(
+                """
+                INSERT INTO payment_verification_requests VALUES (
+                    'pvr_v9_1', 'BeBoss Kigali', 'jeanpaul', '+250788123456', 'DEV-V9',
+                    'MTN MoMo', '*182*8*1*054321*5000#', '0788123456', 5000, 1, 1, 1,
+                    'FT-V9-100', 'PENDING_VERIFICATION', '', 0, $now, $now
+                )
+                """.trimIndent()
+            )
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
     }
 
     @Test
-    fun `migration 9 to 10 preserves data adds causal columns indices and audit logs table`() = runBlocking {
+    fun `migration 9 to 12 preserves data adds causal columns indices audit logs tombstones and shop devices`() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val dbName = "migration_v9_to_v10_test.db"
+        val dbName = "migration_v9_to_v12_test.db"
         context.deleteDatabase(dbName)
 
         // Create and populate exact v9 schema
@@ -429,7 +439,9 @@ class DatabaseMigrationTest {
                 "index_sync_queue_status_nextAttemptAt",
                 "index_local_audit_logs_createdAt",
                 "index_local_audit_logs_action",
-                "index_sync_tombstones_tableName_deletedAt"
+                "index_sync_tombstones_tableName_deletedAt",
+                "index_shop_devices_deviceId",
+                "index_shop_devices_joinCode"
             )
             val actualIndices = mutableSetOf<String>()
             sqliteDb.query("SELECT name FROM sqlite_master WHERE type = 'index'").use { cursor ->
@@ -446,6 +458,16 @@ class DatabaseMigrationTest {
             assertNotNull(profile)
             assertEquals("BeBoss Kigali", profile?.shopName)
             assertEquals(1L, profile?.syncVersion)
+            assertEquals(1, profile?.deviceCountLimit)
+            assertEquals("", profile?.adminWhatsAppNumber)
+            assertEquals(0L, profile?.autoUnlockedAt)
+            assertEquals(0L, profile?.lastAppliedCloudUnlockAt)
+
+            val pvr = roomDb.paymentVerificationDao().getRequestById("pvr_v9_1")
+            assertNotNull(pvr)
+            assertEquals("", pvr?.payerFullName)
+            assertEquals(1, pvr?.deviceCount)
+            assertEquals("", pvr?.approvalMode)
 
             val product = roomDb.productDao().getProductById("p_v9_1")
             assertNotNull(product)
@@ -488,6 +510,32 @@ class DatabaseMigrationTest {
             val tombstones = roomDb.syncTombstoneDao().getAllTombstonesList()
             assertEquals(1, tombstones.size)
             assertEquals("p_v9_deleted", tombstones.first().recordId)
+
+            // Verify new v12 shop_devices table and DAO are operational
+            roomDb.shopDeviceDao().insertOrUpdate(
+                ShopDevice(
+                    id = "dev_v12_1",
+                    shopSyncKey = "owner_0788123456",
+                    deviceId = "POS-TERM-02",
+                    deviceName = "Front Counter 2",
+                    joinCode = "AB12CD",
+                    assignedUserId = "u_cashier_1",
+                    assignedUsername = "marie",
+                    assignedUserName = "Marie Claire",
+                    role = "CASHIER",
+                    branchId = "main_branch",
+                    branchName = "Kigali HQ",
+                    isOwnerPrimary = false,
+                    isActive = true,
+                    monthlyFeeAddonRwf = 2000
+                )
+            )
+            val savedDevice = roomDb.shopDeviceDao().getByDeviceId("POS-TERM-02")
+            assertNotNull(savedDevice)
+            assertEquals("Front Counter 2", savedDevice?.deviceName)
+            assertEquals("AB12CD", savedDevice?.joinCode)
+            assertEquals("Marie Claire", savedDevice?.assignedUserName)
+            assertEquals(2000, savedDevice?.monthlyFeeAddonRwf)
         } finally {
             roomDb.close()
             context.deleteDatabase(dbName)

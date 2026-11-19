@@ -14,12 +14,15 @@ data class PaymentVerificationRequest(
     val provider: String = "MTN MoMo",
     val ussdCode: String = "",
     val payerPhone: String = "",
+    val payerFullName: String = "",
     val amountRwf: Int = 5000,
     val durationMonths: Int = 1,
     val branchCount: Int = 1,
     val workerCount: Int = 1,
+    val deviceCount: Int = 1,
     val telcoReference: String = "",
     val status: String = "PENDING_VERIFICATION", // PENDING_VERIFICATION, APPROVED, REJECTED, REDEEMED
+    val approvalMode: String = "", // UNLOCK_CODE, DIRECT_AUTO_UNLOCK, ""
     val generatedUnlockCode: String = "",
     val syncedToSupabase: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),

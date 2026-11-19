@@ -28,11 +28,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.LockClock
 import androidx.compose.material.icons.filled.Payment
@@ -94,6 +96,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import com.example.R
 import com.example.data.model.Branch
 import com.example.data.model.PaymentVerificationRequest
+import com.example.data.model.ShopDevice
 import com.example.data.model.ShopProfile
 import com.example.data.model.User
 import com.example.ui.theme.DarkNavy
@@ -102,6 +105,7 @@ import com.example.ui.theme.InkMedium
 import com.example.ui.theme.LossRed
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
+import com.example.util.AdminPaymentConfig
 import com.example.util.AppLanguage
 import com.example.util.Localization
 import com.example.util.MoMoPaymentGateway
@@ -120,12 +124,14 @@ fun SubscriptionScreen(
     shopProfile: ShopProfile,
     branches: List<Branch> = emptyList(),
     allUsers: List<User> = emptyList(),
+    shopDevices: List<ShopDevice> = emptyList(),
     currentUser: User? = null,
     paymentRequests: List<PaymentVerificationRequest> = emptyList(),
+    livePaymentConfig: AdminPaymentConfig = OfflineSubscriptionManager.getCurrentPaymentConfig(),
     language: AppLanguage,
     onActivateVoucher: (String) -> Unit,
     onProcessDirectPayment: ((provider: String, phone: String, durationMonths: Int, userReference: String?, onSuccess: (PaymentProcessingResult, SubscriptionPriceBreakdown) -> Unit) -> Unit)? = null,
-    onSubmitPaymentVerification: ((provider: String, payerPhone: String, username: String, registeredPhone: String, durationMonths: Int, branchCount: Int, workerCount: Int, telcoRef: String, onDone: (PaymentVerificationRequest, Boolean) -> Unit) -> Unit)? = null,
+    onSubmitPaymentVerification: ((provider: String, payerPhone: String, payerFullName: String, username: String, registeredPhone: String, durationMonths: Int, branchCount: Int, workerCount: Int, deviceCount: Int, telcoRef: String, onDone: (PaymentVerificationRequest, Boolean) -> Unit) -> Unit)? = null,
     onCheckCloudApproval: () -> Unit = {},
     onClose: () -> Unit = {}
 ) {
@@ -138,15 +144,18 @@ fun SubscriptionScreen(
 
     val initialBranchCount = branches.size.coerceAtLeast(1)
     val initialWorkerCount = allUsers.size.coerceAtLeast(1)
+    val initialDeviceCount = shopDevices.count { it.isActive }.coerceAtLeast(1)
     var selectedBranchCount by remember { mutableIntStateOf(initialBranchCount) }
     var selectedWorkerCount by remember { mutableIntStateOf(initialWorkerCount) }
+    var selectedDeviceCount by remember(shopDevices) { mutableIntStateOf(initialDeviceCount) }
     var selectedDurationMonths by remember { mutableIntStateOf(1) }
 
-    val breakdown = remember(selectedBranchCount, selectedWorkerCount, selectedDurationMonths) {
+    val breakdown = remember(selectedBranchCount, selectedWorkerCount, selectedDeviceCount, selectedDurationMonths, livePaymentConfig) {
         OfflineSubscriptionManager.calculateSubscriptionPrice(
             branchCount = selectedBranchCount,
             workerCount = selectedWorkerCount,
-            durationMonths = selectedDurationMonths
+            durationMonths = selectedDurationMonths,
+            deviceCount = selectedDeviceCount
         )
     }
 
@@ -156,7 +165,11 @@ fun SubscriptionScreen(
         mutableStateOf(ownerAccount?.phone?.ifBlank { shopProfile.phone } ?: shopProfile.phone)
     }
     var payerPhoneInput by remember(shopProfile.phone) { mutableStateOf(shopProfile.phone) }
+    var payerFullNameInput by remember(ownerAccount?.name, shopProfile.name) {
+        mutableStateOf(ownerAccount?.name?.ifBlank { shopProfile.name } ?: shopProfile.name)
+    }
     var telcoRefInput by remember { mutableStateOf("") }
+    var proofError by remember { mutableStateOf<String?>(null) }
 
     var voucherInput by remember { mutableStateOf("") }
     var lastAutoTriggeredCode by remember { mutableStateOf("") }
@@ -410,10 +423,73 @@ fun SubscriptionScreen(
                                 onClick = { selectedWorkerCount++ },
                                 shape = CircleShape,
                                 color = OrangePrimary,
-                                modifier = Modifier.size(40.dp)
+                                modifier = Modifier.size(48.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(Icons.Default.Add, contentDescription = "Increase staff count", tint = Color.White, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Paired Shop Devices Stepper (+2,000 FRw/month per added device)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Icon(Icons.Default.Devices, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(15.dp))
+                                Text(
+                                    text = "${Localization.get("shop_devices_title", language)} (+2,000 FRw/added):",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Text(
+                                text = breakdown.deviceTierName,
+                                fontSize = 11.sp,
+                                color = OrangePrimary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Surface(
+                                onClick = { if (selectedDeviceCount > 1) selectedDeviceCount-- },
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .testTag("sub_device_dec_btn")
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.Remove, contentDescription = "Decrease device count", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            Text(
+                                text = "$selectedDeviceCount",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier.padding(horizontal = 6.dp)
+                            )
+                            Surface(
+                                onClick = { selectedDeviceCount++ },
+                                shape = CircleShape,
+                                color = OrangePrimary,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .testTag("sub_device_inc_btn")
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.Add, contentDescription = "Increase device count", tint = Color.White, modifier = Modifier.size(18.dp))
                                 }
                             }
                         }
@@ -502,11 +578,48 @@ fun SubscriptionScreen(
                         )
                     }
 
+                    val resolvedAdminWa = livePaymentConfig.adminWhatsAppNumber.trim()
+                        .ifBlank { shopProfile.adminWhatsAppNumber.trim() }
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "Live Admin Payment & WhatsApp Settings",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = OrangePrimary
+                            )
+                            Text(
+                                text = "MTN *182#: Code ${livePaymentConfig.mtnMoMoCode.ifBlank { livePaymentConfig.mtnMoMoPhone }} (${livePaymentConfig.mtnRecipientName}) → ${breakdown.ussdMtnCode}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Airtel *500#: ${livePaymentConfig.airtelMoneyPhone} (${livePaymentConfig.airtelRecipientName}) → ${breakdown.ussdAirtelCode}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Admin WhatsApp: ${resolvedAdminWa.ifBlank { "Set Admin WhatsApp in Admin Console -> Pay Config" }}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (resolvedAdminWa.isNotBlank()) ProfitGreen else LossRed
+                            )
+                        }
+                    }
+
                     Text(
-                        text = "1) Dial real USSD on your phone to pay ${breakdown.totalPayable} FRw.\n2) Confirm your created Account Username & Registered Phone, then send proof to Admin WhatsApp (${OfflineSubscriptionManager.defaultSupportWhatsApp}). Admin verifies payment on their phone and generates your unlock code from the Web Dashboard.",
-                        fontSize = 12.sp,
+                        text = "1) Dial *182# or *500# (auto-written with exact ${breakdown.totalPayable} FRw).\n2) Send your Username, Registered Phone, Sender Phone & Registered MoMo Names via WhatsApp so Admin verifies & sends your BB2 Code or Auto-Unlocks directly.",
+                        fontSize = 11.5.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        lineHeight = 17.sp
+                        lineHeight = 16.5.sp
                     )
 
                     // Real USSD Dial Buttons
@@ -558,7 +671,7 @@ fun SubscriptionScreen(
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
                     Text(
-                        text = "Account Proof Sent to Admin (for Unlock Code Binding):",
+                        text = "Credentials Sent to Admin WhatsApp (for Verification & Unlock):",
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -566,7 +679,7 @@ fun SubscriptionScreen(
 
                     OutlinedTextField(
                         value = usernameProofInput,
-                        onValueChange = { usernameProofInput = it },
+                        onValueChange = { usernameProofInput = it; proofError = null },
                         label = { Text("Created Account Username *") },
                         leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = OrangePrimary) },
                         modifier = Modifier
@@ -578,7 +691,7 @@ fun SubscriptionScreen(
 
                     OutlinedTextField(
                         value = registeredPhoneInput,
-                        onValueChange = { registeredPhoneInput = it },
+                        onValueChange = { registeredPhoneInput = it; proofError = null },
                         label = { Text("Registered Account Phone Number *") },
                         leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null, tint = OrangePrimary) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
@@ -589,13 +702,28 @@ fun SubscriptionScreen(
                         singleLine = true
                     )
 
+                    OutlinedTextField(
+                        value = payerFullNameInput,
+                        onValueChange = { payerFullNameInput = it; proofError = null },
+                        label = { Text(Localization.get("payer_full_name_label", language)) },
+                        placeholder = { Text("e.g. Jean Paul Habimana") },
+                        leadingIcon = { Icon(Icons.Default.Badge, contentDescription = null, tint = OrangePrimary) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("payment_proof_payer_name_input"),
+                        shape = RoundedCornerShape(10.dp),
+                        singleLine = true
+                    )
+
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
                             value = payerPhoneInput,
-                            onValueChange = { payerPhoneInput = it },
-                            label = { Text("MoMo Payer Phone") },
+                            onValueChange = { payerPhoneInput = it; proofError = null },
+                            label = { Text("Sender MoMo Phone *") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("payment_proof_sender_phone_input"),
                             shape = RoundedCornerShape(10.dp),
                             singleLine = true
                         )
@@ -609,22 +737,48 @@ fun SubscriptionScreen(
                         )
                     }
 
+                    if (proofError != null) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = LossRed.copy(alpha = 0.14f),
+                            border = BorderStroke(1.dp, LossRed.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = proofError!!,
+                                color = LossRed,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    }
+
                     val activeUssdCode = if (selectedPaymentProvider.contains("AIRTEL", ignoreCase = true))
                         breakdown.ussdAirtelCode else breakdown.ussdMtnCode
 
                     Button(
                         onClick = {
-                            val cleanUser = usernameProofInput.trim().ifBlank { ownerAccount?.username ?: "owner" }
+                            val cleanUser = usernameProofInput.trim().ifBlank { ownerAccount?.username ?: "" }
                             val cleanPhone = registeredPhoneInput.trim().ifBlank { shopProfile.phone }
+                            val cleanPayerPhone = payerPhoneInput.trim().ifBlank { cleanPhone }
+                            val cleanPayerName = payerFullNameInput.trim()
+                            if (cleanUser.isBlank() || cleanPhone.isBlank() || cleanPayerName.isBlank()) {
+                                proofError = "Please enter Username, Registered Phone, and Full Names on the sender phone."
+                                return@Button
+                            }
+                            proofError = null
                             if (onSubmitPaymentVerification != null) {
                                 onSubmitPaymentVerification(
                                     selectedPaymentProvider,
-                                    payerPhoneInput.ifBlank { cleanPhone },
+                                    cleanPayerPhone,
+                                    cleanPayerName,
                                     cleanUser,
                                     cleanPhone,
                                     selectedDurationMonths,
                                     selectedBranchCount,
                                     selectedWorkerCount,
+                                    selectedDeviceCount,
                                     telcoRefInput
                                 ) { req, _ ->
                                     OfflineSubscriptionManager.sendPaymentProofViaWhatsApp(
@@ -638,8 +792,12 @@ fun SubscriptionScreen(
                                         durationMonths = selectedDurationMonths,
                                         branchCount = selectedBranchCount,
                                         workerCount = selectedWorkerCount,
+                                        deviceCount = selectedDeviceCount,
+                                        payerPhone = cleanPayerPhone,
+                                        payerFullName = cleanPayerName,
                                         telcoReference = telcoRefInput,
-                                        requestId = req.id
+                                        requestId = req.id,
+                                        adminWhatsAppNumber = resolvedAdminWa
                                     )
                                 }
                             } else {
@@ -654,7 +812,11 @@ fun SubscriptionScreen(
                                     durationMonths = selectedDurationMonths,
                                     branchCount = selectedBranchCount,
                                     workerCount = selectedWorkerCount,
-                                    telcoReference = telcoRefInput
+                                    deviceCount = selectedDeviceCount,
+                                    payerPhone = cleanPayerPhone,
+                                    payerFullName = cleanPayerName,
+                                    telcoReference = telcoRefInput,
+                                    adminWhatsAppNumber = resolvedAdminWa
                                 )
                             }
                         },
@@ -668,7 +830,7 @@ fun SubscriptionScreen(
                         Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Submit & Send Username/Phone on WhatsApp",
+                            text = "Submit & Send Proof via WhatsApp",
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.5.sp
                         )
@@ -842,11 +1004,32 @@ fun SubscriptionScreen(
                                         }
                                     }
                                     Text(
-                                        text = "@${req.ownerUsername} (${req.ownerPhone}) • ${if (req.syncedToSupabase) "Synced to Supabase" else "Saved Offline (Waiting Internet)"}",
+                                        text = "@${req.ownerUsername} (${req.ownerPhone}) • ${req.deviceCount} dev • ${req.payerFullName.ifBlank { req.payerPhone }} • ${if (req.syncedToSupabase) "Synced to Supabase" else "Saved Offline"}",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                    if (req.generatedUnlockCode.isNotBlank()) {
+                                    if (req.status == "APPROVED" && req.approvalMode == "DIRECT_AUTO_UNLOCK") {
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = ProfitGreen.copy(alpha = 0.14f),
+                                            border = BorderStroke(1.dp, ProfitGreen.copy(alpha = 0.45f)),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(15.dp))
+                                                Text(
+                                                    text = Localization.get("direct_auto_unlock_badge", language),
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = ProfitGreen
+                                                )
+                                            }
+                                        }
+                                    } else if (req.generatedUnlockCode.isNotBlank()) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -985,12 +1168,14 @@ fun SubscriptionPaywallDialog(
     shopProfile: ShopProfile,
     branches: List<Branch> = emptyList(),
     allUsers: List<User> = emptyList(),
+    shopDevices: List<ShopDevice> = emptyList(),
     currentUser: User? = null,
     paymentRequests: List<PaymentVerificationRequest> = emptyList(),
+    livePaymentConfig: AdminPaymentConfig = OfflineSubscriptionManager.getCurrentPaymentConfig(),
     language: AppLanguage,
     onActivateVoucher: (String) -> Unit,
     onProcessDirectPayment: ((provider: String, phone: String, durationMonths: Int, userReference: String?, onSuccess: (PaymentProcessingResult, SubscriptionPriceBreakdown) -> Unit) -> Unit)? = null,
-    onSubmitPaymentVerification: ((provider: String, payerPhone: String, username: String, registeredPhone: String, durationMonths: Int, branchCount: Int, workerCount: Int, telcoRef: String, onDone: (PaymentVerificationRequest, Boolean) -> Unit) -> Unit)? = null,
+    onSubmitPaymentVerification: ((provider: String, payerPhone: String, payerFullName: String, username: String, registeredPhone: String, durationMonths: Int, branchCount: Int, workerCount: Int, deviceCount: Int, telcoRef: String, onDone: (PaymentVerificationRequest, Boolean) -> Unit) -> Unit)? = null,
     onCheckCloudApproval: () -> Unit = {},
     onOpenAdminConsole: (() -> Unit)? = null
 ) {
@@ -1115,8 +1300,10 @@ fun SubscriptionPaywallDialog(
                             shopProfile = shopProfile,
                             branches = branches,
                             allUsers = allUsers,
+                            shopDevices = shopDevices,
                             currentUser = currentUser,
                             paymentRequests = paymentRequests,
+                            livePaymentConfig = livePaymentConfig,
                             language = language,
                             onActivateVoucher = onActivateVoucher,
                             onProcessDirectPayment = onProcessDirectPayment,
@@ -1347,6 +1534,7 @@ private fun DirectMoMoPaymentDialog(
                                     branchCount = breakdown.branchCount,
                                     workerCount = breakdown.workerCount,
                                     durationMonths = breakdown.durationMonths,
+                                    deviceCount = breakdown.deviceCount,
                                     userEnteredReference = refArg,
                                     alreadyUsedRefs = pastRefs
                                 )

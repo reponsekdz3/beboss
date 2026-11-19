@@ -49,8 +49,10 @@ import androidx.compose.material.icons.filled.Checkroom
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.LocalPharmacy
 import androidx.compose.material.icons.filled.Lock
@@ -618,12 +620,16 @@ fun AuthLockScreen(
 fun ShopRegistrationScreen(
     language: AppLanguage,
     isDarkTheme: Boolean,
+    authError: String? = null,
     onRegister: (shopName: String, currencyCode: String, currencySymbol: String, address: String, phone: String, ownerName: String, username: String, pin: String, password: String) -> Unit,
+    onJoinExistingShop: (ownerUsername: String, ownerPhone: String, deviceJoinCode: String, thisDeviceName: String, pin: String, password: String) -> Unit = { _, _, _, _, _, _ -> },
+    onClearError: () -> Unit = {},
     onCancel: () -> Unit,
     onToggleLanguage: () -> Unit,
     onSelectLanguage: ((AppLanguage) -> Unit)? = null,
     onToggleTheme: () -> Unit
 ) {
+    var registrationMode by remember { mutableIntStateOf(0) } // 0 = Create New Shop, 1 = Join Existing Shop (Add Device)
     var step by remember { mutableIntStateOf(0) } // 0, 1, 2
     var shopName by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("sector_retail") }
@@ -637,6 +643,17 @@ fun ShopRegistrationScreen(
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    // Join Existing Shop (Add Device) state
+    var joinOwnerUsername by remember { mutableStateOf("") }
+    var joinOwnerPhone by remember { mutableStateOf("+250 ") }
+    var joinCode by remember { mutableStateOf("") }
+    var joinDeviceName by remember { mutableStateOf("Cashier Device 2") }
+    var joinPin by remember { mutableStateOf("") }
+    var joinPassword by remember { mutableStateOf("") }
+    var showJoinPassword by remember { mutableStateOf(false) }
+
+    val displayError = errorMessage ?: authError
 
     val categories = listOf(
         Pair("sector_retail", Icons.Default.Storefront),
@@ -790,61 +807,145 @@ fun ShopRegistrationScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 3-Step Interactive Stepper Bar
+            // 2-Tab Selector: Create New Shop vs Join Existing Shop (Add Device)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                stepTitles.forEachIndexed { idx, label ->
-                    val isCurrent = step == idx
-                    val isCompleted = idx < step
-                    Surface(
-                        onClick = {
-                            if (idx <= step) {
-                                errorMessage = null
-                                step = idx
-                            }
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        color = when {
-                            isCurrent -> OrangePrimary
-                            isCompleted -> ProfitGreen.copy(alpha = 0.16f)
-                            else -> cardBg
-                        },
-                        border = BorderStroke(
-                            1.dp,
-                            when {
-                                isCurrent -> OrangePrimary
-                                isCompleted -> ProfitGreen
-                                else -> cardBorder
-                            }
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 42.dp)
+                Surface(
+                    onClick = {
+                        registrationMode = 0
+                        errorMessage = null
+                        onClearError()
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (registrationMode == 0) OrangePrimary else cardBg,
+                    border = BorderStroke(1.dp, if (registrationMode == 0) OrangePrimary else cardBorder),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .testTag("register_mode_new_tab")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 6.dp)) {
-                            Text(
-                                text = label,
-                                fontFamily = GopherFontFamily,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = when {
-                                    isCurrent -> Color.White
-                                    isCompleted -> ProfitGreen
-                                    else -> textSecondary
-                                },
-                                textAlign = TextAlign.Center
-                            )
-                        }
+                        Icon(
+                            Icons.Default.AddBusiness,
+                            contentDescription = null,
+                            tint = if (registrationMode == 0) Color.White else OrangePrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = Localization.get("create_new_shop", language),
+                            fontFamily = GopherFontFamily,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (registrationMode == 0) Color.White else textPrimary,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                Surface(
+                    onClick = {
+                        registrationMode = 1
+                        errorMessage = null
+                        onClearError()
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (registrationMode == 1) OrangePrimary else cardBg,
+                    border = BorderStroke(1.dp, if (registrationMode == 1) OrangePrimary else cardBorder),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .testTag("register_mode_join_tab")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Devices,
+                            contentDescription = null,
+                            tint = if (registrationMode == 1) Color.White else ProfitGreen,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = Localization.get("join_existing_shop", language),
+                            fontFamily = GopherFontFamily,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (registrationMode == 1) Color.White else textPrimary,
+                            maxLines = 1
+                        )
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            AnimatedVisibility(visible = errorMessage != null) {
-                if (errorMessage != null) {
+            if (registrationMode == 0) {
+                // 3-Step Interactive Stepper Bar
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    stepTitles.forEachIndexed { idx, label ->
+                        val isCurrent = step == idx
+                        val isCompleted = idx < step
+                        Surface(
+                            onClick = {
+                                if (idx <= step) {
+                                    errorMessage = null
+                                    onClearError()
+                                    step = idx
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = when {
+                                isCurrent -> OrangePrimary
+                                isCompleted -> ProfitGreen.copy(alpha = 0.16f)
+                                else -> cardBg
+                            },
+                            border = BorderStroke(
+                                1.dp,
+                                when {
+                                    isCurrent -> OrangePrimary
+                                    isCompleted -> ProfitGreen
+                                    else -> cardBorder
+                                }
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 42.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 6.dp)) {
+                                Text(
+                                    text = label,
+                                    fontFamily = GopherFontFamily,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = when {
+                                        isCurrent -> Color.White
+                                        isCompleted -> ProfitGreen
+                                        else -> textSecondary
+                                    },
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            AnimatedVisibility(visible = displayError != null) {
+                if (displayError != null) {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         color = LossRed.copy(alpha = 0.15f),
@@ -854,7 +955,7 @@ fun ShopRegistrationScreen(
                             .padding(bottom = 10.dp)
                     ) {
                         Text(
-                            text = errorMessage!!,
+                            text = displayError,
                             fontFamily = GopherFontFamily,
                             fontSize = 12.sp,
                             color = LossRed,
@@ -866,6 +967,269 @@ fun ShopRegistrationScreen(
                 }
             }
 
+            if (registrationMode == 1) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(22.dp),
+                    colors = CardDefaults.cardColors(containerColor = cardBg),
+                    border = BorderStroke(1.dp, cardBorder),
+                    elevation = CardDefaults.cardElevation(if (isDarkTheme) 8.dp else 4.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = ProfitGreen.copy(alpha = 0.1f),
+                            border = BorderStroke(1.dp, ProfitGreen.copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Default.CloudSync, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(18.dp))
+                                Text(
+                                    text = Localization.get("device_fee_addon_note", language),
+                                    fontFamily = GopherFontFamily,
+                                    fontSize = 11.sp,
+                                    color = textPrimary,
+                                    lineHeight = 15.sp
+                                )
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = joinOwnerUsername,
+                            onValueChange = { joinOwnerUsername = it; errorMessage = null; onClearError() },
+                            label = { Text(Localization.get("reg_username_label", language), fontFamily = GopherFontFamily) },
+                            placeholder = { Text("Owner @username (e.g. jeanpaul)") },
+                            leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = OrangePrimary) },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("join_owner_username_input"),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = fieldBg,
+                                unfocusedContainerColor = fieldBg,
+                                focusedTextColor = textPrimary,
+                                unfocusedTextColor = textPrimary,
+                                focusedBorderColor = OrangePrimary,
+                                unfocusedBorderColor = cardBorder
+                            )
+                        )
+
+                        OutlinedTextField(
+                            value = joinOwnerPhone,
+                            onValueChange = { joinOwnerPhone = it; errorMessage = null; onClearError() },
+                            label = { Text(Localization.get("reg_phone_label", language), fontFamily = GopherFontFamily) },
+                            placeholder = { Text("+250 788 123 456") },
+                            leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null, tint = OrangePrimary) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("join_owner_phone_input"),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = fieldBg,
+                                unfocusedContainerColor = fieldBg,
+                                focusedTextColor = textPrimary,
+                                unfocusedTextColor = textPrimary,
+                                focusedBorderColor = OrangePrimary,
+                                unfocusedBorderColor = cardBorder
+                            )
+                        )
+
+                        OutlinedTextField(
+                            value = joinCode,
+                            onValueChange = { joinCode = it.uppercase(); errorMessage = null; onClearError() },
+                            label = { Text("${Localization.get("device_join_code", language)} *", fontFamily = GopherFontFamily) },
+                            placeholder = { Text("BB-A1B2C3") },
+                            leadingIcon = { Icon(Icons.Default.Key, contentDescription = null, tint = OrangePrimary) },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("join_code_input"),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = fieldBg,
+                                unfocusedContainerColor = fieldBg,
+                                focusedTextColor = textPrimary,
+                                unfocusedTextColor = textPrimary,
+                                focusedBorderColor = OrangePrimary,
+                                unfocusedBorderColor = cardBorder
+                            )
+                        )
+
+                        OutlinedTextField(
+                            value = joinDeviceName,
+                            onValueChange = { joinDeviceName = it; errorMessage = null },
+                            label = { Text("This Device Name *", fontFamily = GopherFontFamily) },
+                            placeholder = { Text("Cashier Counter 2") },
+                            leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null, tint = OrangePrimary) },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("join_device_name_input"),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = fieldBg,
+                                unfocusedContainerColor = fieldBg,
+                                focusedTextColor = textPrimary,
+                                unfocusedTextColor = textPrimary,
+                                focusedBorderColor = OrangePrimary,
+                                unfocusedBorderColor = cardBorder
+                            )
+                        )
+
+                        Column {
+                            OutlinedTextField(
+                                value = joinPin,
+                                onValueChange = { if (it.length <= 4 && it.all { c -> c.isDigit() }) joinPin = it; errorMessage = null },
+                                label = { Text(Localization.get("reg_pin_label", language), fontFamily = GopherFontFamily) },
+                                placeholder = { Text(Localization.get("reg_pin_placeholder", language)) },
+                                leadingIcon = { Icon(Icons.Default.Shield, contentDescription = null, tint = OrangePrimary) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                                visualTransformation = PasswordVisualTransformation(),
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("join_pin_input"),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedContainerColor = fieldBg,
+                                    unfocusedContainerColor = fieldBg,
+                                    focusedTextColor = textPrimary,
+                                    unfocusedTextColor = textPrimary,
+                                    focusedBorderColor = OrangePrimary,
+                                    unfocusedBorderColor = cardBorder
+                                )
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 6.dp),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                Surface(
+                                    onClick = { joinPin = SecurityUtils.generateStrongRandomPin() },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = OrangePrimary.copy(alpha = 0.15f),
+                                    border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.35f)),
+                                    modifier = Modifier.heightIn(min = 36.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(14.dp))
+                                        Text(
+                                            text = Localization.get("reg_gen_pin", language),
+                                            fontFamily = GopherFontFamily,
+                                            fontSize = 11.sp,
+                                            color = OrangePrimary,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = joinPassword,
+                            onValueChange = { joinPassword = it; errorMessage = null },
+                            label = { Text(Localization.get("password", language) + " *", fontFamily = GopherFontFamily) },
+                            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = OrangePrimary) },
+                            trailingIcon = {
+                                IconButton(onClick = { showJoinPassword = !showJoinPassword }) {
+                                    Icon(
+                                        imageVector = if (showJoinPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = Localization.get("toggle_password", language),
+                                        tint = textSecondary
+                                    )
+                                }
+                            },
+                            visualTransformation = if (showJoinPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("join_password_input"),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = fieldBg,
+                                unfocusedContainerColor = fieldBg,
+                                focusedTextColor = textPrimary,
+                                unfocusedTextColor = textPrimary,
+                                focusedBorderColor = OrangePrimary,
+                                unfocusedBorderColor = cardBorder
+                            )
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onCancel,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 50.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, cardBorder)
+                            ) {
+                                Text(Localization.get("cancel", language), fontFamily = GopherFontFamily, color = textSecondary)
+                            }
+                            Button(
+                                onClick = {
+                                    if (joinOwnerUsername.isBlank()) {
+                                        errorMessage = Localization.get("reg_err_username", language)
+                                    } else if (joinOwnerPhone.filter { it.isDigit() }.length < 9) {
+                                        errorMessage = Localization.get("reg_err_phone", language)
+                                    } else if (joinCode.isBlank()) {
+                                        errorMessage = "Enter the Device Join Code from the Shop Owner."
+                                    } else if (joinDeviceName.isBlank()) {
+                                        errorMessage = "Enter a name for this device."
+                                    } else if (joinPin.length != 4) {
+                                        errorMessage = Localization.get("reg_err_pin", language)
+                                    } else if (joinPassword.length < 6) {
+                                        errorMessage = Localization.get("reg_err_password", language)
+                                    } else {
+                                        errorMessage = null
+                                        onJoinExistingShop(
+                                            joinOwnerUsername.trim().lowercase().replace(" ", ""),
+                                            joinOwnerPhone.trim(),
+                                            joinCode.trim().uppercase(),
+                                            joinDeviceName.trim(),
+                                            joinPin.trim(),
+                                            joinPassword.trim()
+                                        )
+                                    }
+                                },
+                                modifier = Modifier
+                                    .weight(1.6f)
+                                    .heightIn(min = 50.dp)
+                                    .testTag("join_shop_submit_btn"),
+                                colors = ButtonDefaults.buttonColors(containerColor = ProfitGreen),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Pair Device & Sync Shop",
+                                    fontFamily = GopherFontFamily,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(22.dp),
@@ -1215,6 +1579,27 @@ fun ShopRegistrationScreen(
                                             }
                                         }
                                     }
+
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = ProfitGreen.copy(alpha = 0.1f),
+                                        border = BorderStroke(1.dp, ProfitGreen.copy(alpha = 0.3f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Icon(Icons.Default.CloudSync, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(16.dp))
+                                            Text(
+                                                text = "Saves automatically to Supabase Cloud & syncs in background whenever internet connects.",
+                                                fontFamily = GopherFontFamily,
+                                                fontSize = 10.5.sp,
+                                                color = textSecondary
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1324,6 +1709,7 @@ fun ShopRegistrationScreen(
                         }
                     }
                 }
+            }
             }
         }
     }

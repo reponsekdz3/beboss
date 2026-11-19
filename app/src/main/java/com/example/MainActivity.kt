@@ -215,6 +215,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     val currentUser by viewModel.currentUser.collectAsState()
     val allUsers by viewModel.allUsers.collectAsState()
     val branches by viewModel.branches.collectAsState()
+    val shopDevices by viewModel.shopDevices.collectAsState()
     val selectedBranchId by viewModel.selectedBranchId.collectAsState()
     val connectivityStatus by viewModel.connectivityStatus.collectAsState()
     val cloudSyncReport by viewModel.cloudSyncReport.collectAsState()
@@ -242,10 +243,12 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     val adminPaymentRequests by viewModel.adminPaymentRequests.collectAsState()
     val adminShopAccounts by viewModel.adminShopAccounts.collectAsState()
     val adminShopUsers by viewModel.adminShopUsers.collectAsState()
+    val adminShopDevices by viewModel.adminShopDevices.collectAsState()
     val adminBranchSnapshots by viewModel.adminBranchSnapshots.collectAsState()
     val adminUnlockCodes by viewModel.adminUnlockCodes.collectAsState()
     val adminAuditLogs by viewModel.adminAuditLogs.collectAsState()
     val localAuditLogs by viewModel.localAuditLogs.collectAsState()
+    val adminPaymentConfig by viewModel.adminPaymentConfig.collectAsState()
     val isAdminLoading by viewModel.isAdminLoading.collectAsState()
     val adminLastSyncedAt by viewModel.adminLastSyncedAt.collectAsState()
     val idleLockMinutes by viewModel.idleLockMinutes.collectAsState()
@@ -286,6 +289,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
         ShopRegistrationScreen(
             language = currentLanguage,
             isDarkTheme = isDarkTheme,
+            authError = authError,
             onRegister = { shopName, currencyCode, currencySymbol, address, phone, ownerName, username, pin, password ->
                 viewModel.registerNewShopAndOwner(
                     shopName = shopName,
@@ -299,6 +303,17 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                     password = password
                 )
             },
+            onJoinExistingShop = { ownerUsername, ownerPhone, deviceJoinCode, thisDeviceName, pin, password ->
+                viewModel.joinExistingShopFromCloud(
+                    ownerUsername = ownerUsername,
+                    ownerPhone = ownerPhone,
+                    deviceJoinCode = deviceJoinCode,
+                    thisDeviceName = thisDeviceName,
+                    pin = pin,
+                    password = password
+                )
+            },
+            onClearError = { viewModel.clearAuthError() },
             onCancel = { viewModel.cancelRegistration() },
             onToggleLanguage = { viewModel.toggleLanguage() },
             onSelectLanguage = { lang -> viewModel.setLanguage(lang) },
@@ -551,6 +566,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 currentUser = currentUser,
                                 allUsers = allUsers,
                                 branches = branches,
+                                shopDevices = shopDevices,
+                                livePaymentConfig = adminPaymentConfig,
                                 products = allProducts,
                                 customers = customers,
                                 sales = allSales,
@@ -588,6 +605,15 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onSeedSampleData = { viewModel.seedSampleCatalog() },
                                 onSaveBranch = { b -> viewModel.saveBranch(b) },
                                 onDeleteBranch = { bId -> viewModel.deleteBranch(bId) },
+                                onAddShopDevice = { deviceName, assignedUser, branch, onCreated ->
+                                    viewModel.addSecondaryShopDevice(deviceName, assignedUser, branch, onCreated)
+                                },
+                                onToggleShopDeviceActive = { deviceId, isActive ->
+                                    viewModel.toggleShopDeviceActive(deviceId, isActive)
+                                },
+                                onDeleteShopDevice = { deviceId ->
+                                    viewModel.deleteShopDevice(deviceId)
+                                },
                                 onCreateStockTransfer = { prodId, fromId, fromName, toId, toName, qty, notes ->
                                     viewModel.createStockTransfer(prodId, fromId, fromName, toId, toName, qty, notes)
                                 },
@@ -624,7 +650,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onExportFullBranchPackage = { branchFilter, onReady ->
                                     viewModel.exportFullBranchPackage(context, branchFilter, onReady)
                                 },
-                                onSubmitPaymentVerification = { provider, payerPhone, username, regPhone, months, branchCount, workerCount, telcoRef, onDone ->
+                                onSubmitPaymentVerification = { provider, payerPhone, payerFullName, username, regPhone, months, branchCount, workerCount, deviceCount, telcoRef, onDone ->
                                     viewModel.submitUssdPaymentProof(
                                         provider = provider,
                                         payerPhone = payerPhone,
@@ -634,6 +660,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                         branchCount = branchCount,
                                         workerCount = workerCount,
                                         telcoReference = telcoRef,
+                                        payerFullName = payerFullName,
+                                        deviceCount = deviceCount,
                                         onSubmitted = onDone
                                     )
                                 },
@@ -644,6 +672,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 adminPaymentRequests = adminPaymentRequests,
                                 adminShopAccounts = adminShopAccounts,
                                 adminShopUsers = adminShopUsers,
+                                adminShopDevices = adminShopDevices,
                                 adminBranchSnapshots = adminBranchSnapshots,
                                 adminUnlockCodes = adminUnlockCodes,
                                 adminAuditLogs = adminAuditLogs,
@@ -655,6 +684,18 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onRefreshAdminDashboard = { viewModel.refreshAdminDashboardData() },
                                 onAdminApprovePayment = { req, onDone ->
                                     viewModel.adminApproveAndGenerateCode(req, onDone)
+                                },
+                                onAdminDirectAutoUnlock = { req, onDone ->
+                                    viewModel.adminDirectAutoUnlockPayment(req, onDone)
+                                },
+                                onAdminSavePaymentConfig = { cfg, onDone ->
+                                    viewModel.adminSavePaymentConfig(cfg, onDone)
+                                },
+                                onAdminToggleShopDevice = { dev, active ->
+                                    viewModel.adminToggleShopDeviceActive(dev, active)
+                                },
+                                onAdminDeleteShopDevice = { dev ->
+                                    viewModel.adminDeleteShopDevice(dev)
                                 },
                                 onAdminApproveBatch = { onDone ->
                                     viewModel.adminApproveBatchPendingPayments(onDone)
@@ -677,8 +718,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onAdminSetShopStatus = { shop, status ->
                                     viewModel.adminSetShopStatus(shop, status)
                                 },
-                                onAdminUpdateShopLimits = { shop, branchLimit, workerLimit ->
-                                    viewModel.adminUpdateShopLimits(shop, branchLimit, workerLimit)
+                                onAdminUpdateShopLimits = { shop, branchLimit, workerLimit, deviceLimit ->
+                                    viewModel.adminUpdateShopLimits(shop, branchLimit, workerLimit, deviceLimit)
                                 },
                                 onAdminDeleteShopAccount = { shop ->
                                     viewModel.adminDeleteShopAccount(shop)
@@ -779,8 +820,10 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
             shopProfile = shopProfile,
             branches = branches,
             allUsers = allUsers,
+            shopDevices = shopDevices,
             currentUser = currentUser,
             paymentRequests = paymentVerificationRequests,
+            livePaymentConfig = adminPaymentConfig,
             language = currentLanguage,
             onActivateVoucher = { code -> viewModel.activateSubscriptionVoucher(code) },
             onProcessDirectPayment = { provider, phone, durationMonths, userRef, onSuccess ->
@@ -792,7 +835,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                     onResult = onSuccess
                 )
             },
-            onSubmitPaymentVerification = { provider, payerPhone, username, regPhone, months, branchCount, workerCount, telcoRef, onDone ->
+            onSubmitPaymentVerification = { provider, payerPhone, payerFullName, username, regPhone, months, branchCount, workerCount, deviceCount, telcoRef, onDone ->
                 viewModel.submitUssdPaymentProof(
                     provider = provider,
                     payerPhone = payerPhone,
@@ -802,6 +845,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                     branchCount = branchCount,
                     workerCount = workerCount,
                     telcoReference = telcoRef,
+                    payerFullName = payerFullName,
+                    deviceCount = deviceCount,
                     onSubmitted = onDone
                 )
             },
@@ -820,10 +865,12 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
             paymentRequests = adminPaymentRequests,
             shopAccounts = adminShopAccounts,
             shopUsers = adminShopUsers,
+            shopDevices = adminShopDevices,
             branchSnapshots = adminBranchSnapshots,
             unlockCodes = adminUnlockCodes,
             auditLogs = adminAuditLogs,
             localAuditLogs = localAuditLogs,
+            paymentConfig = adminPaymentConfig,
             isLoading = isAdminLoading,
             language = currentLanguage,
             lastSyncedAt = adminLastSyncedAt,
@@ -832,6 +879,10 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
             onSignOutAdmin = { viewModel.signOutSupabaseAdmin() },
             onRefresh = { viewModel.refreshAdminDashboardData() },
             onApprovePayment = { req, onDone -> viewModel.adminApproveAndGenerateCode(req, onDone) },
+            onDirectAutoUnlock = { req, onDone -> viewModel.adminDirectAutoUnlockPayment(req, onDone) },
+            onSavePaymentConfig = { cfg, onDone -> viewModel.adminSavePaymentConfig(cfg, onDone) },
+            onToggleShopDeviceActive = { dev, active -> viewModel.adminToggleShopDeviceActive(dev, active) },
+            onDeleteShopDevice = { dev -> viewModel.adminDeleteShopDevice(dev) },
             onBatchApprovePending = { onDone -> viewModel.adminApproveBatchPendingPayments(onDone) },
             onRejectPayment = { req, reason -> viewModel.adminRejectPayment(req, reason) },
             onIssueManualCode = { username, regPhone, tier, days, amt, onDone ->
@@ -841,7 +892,9 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
             onExtendShopSubscription = { shop, addDays -> viewModel.adminExtendShopSubscription(shop, addDays) },
             onResetShopTrial = { shop -> viewModel.adminResetShopTrial(shop) },
             onSetShopStatus = { shop, status -> viewModel.adminSetShopStatus(shop, status) },
-            onUpdateShopLimits = { shop, branchLimit, workerLimit -> viewModel.adminUpdateShopLimits(shop, branchLimit, workerLimit) },
+            onUpdateShopLimits = { shop, branchLimit, workerLimit, deviceLimit ->
+                viewModel.adminUpdateShopLimits(shop, branchLimit, workerLimit, deviceLimit)
+            },
             onDeleteShopAccount = { shop -> viewModel.adminDeleteShopAccount(shop) },
             onUpdateShopUserRole = { user, role -> viewModel.adminUpdateShopUserRole(user, role) },
             onToggleShopUserActive = { user, active -> viewModel.adminToggleShopUserActive(user, active) },

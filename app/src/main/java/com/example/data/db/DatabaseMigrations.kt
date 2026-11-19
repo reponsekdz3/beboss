@@ -248,6 +248,46 @@ object DatabaseMigrations {
         }
     }
 
+    val MIGRATION_11_12 = object : Migration(11, 12) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE shop_profile ADD COLUMN deviceCountLimit INTEGER NOT NULL DEFAULT 1")
+            db.execSQL("ALTER TABLE shop_profile ADD COLUMN adminWhatsAppNumber TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE shop_profile ADD COLUMN autoUnlockedAt INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE shop_profile ADD COLUMN lastAppliedCloudUnlockAt INTEGER NOT NULL DEFAULT 0")
+
+            db.execSQL("ALTER TABLE payment_verification_requests ADD COLUMN payerFullName TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE payment_verification_requests ADD COLUMN deviceCount INTEGER NOT NULL DEFAULT 1")
+            db.execSQL("ALTER TABLE payment_verification_requests ADD COLUMN approvalMode TEXT NOT NULL DEFAULT ''")
+
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS shop_devices (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    shopSyncKey TEXT NOT NULL,
+                    deviceId TEXT NOT NULL,
+                    deviceName TEXT NOT NULL,
+                    joinCode TEXT NOT NULL,
+                    assignedUserId TEXT NOT NULL,
+                    assignedUsername TEXT NOT NULL,
+                    assignedFullName TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    branchId TEXT NOT NULL,
+                    branchName TEXT NOT NULL,
+                    isOwnerPrimary INTEGER NOT NULL DEFAULT 0,
+                    isActive INTEGER NOT NULL DEFAULT 1,
+                    monthlyFeeAddonRwf INTEGER NOT NULL DEFAULT 2000,
+                    lastSyncedAt INTEGER NOT NULL DEFAULT 0,
+                    syncedToSupabase INTEGER NOT NULL DEFAULT 0,
+                    createdAt INTEGER NOT NULL,
+                    updatedAt INTEGER NOT NULL
+                )
+                """.trimIndent()
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_shop_devices_deviceId ON shop_devices(deviceId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_shop_devices_joinCode ON shop_devices(joinCode)")
+        }
+    }
+
     val ALL_MIGRATIONS = arrayOf(
         MIGRATION_1_2,
         MIGRATION_2_3,
@@ -258,6 +298,7 @@ object DatabaseMigrations {
         MIGRATION_7_8,
         MIGRATION_8_9,
         MIGRATION_9_10,
-        MIGRATION_10_11
+        MIGRATION_10_11,
+        MIGRATION_11_12
     )
 }

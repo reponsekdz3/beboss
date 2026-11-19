@@ -355,4 +355,24 @@ object BeBossNotificationManager {
             // Handled
         }
     }
+
+    fun sendDirectAutoUnlockNotification(context: Context, shopName: String, daysRemaining: Int) {
+        if (!PermissionManager.hasNotificationPermission(context)) return
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_TARGETS_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle("Subscription Auto-Unlocked by Admin!")
+            .setContentText("${shopName.ifBlank { "Your BeBoss Shop" }} is now ACTIVE ($daysRemaining days left). All features unlocked!")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setColor(0xFF16A34A.toInt())
+            .setContentIntent(getLaunchPendingIntent(context))
+            .build()
+
+        try {
+            NotificationManagerCompat.from(context).notify(4099, notification)
+        } catch (_: SecurityException) {
+            // Handled
+        }
+    }
 }

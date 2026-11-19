@@ -31,6 +31,21 @@ as $$
   );
 $$;
 
+-- 1b. Global App Payment & Support Config (Admin WhatsApp & USSD numbers synced live to all apps)
+create table if not exists public.app_config (
+    id text primary key default 'global',
+    admin_whatsapp_number text not null default '',
+    mtn_momo_code text not null default '054321',
+    mtn_momo_phone text not null default '0788765432',
+    mtn_recipient_name text not null default 'BeBoss Pay',
+    airtel_money_phone text not null default '0738765432',
+    airtel_recipient_name text not null default 'BeBoss Pay',
+    per_device_fee_rwf integer not null default 2000,
+    updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+
+insert into public.app_config (id) values ('global') on conflict (id) do nothing;
+
 -- 2. Registered Shop Accounts & Monthly Subscription Tracking (4-Day Free Trial Default)
 create table if not exists public.shop_accounts (
     id text primary key,
@@ -41,6 +56,10 @@ create table if not exists public.shop_accounts (
     device_challenge text not null default '',
     branch_count integer not null default 1,
     worker_count integer not null default 1,
+    device_count integer not null default 1,
+    device_limit integer not null default 1,
+    admin_whatsapp text not null default '',
+    auto_unlocked_at bigint not null default 0,
     monthly_fee_rwf integer not null default 5000,
     subscription_status text not null default 'TRIAL',
     subscription_expires_at bigint not null default ((extract(epoch from now()) + 345600) * 1000)::bigint,
@@ -53,13 +72,18 @@ create table if not exists public.shop_accounts (
 alter table public.shop_accounts
     add column if not exists remote_kill_switch boolean not null default false,
     add column if not exists min_app_version text not null default '2.0.0',
-    add column if not exists server_failed_pin_attempts integer not null default 0;
+    add column if not exists server_failed_pin_attempts integer not null default 0,
+    add column if not exists device_count integer not null default 1,
+    add column if not exists device_limit integer not null default 1,
+    add column if not exists admin_whatsapp text not null default '',
+    add column if not exists auto_unlocked_at bigint not null default 0;
 
--- Server-Side Pricing Recomputation (never trust client-calculated totals)
+-- Server-Side Pricing Recomputation (matches Android OfflineSubscriptionManager 1:1)
 create or replace function public.compute_expected_subscription_fee(
     p_branch_count integer,
     p_worker_count integer,
-    p_duration_months integer
+    p_duration_months integer,
+    p_device_count integer default 1
 )
 returns integer
 language plpgsql
@@ -68,30 +92,32 @@ as $$
 declare
     v_branches integer := greatest(coalesce(p_branch_count, 1), 1);
     v_workers integer := greatest(coalesce(p_worker_count, 1), 1);
+    v_devices integer := greatest(coalesce(p_device_count, 1), 1);
     v_months integer := greatest(coalesce(p_duration_months, 1), 1);
     v_branch_fee integer;
     v_worker_fee integer;
+    v_device_fee integer;
     v_monthly integer;
     v_gross integer;
     v_discount_pct integer;
 begin
     v_branch_fee := case
         when v_branches <= 1 then 5000
-        when v_branches <= 5 then 10000
+        when v_branches = 2 then 10000
         else 20000
     end;
     v_worker_fee := case
         when v_workers <= 1 then 0
         when v_workers <= 3 then 2000
-        when v_workers <= 6 then 4000
-        else 4000 + ((v_workers - 6) * 500)
+        when v_workers <= 5 then 4000
+        else 4000 + ((v_workers - 5) * 1000)
     end;
-    v_monthly := v_branch_fee + v_worker_fee;
+    v_device_fee := greatest(v_devices - 1, 0) * 2000;
+    v_monthly := v_branch_fee + v_worker_fee + v_device_fee;
     v_gross := v_monthly * v_months;
     v_discount_pct := case
-        when v_months >= 12 then 15
-        when v_months >= 6 then 10
-        when v_months >= 3 then 5
+        when v_months >= 12 then 20
+        when v_months >= 3 then 10
         else 0
     end;
     return v_gross - ((v_gross * v_discount_pct) / 100);
@@ -114,6 +140,28 @@ create table if not exists public.shop_users (
     updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
 );
 
+-- 3b. Shop Devices Registry (+2,000 FRw/month per extra paired device + user)
+create table if not exists public.shop_devices (
+    id text primary key,
+    shop_sync_key text not null,
+    shop_name text not null default '',
+    device_id text not null default '',
+    device_name text not null default '',
+    join_code text not null default '',
+    assigned_user_id text not null default '',
+    assigned_username text not null default '',
+    assigned_user_name text not null default '',
+    role text not null default 'CASHIER',
+    branch_id text not null default 'main_branch',
+    branch_name text not null default 'Main Store',
+    is_owner_primary boolean not null default false,
+    is_active boolean not null default true,
+    monthly_fee_addon_rwf integer not null default 2000,
+    last_synced_at bigint not null default 0,
+    created_at bigint not null default (extract(epoch from now()) * 1000)::bigint,
+    updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+
 -- 4. USSD & WhatsApp Payment Verification Claims
 create table if not exists public.payment_requests (
     id text primary key,
@@ -124,12 +172,15 @@ create table if not exists public.payment_requests (
     provider text not null default 'MTN MoMo',
     ussd_code text not null default '',
     payer_phone text not null default '',
+    payer_full_name text not null default '',
     amount_rwf integer not null default 5000,
     duration_months integer not null default 1,
     branch_count integer not null default 1,
     worker_count integer not null default 1,
+    device_count integer not null default 1,
     telco_reference text not null default '',
     status text not null default 'PENDING_VERIFICATION',
+    approval_mode text not null default '',
     generated_unlock_code text not null default '',
     verified_by_admin text not null default '',
     rejection_reason text not null default '',
@@ -138,7 +189,10 @@ create table if not exists public.payment_requests (
 );
 
 alter table public.payment_requests
-    add column if not exists rejection_reason text not null default '';
+    add column if not exists rejection_reason text not null default '',
+    add column if not exists payer_full_name text not null default '',
+    add column if not exists device_count integer not null default 1,
+    add column if not exists approval_mode text not null default '';
 
 create or replace function public.enforce_payment_request_server_fee()
 returns trigger
@@ -147,11 +201,13 @@ as $$
 begin
     new.branch_count := greatest(coalesce(new.branch_count, 1), 1);
     new.worker_count := greatest(coalesce(new.worker_count, 1), 1);
+    new.device_count := greatest(coalesce(new.device_count, 1), 1);
     new.duration_months := greatest(coalesce(new.duration_months, 1), 1);
     new.amount_rwf := public.compute_expected_subscription_fee(
         new.branch_count,
         new.worker_count,
-        new.duration_months
+        new.duration_months,
+        new.device_count
     );
     return new;
 end;
@@ -206,6 +262,8 @@ create index if not exists idx_shop_accounts_username on public.shop_accounts(ow
 create index if not exists idx_shop_users_shop_key on public.shop_users(shop_sync_key);
 create index if not exists idx_shop_users_username on public.shop_users(username);
 create index if not exists idx_shop_users_updated on public.shop_users(updated_at desc);
+create index if not exists idx_shop_devices_shop_key on public.shop_devices(shop_sync_key);
+create index if not exists idx_shop_devices_join_code on public.shop_devices(join_code);
 create index if not exists idx_payment_requests_status on public.payment_requests(status);
 create index if not exists idx_payment_requests_username on public.payment_requests(owner_username);
 create index if not exists idx_unlock_codes_code on public.unlock_codes(unlock_code);
@@ -215,8 +273,10 @@ create index if not exists idx_branch_sync_updated on public.branch_sync_snapsho
 create index if not exists idx_admin_audit_created on public.admin_audit_logs(created_at desc);
 
 alter table public.admin_profiles enable row level security;
+alter table public.app_config enable row level security;
 alter table public.shop_accounts enable row level security;
 alter table public.shop_users enable row level security;
+alter table public.shop_devices enable row level security;
 alter table public.payment_requests enable row level security;
 alter table public.unlock_codes enable row level security;
 alter table public.branch_sync_snapshots enable row level security;
@@ -238,6 +298,17 @@ create policy "Bootstrap or admin insert profile" on public.admin_profiles
 
 drop policy if exists "Admin update profiles" on public.admin_profiles;
 create policy "Admin update profiles" on public.admin_profiles
+    for update using (public.is_beboss_admin()) with check (public.is_beboss_admin());
+
+-- Global App Payment & WhatsApp Config Policies (Public read for all apps; Master Admin write)
+drop policy if exists "Anyone reads app_config" on public.app_config;
+create policy "Anyone reads app_config" on public.app_config
+    for select using (true);
+drop policy if exists "Master admin inserts app_config" on public.app_config;
+create policy "Master admin inserts app_config" on public.app_config
+    for insert with check (public.is_beboss_admin());
+drop policy if exists "Master admin updates app_config" on public.app_config;
+create policy "Master admin updates app_config" on public.app_config
     for update using (public.is_beboss_admin()) with check (public.is_beboss_admin());
 
 -- Helper reading the caller's X-Shop-Sync-Key request header for multi-tenant RLS isolation:
@@ -314,6 +385,35 @@ create policy "Update shop_users" on public.shop_users
 drop policy if exists "Master admin delete shop_users" on public.shop_users;
 create policy "Master admin delete shop_users" on public.shop_users
     for delete using (public.is_beboss_admin());
+
+-- Shop Devices Policies (Single-shop multi-device registry scoped by X-Shop-Sync-Key or Master Admin)
+drop policy if exists "Read shop_devices" on public.shop_devices;
+create policy "Read shop_devices" on public.shop_devices
+    for select using (
+        public.is_beboss_admin()
+        or shop_sync_key = public.current_shop_sync_key()
+    );
+drop policy if exists "Insert shop_devices" on public.shop_devices;
+create policy "Insert shop_devices" on public.shop_devices
+    for insert with check (
+        public.is_beboss_admin()
+        or (shop_sync_key = public.current_shop_sync_key() and shop_sync_key <> '')
+    );
+drop policy if exists "Update shop_devices" on public.shop_devices;
+create policy "Update shop_devices" on public.shop_devices
+    for update using (
+        public.is_beboss_admin()
+        or shop_sync_key = public.current_shop_sync_key()
+    ) with check (
+        public.is_beboss_admin()
+        or shop_sync_key = public.current_shop_sync_key()
+    );
+drop policy if exists "Delete shop_devices" on public.shop_devices;
+create policy "Delete shop_devices" on public.shop_devices
+    for delete using (
+        public.is_beboss_admin()
+        or shop_sync_key = public.current_shop_sync_key()
+    );
 
 -- Payment Requests Policies (Tenant-scoped by owner_username + owner_phone matching X-Shop-Sync-Key)
 drop policy if exists "Shop terminals submit and read payment_requests" on public.payment_requests;
