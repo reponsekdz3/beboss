@@ -62,6 +62,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -83,6 +84,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.LinearProgressIndicator
 import com.example.R
 import com.example.data.model.Branch
 import com.example.data.model.PaymentVerificationRequest
@@ -101,6 +109,7 @@ import com.example.util.OfflineSubscriptionManager
 import com.example.util.PaymentProcessingResult
 import com.example.util.ReceiptGenerator
 import com.example.util.SubscriptionPriceBreakdown
+import com.example.util.SubscriptionSecurityManager
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -115,7 +124,7 @@ fun SubscriptionScreen(
     paymentRequests: List<PaymentVerificationRequest> = emptyList(),
     language: AppLanguage,
     onActivateVoucher: (String) -> Unit,
-    onProcessDirectPayment: ((provider: String, phone: String, durationMonths: Int, onSuccess: (PaymentProcessingResult, SubscriptionPriceBreakdown) -> Unit) -> Unit)? = null,
+    onProcessDirectPayment: ((provider: String, phone: String, durationMonths: Int, userReference: String?, onSuccess: (PaymentProcessingResult, SubscriptionPriceBreakdown) -> Unit) -> Unit)? = null,
     onSubmitPaymentVerification: ((provider: String, payerPhone: String, username: String, registeredPhone: String, durationMonths: Int, branchCount: Int, workerCount: Int, telcoRef: String, onDone: (PaymentVerificationRequest, Boolean) -> Unit) -> Unit)? = null,
     onCheckCloudApproval: () -> Unit = {},
     onClose: () -> Unit = {}
@@ -124,7 +133,7 @@ fun SubscriptionScreen(
     val scrollState = rememberScrollState()
 
     val ownerAccount = remember(currentUser, allUsers) {
-        currentUser ?: allUsers.firstOrNull { it.role.name == "OWNER" } ?: allUsers.firstOrNull()
+        allUsers.firstOrNull { it.role.name == "OWNER" } ?: currentUser ?: allUsers.firstOrNull()
     }
 
     val initialBranchCount = branches.size.coerceAtLeast(1)
@@ -150,6 +159,17 @@ fun SubscriptionScreen(
     var telcoRefInput by remember { mutableStateOf("") }
 
     var voucherInput by remember { mutableStateOf("") }
+    var lastAutoTriggeredCode by remember { mutableStateOf("") }
+    val isCompleteUnlockFormat = remember(voucherInput) {
+        SubscriptionSecurityManager.isCompleteUnlockCodeFormat(voucherInput)
+    }
+    LaunchedEffect(voucherInput) {
+        val clean = voucherInput.trim().uppercase(Locale.ROOT)
+        if (SubscriptionSecurityManager.isCompleteUnlockCodeFormat(clean) && clean != lastAutoTriggeredCode) {
+            lastAutoTriggeredCode = clean
+            onActivateVoucher(clean)
+        }
+    }
     var showDirectPaymentDialog by remember { mutableStateOf(false) }
     var showInvoiceDialog by remember { mutableStateOf(false) }
     var latestInvoiceText by remember { mutableStateOf("") }
@@ -688,12 +708,12 @@ fun SubscriptionScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                             Icon(Icons.Default.Key, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Step 3: Insert Admin Unlock Code",
-                                fontSize = 15.sp,
+                                text = Localization.get("insert_unlock_code_title", language),
+                                fontSize = 14.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -703,14 +723,14 @@ fun SubscriptionScreen(
                             onClick = onCheckCloudApproval,
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Icon(Icons.Default.CloudSync, contentDescription = "Sync Supabase Approvals", modifier = Modifier.size(15.dp), tint = OrangePrimary)
+                            Icon(Icons.Default.CloudSync, contentDescription = Localization.get("sync_cloud_approvals", language), modifier = Modifier.size(15.dp), tint = OrangePrimary)
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Sync Cloud", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OrangePrimary)
+                            Text(Localization.get("sync_cloud_approvals", language), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OrangePrimary)
                         }
                     }
 
                     Text(
-                        text = "Enter the BB2-... unlock code generated by the Admin Web Platform (sent via WhatsApp or auto-synced via Supabase):",
+                        text = "Paste or type the BB2-... code bound to @${ownerAccount?.username ?: "owner"} (${ownerAccount?.phone?.ifBlank { shopProfile.phone } ?: shopProfile.phone}). Complete BB2 codes verify and auto-unlock instantly.",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -718,7 +738,7 @@ fun SubscriptionScreen(
                     OutlinedTextField(
                         value = voucherInput,
                         onValueChange = { voucherInput = it },
-                        label = { Text("Admin Unlock Code (BB2-...) or MoMo Ref") },
+                        label = { Text(Localization.get("enter_voucher_code", language)) },
                         placeholder = { Text("BB2-SINGLE-30-...") },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -727,10 +747,37 @@ fun SubscriptionScreen(
                         singleLine = true
                     )
 
+                    if (isCompleteUnlockFormat) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = ProfitGreen.copy(alpha = 0.14f),
+                            border = BorderStroke(1.dp, ProfitGreen.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("auto_unlock_detected_badge")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(16.dp))
+                                Text(
+                                    text = Localization.get("auto_unlock_detected", language),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ProfitGreen
+                                )
+                            }
+                        }
+                    }
+
                     Button(
                         onClick = {
                             if (voucherInput.isNotBlank()) {
-                                onActivateVoucher(voucherInput.trim())
+                                val cleaned = voucherInput.trim().uppercase(Locale.ROOT)
+                                lastAutoTriggeredCode = cleaned
+                                onActivateVoucher(cleaned)
                                 voucherInput = ""
                             }
                         },
@@ -739,12 +786,12 @@ fun SubscriptionScreen(
                             .heightIn(min = 48.dp)
                             .testTag("activate_unlock_code_button"),
                         shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = DarkNavy),
+                        colors = ButtonDefaults.buttonColors(containerColor = ProfitGreen),
                         enabled = voucherInput.isNotBlank()
                     ) {
                         Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Verify & Activate Unlock Code", fontWeight = FontWeight.Bold)
+                        Text(Localization.get("activate_code", language), fontWeight = FontWeight.Bold)
                     }
 
                     // Live Verification Requests History (Offline Room + Cloud Sync Status)
@@ -871,6 +918,7 @@ fun SubscriptionScreen(
             shopProfile = shopProfile,
             breakdown = breakdown,
             onDismiss = { showDirectPaymentDialog = false },
+            onSubmitOnlinePayment = onProcessDirectPayment,
             onPaymentCompleted = { result ->
                 showDirectPaymentDialog = false
                 val invoice = ReceiptGenerator.generateSubscriptionInvoice(
@@ -941,40 +989,145 @@ fun SubscriptionPaywallDialog(
     paymentRequests: List<PaymentVerificationRequest> = emptyList(),
     language: AppLanguage,
     onActivateVoucher: (String) -> Unit,
-    onProcessDirectPayment: ((provider: String, phone: String, durationMonths: Int, onSuccess: (PaymentProcessingResult, SubscriptionPriceBreakdown) -> Unit) -> Unit)? = null,
+    onProcessDirectPayment: ((provider: String, phone: String, durationMonths: Int, userReference: String?, onSuccess: (PaymentProcessingResult, SubscriptionPriceBreakdown) -> Unit) -> Unit)? = null,
     onSubmitPaymentVerification: ((provider: String, payerPhone: String, username: String, registeredPhone: String, durationMonths: Int, branchCount: Int, workerCount: Int, telcoRef: String, onDone: (PaymentVerificationRequest, Boolean) -> Unit) -> Unit)? = null,
-    onCheckCloudApproval: () -> Unit = {}
+    onCheckCloudApproval: () -> Unit = {},
+    onOpenAdminConsole: (() -> Unit)? = null
 ) {
-    AlertDialog(
-        onDismissRequest = { /* Non-dismissible when expired */ },
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Security, contentDescription = null, tint = LossRed)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = Localization.get("subscription_expired", language),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp,
-                    color = LossRed
-                )
+    val lockTitle = when {
+        shopProfile.isSuspended -> Localization.get("suspended_title", language)
+        shopProfile.isFreeTrial -> Localization.get("trial_ended_title", language)
+        else -> Localization.get("subscription_expired", language)
+    }
+    val lockSubtitle = when {
+        shopProfile.isSuspended -> Localization.get("suspended_subtitle", language)
+        shopProfile.isFreeTrial -> Localization.get("trial_ended_subtitle", language)
+        else -> Localization.get("expired_subtitle", language)
+    }
+
+    Dialog(
+        onDismissRequest = { /* Hard lock: non-dismissible until valid payment or BB2 unlock code */ },
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("subscription_hard_lock_screen"),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+            ) {
+                // Hard-Lock Header Banner
+                Surface(
+                    color = LossRed,
+                    contentColor = Color.White,
+                    shadowElevation = 6.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color.White.copy(alpha = 0.2f),
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Lock,
+                                            contentDescription = "App Locked",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = lockTitle,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 17.sp,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = "${shopProfile.shopName.ifBlank { "BeBoss POS" }} • Terminal Locked",
+                                        fontSize = 11.5.sp,
+                                        color = Color.White.copy(alpha = 0.9f),
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                            if (onOpenAdminConsole != null) {
+                                IconButton(
+                                    onClick = onOpenAdminConsole,
+                                    modifier = Modifier.testTag("paywall_admin_console_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AdminPanelSettings,
+                                        contentDescription = "Open Master Admin Console",
+                                        tint = Color.White
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = lockSubtitle,
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp,
+                            color = Color.White.copy(alpha = 0.94f)
+                        )
+                    }
+                }
+
+                // Scrollable Activation & Payment Body
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .widthIn(max = 640.dp)
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                    ) {
+                        SubscriptionScreen(
+                            shopProfile = shopProfile,
+                            branches = branches,
+                            allUsers = allUsers,
+                            currentUser = currentUser,
+                            paymentRequests = paymentRequests,
+                            language = language,
+                            onActivateVoucher = onActivateVoucher,
+                            onProcessDirectPayment = onProcessDirectPayment,
+                            onSubmitPaymentVerification = onSubmitPaymentVerification,
+                            onCheckCloudApproval = onCheckCloudApproval
+                        )
+                    }
+                }
             }
-        },
-        text = {
-            SubscriptionScreen(
-                shopProfile = shopProfile,
-                branches = branches,
-                allUsers = allUsers,
-                currentUser = currentUser,
-                paymentRequests = paymentRequests,
-                language = language,
-                onActivateVoucher = onActivateVoucher,
-                onProcessDirectPayment = onProcessDirectPayment,
-                onSubmitPaymentVerification = onSubmitPaymentVerification,
-                onCheckCloudApproval = onCheckCloudApproval
-            )
-        },
-        confirmButton = {}
-    )
+        }
+    }
 }
 
 @Composable
@@ -982,6 +1135,7 @@ private fun DirectMoMoPaymentDialog(
     shopProfile: ShopProfile,
     breakdown: SubscriptionPriceBreakdown,
     onDismiss: () -> Unit,
+    onSubmitOnlinePayment: ((provider: String, phone: String, durationMonths: Int, userReference: String?, onSuccess: (PaymentProcessingResult, SubscriptionPriceBreakdown) -> Unit) -> Unit)? = null,
     onPaymentCompleted: (PaymentProcessingResult) -> Unit
 ) {
     var selectedProvider by remember { mutableStateOf("MTN MoMo") }
@@ -1167,36 +1321,54 @@ private fun DirectMoMoPaymentDialog(
                     onClick = {
                         isProcessing = true
                         errorMessage = null
-                        coroutineScope.launch {
-                            val pastRefs = setOfNotNull(shopProfile.lastPaymentRef)
-                            val result = OfflineSubscriptionManager.processMoMoPaymentAsync(
-                                context = context,
-                                shopProfile = shopProfile,
-                                payerPhone = phoneInput,
-                                provider = selectedProvider,
-                                branchCount = breakdown.branchCount,
-                                workerCount = breakdown.workerCount,
-                                durationMonths = breakdown.durationMonths,
-                                userEnteredReference = smsRefInput.ifBlank { null },
-                                alreadyUsedRefs = pastRefs
-                            )
-                            isProcessing = false
-                            if (result.isSuccess) {
-                                onPaymentCompleted(result)
-                            } else {
-                                errorMessage = result.message
+                        val refArg = smsRefInput.trim().ifBlank { null }
+                        if (onSubmitOnlinePayment != null) {
+                            onSubmitOnlinePayment(
+                                selectedProvider,
+                                phoneInput.trim(),
+                                breakdown.durationMonths,
+                                refArg
+                            ) { result, _ ->
+                                isProcessing = false
+                                if (result.isSuccess) {
+                                    onPaymentCompleted(result)
+                                } else {
+                                    errorMessage = result.message
+                                }
+                            }
+                        } else {
+                            coroutineScope.launch {
+                                val pastRefs = setOfNotNull(shopProfile.lastPaymentRef.takeIf { it.isNotBlank() })
+                                val result = OfflineSubscriptionManager.processMoMoPaymentAsync(
+                                    context = context,
+                                    shopProfile = shopProfile,
+                                    payerPhone = phoneInput.trim(),
+                                    provider = selectedProvider,
+                                    branchCount = breakdown.branchCount,
+                                    workerCount = breakdown.workerCount,
+                                    durationMonths = breakdown.durationMonths,
+                                    userEnteredReference = refArg,
+                                    alreadyUsedRefs = pastRefs
+                                )
+                                isProcessing = false
+                                if (result.isSuccess) {
+                                    onPaymentCompleted(result)
+                                } else {
+                                    errorMessage = result.message
+                                }
                             }
                         }
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 48.dp),
+                        .heightIn(min = 48.dp)
+                        .testTag("momo_verify_activate_button"),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
                     enabled = !isProcessing && (phoneInput.isNotBlank() || smsRefInput.isNotBlank())
                 ) {
                     Text(
-                        text = if (isProcessing) "Verifying..." else "Verify SMS & Activate ${breakdown.totalPayable} FRw",
+                        text = if (isProcessing) "Verifying with Provider..." else "Pay / Verify & Unlock (${breakdown.totalPayable} FRw)",
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )

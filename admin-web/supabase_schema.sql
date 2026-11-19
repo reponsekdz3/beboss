@@ -31,7 +31,7 @@ as $$
   );
 $$;
 
--- 2. Registered Shop Accounts & Monthly Subscription Tracking
+-- 2. Registered Shop Accounts & Monthly Subscription Tracking (4-Day Free Trial Default)
 create table if not exists public.shop_accounts (
     id text primary key,
     shop_name text not null,
@@ -42,10 +42,61 @@ create table if not exists public.shop_accounts (
     branch_count integer not null default 1,
     worker_count integer not null default 1,
     monthly_fee_rwf integer not null default 5000,
-    subscription_status text not null default 'ACTIVE',
-    subscription_expires_at bigint not null default 0,
+    subscription_status text not null default 'TRIAL',
+    subscription_expires_at bigint not null default ((extract(epoch from now()) + 345600) * 1000)::bigint,
+    remote_kill_switch boolean not null default false,
+    min_app_version text not null default '2.0.0',
+    server_failed_pin_attempts integer not null default 0,
     updated_at bigint not null default (extract(epoch from now()) * 1000)::bigint
 );
+
+alter table public.shop_accounts
+    add column if not exists remote_kill_switch boolean not null default false,
+    add column if not exists min_app_version text not null default '2.0.0',
+    add column if not exists server_failed_pin_attempts integer not null default 0;
+
+-- Server-Side Pricing Recomputation (never trust client-calculated totals)
+create or replace function public.compute_expected_subscription_fee(
+    p_branch_count integer,
+    p_worker_count integer,
+    p_duration_months integer
+)
+returns integer
+language plpgsql
+immutable
+as $$
+declare
+    v_branches integer := greatest(coalesce(p_branch_count, 1), 1);
+    v_workers integer := greatest(coalesce(p_worker_count, 1), 1);
+    v_months integer := greatest(coalesce(p_duration_months, 1), 1);
+    v_branch_fee integer;
+    v_worker_fee integer;
+    v_monthly integer;
+    v_gross integer;
+    v_discount_pct integer;
+begin
+    v_branch_fee := case
+        when v_branches <= 1 then 5000
+        when v_branches <= 5 then 10000
+        else 20000
+    end;
+    v_worker_fee := case
+        when v_workers <= 1 then 0
+        when v_workers <= 3 then 2000
+        when v_workers <= 6 then 4000
+        else 4000 + ((v_workers - 6) * 500)
+    end;
+    v_monthly := v_branch_fee + v_worker_fee;
+    v_gross := v_monthly * v_months;
+    v_discount_pct := case
+        when v_months >= 12 then 15
+        when v_months >= 6 then 10
+        when v_months >= 3 then 5
+        else 0
+    end;
+    return v_gross - ((v_gross * v_discount_pct) / 100);
+end;
+$$;
 
 -- 3. Shop Users Directory (Owners, Managers & Cashiers across all shops — NO PIN/password hashes stored!)
 create table if not exists public.shop_users (
@@ -88,6 +139,28 @@ create table if not exists public.payment_requests (
 
 alter table public.payment_requests
     add column if not exists rejection_reason text not null default '';
+
+create or replace function public.enforce_payment_request_server_fee()
+returns trigger
+language plpgsql
+as $$
+begin
+    new.branch_count := greatest(coalesce(new.branch_count, 1), 1);
+    new.worker_count := greatest(coalesce(new.worker_count, 1), 1);
+    new.duration_months := greatest(coalesce(new.duration_months, 1), 1);
+    new.amount_rwf := public.compute_expected_subscription_fee(
+        new.branch_count,
+        new.worker_count,
+        new.duration_months
+    );
+    return new;
+end;
+$$;
+
+drop trigger if exists trg_recompute_payment_request_fee on public.payment_requests;
+create trigger trg_recompute_payment_request_fee
+    before insert on public.payment_requests
+    for each row execute function public.enforce_payment_request_server_fee();
 
 -- 5. Cryptographic Account-Bound Unlock Codes Ledger (BB2-...)
 create table if not exists public.unlock_codes (

@@ -3,6 +3,7 @@ package com.example.ui.viewmodel.coordinators
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.database.sqlite.SQLiteFullException
 import com.example.data.model.Branch
 import com.example.data.model.CartItem
 import com.example.data.model.Customer
@@ -14,8 +15,10 @@ import com.example.data.model.ShopProfile
 import com.example.data.model.User
 import com.example.data.repository.BeBossRepository
 import com.example.ui.viewmodel.CartState
+import com.example.ui.viewmodel.HeldCart
 import com.example.util.AppLanguage
 import com.example.util.BeBossNotificationManager
+import com.example.util.MoneyUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,11 +53,15 @@ class PosCartCoordinator(
     private val _cartState = MutableStateFlow(CartState())
     val cartState: StateFlow<CartState> = _cartState.asStateFlow()
 
+    private val _heldCarts = MutableStateFlow<List<HeldCart>>(emptyList())
+    val heldCarts: StateFlow<List<HeldCart>> = _heldCarts.asStateFlow()
+
     private val _activeReceiptSale = MutableStateFlow<SaleWithItems?>(null)
     val activeReceiptSale: StateFlow<SaleWithItems?> = _activeReceiptSale.asStateFlow()
 
     init {
         restoreCartDraft()
+        restoreHeldCarts()
     }
 
     private fun updateAndPersistCart(transform: (CartState) -> CartState) {
@@ -84,6 +91,8 @@ class PosCartCoordinator(
                 put("discountAmount", state.discountAmount)
                 put("paymentMethod", state.paymentMethod)
                 put("amountPaidInput", state.amountPaidInput)
+                put("splitCashInput", state.splitCashInput)
+                put("splitMomoInput", state.splitMomoInput)
                 put("notes", state.notes)
             }
             cartPrefs.edit().putString("draft_json", root.toString()).apply()
@@ -120,11 +129,92 @@ class PosCartCoordinator(
                         discountAmount = root.optDouble("discountAmount", 0.0).coerceAtLeast(0.0),
                         paymentMethod = root.optString("paymentMethod", "CASH"),
                         amountPaidInput = root.optString("amountPaidInput", ""),
+                        splitCashInput = root.optString("splitCashInput", ""),
+                        splitMomoInput = root.optString("splitMomoInput", ""),
                         notes = root.optString("notes", "")
                     )
                 }
             } catch (_: Exception) {
                 cartPrefs.edit().remove("draft_json").apply()
+            }
+        }
+    }
+
+    private fun persistHeldCarts(list: List<HeldCart>) {
+        try {
+            if (list.isEmpty()) {
+                cartPrefs.edit().remove("held_carts_json").apply()
+                return
+            }
+            val arr = JSONArray()
+            list.forEach { held ->
+                val itemsArr = JSONArray()
+                held.items.forEach { item ->
+                    itemsArr.put(JSONObject().apply {
+                        put("productId", item.product.id)
+                        put("quantity", item.quantity)
+                        if (item.customPrice != null) put("customPrice", item.customPrice)
+                    })
+                }
+                arr.put(JSONObject().apply {
+                    put("id", held.id)
+                    put("label", held.label)
+                    put("heldAt", held.heldAt)
+                    put("items", itemsArr)
+                    put("selectedCustomerId", held.selectedCustomerId ?: JSONObject.NULL)
+                    put("selectedCustomerName", held.selectedCustomerName)
+                    put("discountAmount", held.discountAmount)
+                    put("paymentMethod", held.paymentMethod)
+                    put("notes", held.notes)
+                })
+            }
+            cartPrefs.edit().putString("held_carts_json", arr.toString()).apply()
+        } catch (_: Exception) {
+            // Best-effort local persistence
+        }
+    }
+
+    private fun restoreHeldCarts() {
+        val raw = cartPrefs.getString("held_carts_json", null) ?: return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val arr = JSONArray(raw)
+                val restored = mutableListOf<HeldCart>()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    val itemsArr = obj.optJSONArray("items") ?: JSONArray()
+                    val items = mutableListOf<CartItem>()
+                    for (j in 0 until itemsArr.length()) {
+                        val itemObj = itemsArr.getJSONObject(j)
+                        val prodId = itemObj.optString("productId")
+                        val qty = itemObj.optDouble("quantity", 0.0)
+                        if (prodId.isBlank() || qty <= 0.0) continue
+                        val prod = repository.getProductById(prodId) ?: continue
+                        if (prod.isDeleted) continue
+                        val customPrice = if (itemObj.has("customPrice") && !itemObj.isNull("customPrice")) {
+                            itemObj.optDouble("customPrice")
+                        } else null
+                        items.add(CartItem(product = prod, quantity = qty, customPrice = customPrice))
+                    }
+                    if (items.isNotEmpty()) {
+                        restored.add(
+                            HeldCart(
+                                id = obj.optString("id"),
+                                label = obj.optString("label", "Held Cart"),
+                                heldAt = obj.optLong("heldAt", System.currentTimeMillis()),
+                                items = items,
+                                selectedCustomerId = if (obj.isNull("selectedCustomerId")) null else obj.optString("selectedCustomerId"),
+                                selectedCustomerName = obj.optString("selectedCustomerName", "Walk-in Customer"),
+                                discountAmount = obj.optDouble("discountAmount", 0.0).coerceAtLeast(0.0),
+                                paymentMethod = obj.optString("paymentMethod", "CASH"),
+                                notes = obj.optString("notes", "")
+                            )
+                        )
+                    }
+                }
+                _heldCarts.value = restored
+            } catch (_: Exception) {
+                cartPrefs.edit().remove("held_carts_json").apply()
             }
         }
     }
@@ -190,8 +280,67 @@ class PosCartCoordinator(
         updateAndPersistCart { it.copy(amountPaidInput = input) }
     }
 
+    fun setCartSplitCashInput(input: String) {
+        updateAndPersistCart { it.copy(splitCashInput = input) }
+    }
+
+    fun setCartSplitMomoInput(input: String) {
+        updateAndPersistCart { it.copy(splitMomoInput = input) }
+    }
+
     fun setCartNotes(notes: String) {
         updateAndPersistCart { it.copy(notes = notes) }
+    }
+
+    fun holdCurrentCart(label: String = "") {
+        val state = _cartState.value
+        if (state.items.isEmpty()) return
+        val resolvedLabel = label.trim().ifBlank {
+            if (state.selectedCustomerId != null) state.selectedCustomerName
+            else "Order #${_heldCarts.value.size + 1} (${state.totalUnitsCount.toInt()} items)"
+        }
+        val held = HeldCart(
+            label = resolvedLabel,
+            items = state.items,
+            selectedCustomerId = state.selectedCustomerId,
+            selectedCustomerName = state.selectedCustomerName,
+            discountAmount = state.discountAmount,
+            paymentMethod = state.paymentMethod,
+            notes = state.notes
+        )
+        val updated = listOf(held) + _heldCarts.value
+        _heldCarts.value = updated
+        persistHeldCarts(updated)
+        clearCart()
+        scope.launch {
+            emitSnackbar("Cart placed on hold: $resolvedLabel")
+        }
+    }
+
+    fun resumeHeldCart(heldId: String) {
+        val target = _heldCarts.value.firstOrNull { it.id == heldId } ?: return
+        val remaining = _heldCarts.value.filterNot { it.id == heldId }
+        _heldCarts.value = remaining
+        persistHeldCarts(remaining)
+        updateAndPersistCart {
+            CartState(
+                items = target.items,
+                selectedCustomerId = target.selectedCustomerId,
+                selectedCustomerName = target.selectedCustomerName,
+                discountAmount = target.discountAmount,
+                paymentMethod = target.paymentMethod,
+                notes = target.notes
+            )
+        }
+        scope.launch {
+            emitSnackbar("Resumed held cart: ${target.label}")
+        }
+    }
+
+    fun deleteHeldCart(heldId: String) {
+        val updated = _heldCarts.value.filterNot { it.id == heldId }
+        _heldCarts.value = updated
+        persistHeldCarts(updated)
     }
 
     fun checkoutSale() {
@@ -205,6 +354,19 @@ class PosCartCoordinator(
                     ?: branches.value.firstOrNull { it.isMainBranch }
                     ?: Branch()
 
+                val finalNotes = if (state.paymentMethod == "SPLIT") {
+                    val cashCents = MoneyUtils.toCents(state.splitCashAmount)
+                    val momoCents = MoneyUtils.toCents(state.splitMomoAmount)
+                    if (cashCents + momoCents <= 0L) {
+                        emitSnackbar("Enter Cash and MoMo split amounts before completing a split sale.")
+                        return@launch
+                    }
+                    val splitSummary = "Split Payment: Cash ${MoneyUtils.centsToDouble(cashCents).toLong()} + MoMo ${MoneyUtils.centsToDouble(momoCents).toLong()} ${shopProfile.value.currencySymbol}"
+                    if (state.notes.isBlank()) splitSummary else "${state.notes} | $splitSummary"
+                } else {
+                    state.notes
+                }
+
                 val sale = repository.processSale(
                     items = state.items,
                     customerId = state.selectedCustomerId,
@@ -212,7 +374,7 @@ class PosCartCoordinator(
                     discountAmount = state.discountAmount,
                     paymentMethod = state.paymentMethod,
                     amountPaid = state.effectiveAmountPaid,
-                    notes = state.notes,
+                    notes = finalNotes,
                     branchId = branch.id,
                     branchName = branch.name,
                     cashierId = user?.id ?: "",
@@ -240,6 +402,8 @@ class PosCartCoordinator(
                 else "Sale recorded successfully! Receipt ready."
                 emitSnackbar(msg)
                 onMutationSuccess()
+            } catch (_: SQLiteFullException) {
+                emitSnackbar("Storage full! Free up device storage or run WAL Checkpoint in Settings before completing this sale.")
             } catch (e: Exception) {
                 emitSnackbar("Error processing sale: ${e.message}")
             }

@@ -101,8 +101,10 @@ import com.example.ui.theme.LossRed
 import com.example.ui.theme.OrangeLight
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
+import com.example.util.AppLanguage
 import com.example.util.ContactsHelper
 import com.example.util.ExcelCsvExporter
+import com.example.util.Localization
 import com.example.util.PdfReportGenerator
 import com.example.util.PickedContactInfo
 import com.example.util.ReceiptGenerator
@@ -120,6 +122,7 @@ fun CustomersScreen(
     shopProfile: ShopProfile,
     allSales: List<Sale> = emptyList(),
     allPayments: List<CustomerPayment> = emptyList(),
+    language: AppLanguage = AppLanguage.ENGLISH,
     onSaveCustomer: (Customer) -> Unit,
     onRecordPayment: (String, Double) -> Unit,
     onDeleteCustomer: (String) -> Unit,
@@ -178,7 +181,7 @@ fun CustomersScreen(
                         ) {
                             Column {
                                 Text(
-                                    text = "TOTAL UNCOLLECTED CUSTOMER DEBT",
+                                    text = Localization.get("outstanding_debts", language).uppercase(),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = if (totalOutstandingDebt > 0) LossRed else InkMedium,
@@ -231,7 +234,7 @@ fun CustomersScreen(
                             ) {
                                 Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(15.dp), tint = OrangePrimary)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Excel/CSV Sheet", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OrangePrimary)
+                                Text(Localization.get("export_excel_csv", language), fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = OrangePrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
 
                             OutlinedButton(
@@ -242,7 +245,7 @@ fun CustomersScreen(
                             ) {
                                 Icon(Icons.Default.Contacts, contentDescription = null, modifier = Modifier.size(15.dp), tint = DarkNavy)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Import Contacts", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = DarkNavy)
+                                Text(Localization.get("import_contacts", language), fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = DarkNavy, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
 
                             if (onClearAllCustomers != null && customers.isNotEmpty()) {

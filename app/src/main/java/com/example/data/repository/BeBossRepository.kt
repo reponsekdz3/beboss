@@ -870,25 +870,28 @@ class BeBossRepository(private val database: AppDatabase) {
         inventoryManager.clearAllProducts()
         customerDebtManager.clearAllCustomers()
 
-        // 3. Reset shop profile to clean fresh store
+        // 3. Reset shop profile to clean fresh 4-day trial store
+        val now = com.example.util.ClockGuard.effectiveNowMs()
         val freshProfile = ShopProfile(
-            id = 1,
-            name = "Store Manager",
+            id = 1L,
+            name = "",
             phone = "",
             email = "",
-            shopName = "My Retail Store",
-            address = "Kigali, Rwanda",
+            shopName = "",
+            address = "",
             currencyCode = "RWF",
             currencySymbol = "FRw",
             taxRate = 18.0,
             tinNumber = "",
             receiptFooter = "Thank you for shopping with us!",
-            isOnlineSyncEnabled = false,
-            backendServerUrl = "https://api.beboss.app/v1",
-            subscriptionStatus = "ACTIVE",
+            isOnlineSyncEnabled = true,
+            backendServerUrl = "",
+            subscriptionStatus = ShopProfile.STATUS_TRIAL,
             monthlyFeeRwf = 5000,
-            subscriptionExpiresAt = System.currentTimeMillis() + (30L * 24 * 60 * 60 * 1000L),
-            trialStartedAt = System.currentTimeMillis()
+            subscriptionExpiresAt = now + ShopProfile.FREE_TRIAL_DURATION_MS,
+            trialStartedAt = now,
+            lastPaymentRef = "FREE-TRIAL-4D",
+            lastPaymentAmount = 0
         )
         shopProfileDao.insertOrUpdateProfile(freshProfile)
 
@@ -903,24 +906,27 @@ class BeBossRepository(private val database: AppDatabase) {
     suspend fun initDatabase() = withContext(Dispatchers.IO) {
         val existingProfile = shopProfileDao.getShopProfileDirect()
         if (existingProfile == null) {
+            val now = com.example.util.ClockGuard.effectiveNowMs()
             val defaultProfile = ShopProfile(
-                id = 1,
-                name = "Jean Paul",
-                phone = "+250 788 123 456",
-                email = "reponsekdz01@gmail.com",
-                shopName = "BeBoss Kigali Superstore",
-                address = "Kigali, Commercial District",
+                id = 1L,
+                name = "",
+                phone = "",
+                email = "",
+                shopName = "",
+                address = "",
                 currencyCode = "RWF",
                 currencySymbol = "FRw",
                 taxRate = 18.0,
-                tinNumber = "TIN-100293847",
+                tinNumber = "",
                 receiptFooter = "Murakoze cyane! Thank you for shopping with us.",
                 isOnlineSyncEnabled = true,
-                backendServerUrl = "https://api.beboss.app/v1",
-                subscriptionStatus = "ACTIVE",
+                backendServerUrl = "",
+                subscriptionStatus = ShopProfile.STATUS_TRIAL,
                 monthlyFeeRwf = 5000,
-                subscriptionExpiresAt = System.currentTimeMillis() + (30L * 24 * 60 * 60 * 1000L),
-                trialStartedAt = System.currentTimeMillis()
+                subscriptionExpiresAt = now + ShopProfile.FREE_TRIAL_DURATION_MS,
+                trialStartedAt = now,
+                lastPaymentRef = "FREE-TRIAL-4D",
+                lastPaymentAmount = 0
             )
             shopProfileDao.insertOrUpdateProfile(defaultProfile)
         }

@@ -156,7 +156,9 @@ object SupabaseAdminClient {
 
     fun buildCertificatePinner(
         supabaseUrl: String = getSupabaseUrl(),
-        pinsCsv: String = System.getProperty("beboss.supabase.certPins").orEmpty()
+        pinsCsv: String = BuildConfig.SUPABASE_CERT_PINS.ifBlank {
+            System.getProperty("beboss.supabase.certPins").orEmpty()
+        }
     ): CertificatePinner? {
         val rawPins = pinsCsv.split(',').map { it.trim() }.filter { it.startsWith("sha256/") }
         if (rawPins.isEmpty()) return null
@@ -983,6 +985,12 @@ object SupabaseAdminClient {
             val now = System.currentTimeMillis()
             val codeId = UUID.randomUUID().toString()
             val operatorLabel = activeAdminSession?.let { "${it.fullName} (${it.email})" } ?: adminName
+            val recomputedBreakdown = OfflineSubscriptionManager.calculateSubscriptionPrice(
+                branchCount = request.branchCount.coerceAtLeast(1),
+                workerCount = request.workerCount.coerceAtLeast(1),
+                durationMonths = request.durationMonths.coerceAtLeast(1)
+            )
+            val verifiedAmountRwf = recomputedBreakdown.totalPayable
             val codePayload = JSONObject().apply {
                 put("id", codeId)
                 put("unlock_code", generatedCode)
@@ -991,7 +999,7 @@ object SupabaseAdminClient {
                 put("device_challenge", request.deviceChallenge)
                 put("tier_code", tierCode)
                 put("plan_days", days)
-                put("amount_rwf", request.amountRwf)
+                put("amount_rwf", verifiedAmountRwf)
                 put("status", "ISSUED")
                 put("issued_by_admin", operatorLabel)
                 put("issued_at", now)
@@ -1004,6 +1012,7 @@ object SupabaseAdminClient {
 
             val prPatch = JSONObject().apply {
                 put("status", "APPROVED")
+                put("amount_rwf", verifiedAmountRwf)
                 put("generated_unlock_code", generatedCode)
                 put("verified_by_admin", operatorLabel)
                 put("updated_at", now)
@@ -1017,10 +1026,13 @@ object SupabaseAdminClient {
             if (codeOk && prOk) {
                 val shopKey = computeShopSyncKey(request.ownerUsername, request.ownerPhone)
                 extendShopExpiryInternal(shopKey, days)
+                val varianceNote = if (request.amountRwf != verifiedAmountRwf) {
+                    " [recomputed from ${request.amountRwf} FRw]"
+                } else ""
                 logAdminAudit(
                     action = "APPROVE_PAYMENT",
                     targetId = request.ownerUsername,
-                    details = "Approved ${request.amountRwf} FRw (${request.provider}) -> $generatedCode (+${days}d)"
+                    details = "Approved $verifiedAmountRwf FRw$varianceNote (${request.provider}) -> $generatedCode (+${days}d)"
                 )
             }
             Pair(codeOk && prOk, generatedCode)
@@ -1163,8 +1175,13 @@ object SupabaseAdminClient {
         if (!isConfigured() || activeAdminSession == null) return@withContext false
         try {
             val now = System.currentTimeMillis()
+            val normalized = newStatus.trim().uppercase(Locale.ROOT)
+            val isLocking = normalized == ShopProfile.STATUS_EXPIRED || normalized == ShopProfile.STATUS_SUSPENDED
             val patch = JSONObject().apply {
-                put("subscription_status", newStatus)
+                put("subscription_status", normalized)
+                if (isLocking) {
+                    put("subscription_expires_at", now)
+                }
                 put("updated_at", now)
             }
             val req = buildRestRequest(
@@ -1173,11 +1190,40 @@ object SupabaseAdminClient {
             ).patch(patch.toString().toRequestBody(jsonMediaType)).build()
             val ok = client.newCall(req).execute().use { it.isSuccessful }
             if (ok) {
-                logAdminAudit("SET_SHOP_STATUS", "@${shop.ownerUsername}", "${shop.shopName} -> $newStatus")
+                logAdminAudit("SET_SHOP_STATUS", "@${shop.ownerUsername}", "${shop.shopName} -> $normalized")
             }
             ok
         } catch (e: Exception) {
             Log.e(TAG, "adminSetShopStatus error: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun adminResetShopTrial(
+        shop: SupabaseShopAccountDto,
+        trialDays: Int = ShopProfile.FREE_TRIAL_DAYS
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (!isConfigured() || activeAdminSession == null) return@withContext false
+        try {
+            val now = System.currentTimeMillis()
+            val safeDays = trialDays.coerceIn(1, 14)
+            val newExpiry = now + safeDays * 86_400_000L
+            val patch = JSONObject().apply {
+                put("subscription_status", ShopProfile.STATUS_TRIAL)
+                put("subscription_expires_at", newExpiry)
+                put("updated_at", now)
+            }
+            val req = buildRestRequest(
+                "shop_accounts?id=eq.${URLEncoder.encode(shop.id, "UTF-8")}",
+                useAdminJwtIfAvailable = true
+            ).patch(patch.toString().toRequestBody(jsonMediaType)).build()
+            val ok = client.newCall(req).execute().use { it.isSuccessful }
+            if (ok) {
+                logAdminAudit("RESET_TRIAL", "@${shop.ownerUsername}", "Reset ${shop.shopName} to ${safeDays}d TRIAL")
+            }
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "adminResetShopTrial error: ${e.message}")
             false
         }
     }

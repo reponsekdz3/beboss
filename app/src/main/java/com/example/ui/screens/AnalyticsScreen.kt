@@ -43,9 +43,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.TrendingUp
 import com.example.data.model.AnalyticsPeriod
 import com.example.data.model.CategorySalesShare
 import com.example.data.model.DailyAnalyticsPoint
+import com.example.data.model.Product
 import com.example.data.model.ProfitLossSummary
 import com.example.data.model.ShopProfile
 import com.example.data.model.TopProductReport
@@ -54,8 +56,12 @@ import com.example.ui.theme.DarkNavy
 import com.example.ui.theme.LossRed
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
+import com.example.ui.theme.WarningAmber
+import com.example.util.AppLanguage
+import com.example.util.Localization
 import com.example.util.PdfReportGenerator
 import com.example.util.ReceiptGenerator
+import kotlin.math.ceil
 
 @Composable
 fun AnalyticsScreen(
@@ -64,7 +70,9 @@ fun AnalyticsScreen(
     chartPoints: List<DailyAnalyticsPoint>,
     topProducts: List<TopProductReport>,
     categoryShares: List<CategorySalesShare>,
+    products: List<Product> = emptyList(),
     shopProfile: ShopProfile,
+    language: AppLanguage = AppLanguage.ENGLISH,
     onPeriodSelected: (AnalyticsPeriod) -> Unit
 ) {
     val context = LocalContext.current
@@ -107,9 +115,15 @@ fun AnalyticsScreen(
                             color = if (isSelected) OrangePrimary else Color.Transparent
                         ) {
                             Box(contentAlignment = Alignment.Center) {
+                                val periodLabel = when (period) {
+                                    AnalyticsPeriod.TODAY -> Localization.get("period_today", language)
+                                    AnalyticsPeriod.THIS_WEEK -> Localization.get("period_this_week", language)
+                                    AnalyticsPeriod.THIS_MONTH -> Localization.get("period_this_month", language)
+                                    AnalyticsPeriod.ALL_TIME -> Localization.get("period_all_time", language)
+                                }
                                 Text(
-                                    text = period.displayName,
-                                    fontSize = 12.sp,
+                                    text = periodLabel,
+                                    fontSize = 11.5.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                     color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
                                 )
@@ -135,7 +149,7 @@ fun AnalyticsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "NET PROFIT / LOSS",
+                            text = Localization.get("gross_profit", language).uppercase(),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -183,19 +197,19 @@ fun AnalyticsScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         MetricTile(
-                            label = "Total Revenue",
+                            label = Localization.get("gross_revenue", language),
                             value = ReceiptGenerator.formatMoney(summary.totalRevenue, shopProfile),
                             color = OrangePrimary,
                             modifier = Modifier.weight(1f)
                         )
                         MetricTile(
-                            label = "Cost of Goods",
+                            label = Localization.get("cost_of_goods", language),
                             value = ReceiptGenerator.formatMoney(summary.totalCost, shopProfile),
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f)
                         )
                         MetricTile(
-                            label = "Orders Count",
+                            label = Localization.get("today_orders", language),
                             value = "${summary.totalSalesCount}",
                             color = Color(0xFF3B82F6),
                             modifier = Modifier.weight(1f)
@@ -231,7 +245,7 @@ fun AnalyticsScreen(
                             Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Top Profitable Products",
+                                text = Localization.get("top_selling_products", language),
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -307,7 +321,7 @@ fun AnalyticsScreen(
                             Icon(Icons.Default.Category, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Category Sales Breakdown",
+                                text = Localization.get("category_sales_share", language),
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -346,6 +360,117 @@ fun AnalyticsScreen(
             }
         }
 
+        // Demand Forecasting & Reorder Suggestions (Moving Average Velocity)
+        item {
+            val periodDays = when (selectedPeriod) {
+                AnalyticsPeriod.TODAY -> 1.0
+                AnalyticsPeriod.THIS_WEEK -> 7.0
+                AnalyticsPeriod.THIS_MONTH -> 30.0
+                AnalyticsPeriod.ALL_TIME -> 30.0
+            }
+            val soldByName = topProducts.associateBy { it.productName.lowercase() }
+            val forecasts = products
+                .filter { !it.isDeleted }
+                .mapNotNull { product ->
+                    val soldQty = soldByName[product.name.lowercase()]?.totalQuantitySold ?: 0.0
+                    val dailyVelocity = soldQty / periodDays
+                    val daysCover = if (dailyVelocity > 0.0) product.quantityInStock / dailyVelocity else Double.POSITIVE_INFINITY
+                    val needsReorder = product.isLowStock || (dailyVelocity > 0.0 && daysCover < 10.0)
+                    if (!needsReorder) return@mapNotNull null
+                    val targetStock = maxOf(
+                        ceil(dailyVelocity * 14.0),
+                        product.lowStockThreshold * 2.0,
+                        5.0
+                    )
+                    val reorderQty = (targetStock - product.quantityInStock).coerceAtLeast(1.0).toInt()
+                    val estCost = reorderQty * product.costPrice
+                    Triple(product, daysCover, reorderQty to estCost)
+                }
+                .sortedBy { it.second }
+                .take(5)
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, WarningAmber.copy(alpha = 0.35f)),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.TrendingUp, contentDescription = null, tint = WarningAmber, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = Localization.get("demand_forecast_title", language),
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Computed from ${selectedPeriod.displayName.lowercase()} sales velocity & stock cover",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    if (forecasts.isEmpty()) {
+                        Text(
+                            text = "All active inventory items have healthy stock cover for the next 10+ days.",
+                            fontSize = 12.sp,
+                            color = ProfitGreen,
+                            fontWeight = FontWeight.Medium
+                        )
+                    } else {
+                        forecasts.forEachIndexed { idx, (product, daysCover, reorderPair) ->
+                            val (reorderQty, estCost) = reorderPair
+                            val coverText = if (daysCover.isInfinite()) "Low stock threshold" else "${daysCover.toInt().coerceAtLeast(0)}d stock cover"
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = product.name,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "On hand: ${product.quantityInStock.toInt()} ${product.unit} • $coverText",
+                                        fontSize = 11.sp,
+                                        color = if (product.quantityInStock <= 0 || daysCover < 3.0) LossRed else WarningAmber
+                                    )
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = "Order +$reorderQty ${product.unit}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = OrangePrimary
+                                    )
+                                    Text(
+                                        text = "Est. ${ReceiptGenerator.formatMoney(estCost, shopProfile)}",
+                                        fontSize = 10.5.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            if (idx < forecasts.lastIndex) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Share & PDF Export Report Actions
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -377,7 +502,7 @@ fun AnalyticsScreen(
                 ) {
                     Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Export Official PDF Financial Report", fontWeight = FontWeight.Bold)
+                    Text(Localization.get("export_pdf_report", language), fontWeight = FontWeight.Bold)
                 }
 
                 OutlinedButton(

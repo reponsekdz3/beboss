@@ -58,14 +58,14 @@ class SubscriptionManager(
             )
             redeemedVoucherDao.insertRedeemedVoucher(redeemedRecord)
 
-            // Extend shop profile subscription
+            // Extend shop profile subscription using anti-rollback monotonic clock
+            val now = com.example.util.ClockGuard.effectiveNowMs()
             val currentExpiry = shopProfile.subscriptionExpiresAt
-            val now = System.currentTimeMillis()
-            val baseTime = if (currentExpiry > now) currentExpiry else now
+            val baseTime = if (currentExpiry > now && !shopProfile.isSuspended) currentExpiry else now
             val newExpiry = baseTime + (validation.daysToAdd.toLong() * 24 * 60 * 60 * 1000L)
 
             val updatedProfile = shopProfile.copy(
-                subscriptionStatus = "ACTIVE",
+                subscriptionStatus = ShopProfile.STATUS_ACTIVE,
                 subscriptionExpiresAt = newExpiry,
                 lastPaymentRef = voucherCode.trim().uppercase(),
                 lastPaymentAmount = validation.verifiedAmount,
@@ -79,7 +79,7 @@ class SubscriptionManager(
     }
 
     /**
-     * Records and activates direct mobile money payment.
+     * Records and activates verified mobile money payment.
      */
     suspend fun recordDirectMoMoPayment(
         shopProfile: ShopProfile,
@@ -89,27 +89,42 @@ class SubscriptionManager(
         workerCount: Int,
         durationMonths: Int,
         smsTransactionReference: String? = null,
-        alreadyUsedRefs: Set<String> = emptySet()
+        alreadyUsedRefs: Set<String> = emptySet(),
+        context: android.content.Context? = null
     ): PaymentProcessingResult = withContext(Dispatchers.IO) {
-        val result = OfflineSubscriptionManager.processDirectMoMoPayment(
-            shopProfile = shopProfile,
-            payerPhone = payerPhone,
-            provider = provider,
-            branchCount = branchCount,
-            workerCount = workerCount,
-            durationMonths = durationMonths,
-            smsTransactionReference = smsTransactionReference,
-            alreadyUsedRefs = alreadyUsedRefs
-        )
+        val result = if (context != null) {
+            OfflineSubscriptionManager.processMoMoPaymentAsync(
+                context = context,
+                shopProfile = shopProfile,
+                payerPhone = payerPhone,
+                provider = provider,
+                branchCount = branchCount,
+                workerCount = workerCount,
+                durationMonths = durationMonths,
+                userEnteredReference = smsTransactionReference,
+                alreadyUsedRefs = alreadyUsedRefs
+            )
+        } else {
+            OfflineSubscriptionManager.processDirectMoMoPayment(
+                shopProfile = shopProfile,
+                payerPhone = payerPhone,
+                provider = provider,
+                branchCount = branchCount,
+                workerCount = workerCount,
+                durationMonths = durationMonths,
+                smsTransactionReference = smsTransactionReference,
+                alreadyUsedRefs = alreadyUsedRefs
+            )
+        }
 
         if (result.isSuccess) {
+            val now = com.example.util.ClockGuard.effectiveNowMs()
             val currentExpiry = shopProfile.subscriptionExpiresAt
-            val now = System.currentTimeMillis()
-            val baseTime = if (currentExpiry > now) currentExpiry else now
+            val baseTime = if (currentExpiry > now && !shopProfile.isSuspended) currentExpiry else now
             val newExpiry = baseTime + (result.planDays.toLong() * 24 * 60 * 60 * 1000L)
 
             val updatedProfile = shopProfile.copy(
-                subscriptionStatus = "ACTIVE",
+                subscriptionStatus = ShopProfile.STATUS_ACTIVE,
                 subscriptionExpiresAt = newExpiry,
                 lastPaymentRef = result.transactionRef,
                 lastPaymentAmount = result.amountPaid,

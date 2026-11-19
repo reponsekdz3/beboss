@@ -27,7 +27,7 @@ object ReceiptGenerator {
     fun computeTaxIncludedAmount(totalAmount: Double, taxRatePercent: Double): Double {
         if (taxRatePercent <= 0.0 || totalAmount <= 0.0) return 0.0
         val tax = totalAmount * (taxRatePercent / (100.0 + taxRatePercent))
-        return MoneyUtils.fromCents(MoneyUtils.toCents(tax))
+        return MoneyUtils.centsToDouble(MoneyUtils.toCents(tax))
     }
 
     /**

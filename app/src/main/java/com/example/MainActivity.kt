@@ -86,6 +86,7 @@ import com.example.util.BeBossNotificationManager
 import com.example.util.BiometricAuthManager
 import com.example.util.ClockGuard
 import com.example.util.ConnectivityStatus
+import com.example.util.Localization
 import kotlinx.coroutines.flow.collectLatest
 
 class MainActivity : ComponentActivity() {
@@ -192,6 +193,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     val customers by viewModel.customers.collectAsState()
     val totalOutstandingDebt by viewModel.totalOutstandingDebt.collectAsState()
     val cartState by viewModel.cartState.collectAsState()
+    val heldCarts by viewModel.heldCarts.collectAsState()
+    val deviceIntegrityStatus by viewModel.deviceIntegrityStatus.collectAsState()
     val allSales by viewModel.allSales.collectAsState()
     val allPurchases by viewModel.allPurchases.collectAsState()
     val purchaseSummary by viewModel.purchaseSummary.collectAsState()
@@ -244,6 +247,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     val adminAuditLogs by viewModel.adminAuditLogs.collectAsState()
     val localAuditLogs by viewModel.localAuditLogs.collectAsState()
     val isAdminLoading by viewModel.isAdminLoading.collectAsState()
+    val adminLastSyncedAt by viewModel.adminLastSyncedAt.collectAsState()
+    val idleLockMinutes by viewModel.idleLockMinutes.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     var showSplashScreen by remember { mutableStateOf(true) }
@@ -251,6 +256,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     var showQuickCustomSaleDialog by remember { mutableStateOf(false) }
     var showUniversalSearchDialog by remember { mutableStateOf(false) }
     var showPermissionOnboardingDialog by remember { mutableStateOf(false) }
+    var showPaywallAdminConsole by remember { mutableStateOf(false) }
 
     val debtorsCount = remember(customers) { customers.count { it.debtBalance > 0 } }
 
@@ -295,6 +301,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
             },
             onCancel = { viewModel.cancelRegistration() },
             onToggleLanguage = { viewModel.toggleLanguage() },
+            onSelectLanguage = { lang -> viewModel.setLanguage(lang) },
             onToggleTheme = { viewModel.toggleDarkMode() }
         )
     } else if (isLocked) {
@@ -312,24 +319,23 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                 if (activity != null && BiometricAuthManager.isBiometricAvailable(context)) {
                     BiometricAuthManager.promptBiometric(
                         activity = activity,
-                        title = if (currentLanguage == AppLanguage.KINYARWANDA) "Kugenzura Igikumwe" else "Fingerprint Verification",
-                        subtitle = if (currentLanguage == AppLanguage.KINYARWANDA) "Koresha igikumwe gufungura BeBoss" else "Verify fingerprint to unlock BeBoss",
-                        negativeButtonText = if (currentLanguage == AppLanguage.KINYARWANDA) "Koresha PIN" else "Use PIN Instead",
+                        title = Localization.get("biometric_prompt_title", currentLanguage),
+                        subtitle = Localization.get("biometric_prompt_subtitle", currentLanguage),
+                        negativeButtonText = Localization.get("biometric_use_pin", currentLanguage),
                         onSuccess = { viewModel.unlockWithBiometric(verifiedByHardware = true) },
                         onError = { msg -> viewModel.reportBiometricError(msg) },
                         onFailed = { viewModel.reportBiometricCancelled() }
                     )
                 } else {
                     viewModel.reportBiometricError(
-                        if (currentLanguage == AppLanguage.KINYARWANDA)
-                            "Igikoresho ntigifite uburyo bw'igikumwe bwizewe. Koresha PIN cyangwa ijambobanga."
-                        else "Hardware biometric authentication is unavailable on this device. Use PIN or password."
+                        Localization.get("biometric_unavailable", currentLanguage)
                     )
                 }
             },
             onSelectUser = { user -> viewModel.selectLockedOperator(user) },
             onClearError = { viewModel.clearAuthError() },
             onToggleLanguage = { viewModel.toggleLanguage() },
+            onSelectLanguage = { lang -> viewModel.setLanguage(lang) },
             onToggleTheme = { viewModel.toggleDarkMode() },
             onOpenRegister = { viewModel.showRegistrationScreen() }
         )
@@ -448,7 +454,9 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 categories = categories,
                                 customers = customers,
                                 cartState = cartState,
+                                heldCarts = heldCarts,
                                 shopProfile = shopProfile,
+                                language = currentLanguage,
                                 onAddToCart = { p -> viewModel.addToCart(p) },
                                 onUpdateQuantity = { pId, qty -> viewModel.updateCartItemQuantity(pId, qty) },
                                 onRemoveItem = { pId -> viewModel.removeCartItem(pId) },
@@ -457,7 +465,12 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onSetPaymentMethod = { m -> viewModel.setCartPaymentMethod(m) },
                                 onSetDiscount = { d -> viewModel.setCartDiscount(d) },
                                 onSetAmountPaid = { a -> viewModel.setCartAmountPaidInput(a) },
+                                onSetSplitCash = { s -> viewModel.setCartSplitCashInput(s) },
+                                onSetSplitMomo = { s -> viewModel.setCartSplitMomoInput(s) },
                                 onSetNotes = { n -> viewModel.setCartNotes(n) },
+                                onHoldCart = { lbl -> viewModel.holdCurrentCart(lbl) },
+                                onResumeHeldCart = { id -> viewModel.resumeHeldCart(id) },
+                                onDeleteHeldCart = { id -> viewModel.deleteHeldCart(id) },
                                 onCheckout = { viewModel.checkoutSale() },
                                 onQuickAddProduct = { viewModel.navigateTo(AppScreen.INVENTORY) }
                             )
@@ -471,6 +484,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 shopProfile = shopProfile,
                                 purchases = allPurchases,
                                 purchaseSummary = purchaseSummary,
+                                language = currentLanguage,
                                 onSaveProduct = { p -> viewModel.saveProduct(p) },
                                 onAdjustStock = { pId, delta, reason -> viewModel.adjustStock(pId, delta, reason) },
                                 onDeleteProduct = { pId -> viewModel.deleteProduct(pId) },
@@ -499,7 +513,9 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 chartPoints = dailyChartPoints,
                                 topProducts = topProducts,
                                 categoryShares = categoryBreakdown,
+                                products = allProducts,
                                 shopProfile = shopProfile,
+                                language = currentLanguage,
                                 onPeriodSelected = { p -> viewModel.setAnalyticsPeriod(p) }
                             )
                         }
@@ -511,6 +527,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 shopProfile = shopProfile,
                                 allSales = allSales,
                                 allPayments = allCustomerPayments,
+                                language = currentLanguage,
                                 onSaveCustomer = { c -> viewModel.saveCustomer(c) },
                                 onRecordPayment = { cId, amt -> viewModel.recordDebtPayment(cId, amt) },
                                 onDeleteCustomer = { cId -> viewModel.deleteCustomer(cId) },
@@ -522,8 +539,9 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                             SalesHistoryScreen(
                                 sales = allSales,
                                 shopProfile = shopProfile,
+                                language = currentLanguage,
                                 onOpenReceipt = { saleId -> viewModel.openReceipt(saleId) },
-                                onDeleteSale = { saleId -> viewModel.deleteSale(saleId) }
+                                onDeleteSale = { saleId, reason -> viewModel.deleteSale(saleId, reason) }
                             )
                         }
 
@@ -583,9 +601,17 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onLogout = { viewModel.logoutUser() },
                                 onSwitchUser = { u -> viewModel.switchUser(u) },
                                 onActivateVoucher = { code -> viewModel.activateSubscriptionVoucher(code) },
-                                onProcessDirectPayment = { provider, phone, durationMonths, onSuccess ->
-                                    viewModel.processDirectSubscriptionPayment(provider, phone, durationMonths, onResult = onSuccess)
+                                onProcessDirectPayment = { provider, phone, durationMonths, userRef, onSuccess ->
+                                    viewModel.processDirectSubscriptionPayment(
+                                        provider = provider,
+                                        phone = phone,
+                                        durationMonths = durationMonths,
+                                        userReference = userRef,
+                                        onResult = onSuccess
+                                    )
                                 },
+                                deadLetterSyncCount = deadLetterSyncCount,
+                                deviceIntegrityStatus = deviceIntegrityStatus,
                                 paymentVerificationRequests = paymentVerificationRequests,
                                 discoveredHubs = discoveredHubs,
                                 isDiscoveringHubs = isDiscoveringHubs,
@@ -645,6 +671,9 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onAdminExtendShopSubscription = { shop, addDays ->
                                     viewModel.adminExtendShopSubscription(shop, addDays)
                                 },
+                                onAdminResetShopTrial = { shop ->
+                                    viewModel.adminResetShopTrial(shop)
+                                },
                                 onAdminSetShopStatus = { shop, status ->
                                     viewModel.adminSetShopStatus(shop, status)
                                 },
@@ -669,15 +698,18 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onShareAdminWebPortal = { viewModel.shareAdminWebPortal(context) },
                                 onShowSplashScreen = { showSplashScreen = true },
                                 onTestNotification = { type -> viewModel.testNotification(type) },
-                                onRequestPermissions = { showPermissionOnboardingDialog = true }
+                                onRequestPermissions = { showPermissionOnboardingDialog = true },
+                                onSelectLanguage = { lang -> viewModel.setLanguage(lang) },
+                                idleLockMinutes = idleLockMinutes,
+                                onSetIdleLockMinutes = { mins -> viewModel.setIdleLockMinutes(mins) },
+                                adminLastSyncedAt = adminLastSyncedAt
                             )
                         }
                     }
+                            }
                         }
                     }
                 }
-                }
-            }
             }
         }
     }
@@ -741,7 +773,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
         )
     }
 
-    // Active Subscription Paywall Lock (If subscription is expired)
+    // Active Subscription Hard-Lock Paywall (Non-dismissible after 4-day free trial or remote lock)
     if (!shopProfile.isSubscriptionActive && !isLocked && !isRegistrationNeeded) {
         com.example.ui.screens.SubscriptionPaywallDialog(
             shopProfile = shopProfile,
@@ -751,8 +783,14 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
             paymentRequests = paymentVerificationRequests,
             language = currentLanguage,
             onActivateVoucher = { code -> viewModel.activateSubscriptionVoucher(code) },
-            onProcessDirectPayment = { provider, phone, durationMonths, onSuccess ->
-                viewModel.processDirectSubscriptionPayment(provider, phone, durationMonths, onResult = onSuccess)
+            onProcessDirectPayment = { provider, phone, durationMonths, userRef, onSuccess ->
+                viewModel.processDirectSubscriptionPayment(
+                    provider = provider,
+                    phone = phone,
+                    durationMonths = durationMonths,
+                    userReference = userRef,
+                    onResult = onSuccess
+                )
             },
             onSubmitPaymentVerification = { provider, payerPhone, username, regPhone, months, branchCount, workerCount, telcoRef, onDone ->
                 viewModel.submitUssdPaymentProof(
@@ -767,7 +805,50 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                     onSubmitted = onDone
                 )
             },
-            onCheckCloudApproval = { viewModel.checkCloudUnlockApprovals() }
+            onCheckCloudApproval = { viewModel.checkCloudUnlockApprovals() },
+            onOpenAdminConsole = { showPaywallAdminConsole = true }
+        )
+    }
+
+    // Master Admin Console accessible even when a terminal is on the Subscription Hard-Lock Paywall
+    if (showPaywallAdminConsole) {
+        com.example.ui.screens.AdminVerificationConsoleDialog(
+            shopProfile = shopProfile,
+            adminSession = adminSession,
+            adminAuthError = adminAuthError,
+            isAdminAuthenticating = isAdminAuthenticating,
+            paymentRequests = adminPaymentRequests,
+            shopAccounts = adminShopAccounts,
+            shopUsers = adminShopUsers,
+            branchSnapshots = adminBranchSnapshots,
+            unlockCodes = adminUnlockCodes,
+            auditLogs = adminAuditLogs,
+            localAuditLogs = localAuditLogs,
+            isLoading = isAdminLoading,
+            language = currentLanguage,
+            lastSyncedAt = adminLastSyncedAt,
+            onSignInAdmin = { email, password -> viewModel.signInSupabaseAdmin(email, password) },
+            onSignUpAdmin = { email, password, fullName -> viewModel.signUpSupabaseAdmin(email, password, fullName) },
+            onSignOutAdmin = { viewModel.signOutSupabaseAdmin() },
+            onRefresh = { viewModel.refreshAdminDashboardData() },
+            onApprovePayment = { req, onDone -> viewModel.adminApproveAndGenerateCode(req, onDone) },
+            onBatchApprovePending = { onDone -> viewModel.adminApproveBatchPendingPayments(onDone) },
+            onRejectPayment = { req, reason -> viewModel.adminRejectPayment(req, reason) },
+            onIssueManualCode = { username, regPhone, tier, days, amt, onDone ->
+                viewModel.adminIssueManualCode(username, regPhone, tier, days, amt, onDone)
+            },
+            onRevokeCode = { codeDto -> viewModel.adminRevokeCode(codeDto) },
+            onExtendShopSubscription = { shop, addDays -> viewModel.adminExtendShopSubscription(shop, addDays) },
+            onResetShopTrial = { shop -> viewModel.adminResetShopTrial(shop) },
+            onSetShopStatus = { shop, status -> viewModel.adminSetShopStatus(shop, status) },
+            onUpdateShopLimits = { shop, branchLimit, workerLimit -> viewModel.adminUpdateShopLimits(shop, branchLimit, workerLimit) },
+            onDeleteShopAccount = { shop -> viewModel.adminDeleteShopAccount(shop) },
+            onUpdateShopUserRole = { user, role -> viewModel.adminUpdateShopUserRole(user, role) },
+            onToggleShopUserActive = { user, active -> viewModel.adminToggleShopUserActive(user, active) },
+            onDeleteShopUser = { user -> viewModel.adminDeleteShopUser(user) },
+            onDeleteBranchSnapshot = { snap -> viewModel.adminDeleteBranchSnapshot(snap) },
+            onShareWebPortal = { viewModel.shareAdminWebPortal(context) },
+            onDismiss = { showPaywallAdminConsole = false }
         )
     }
 
@@ -812,22 +893,14 @@ private fun BeBossRuntimeStatusBanner(
             else -> Icons.Default.CloudOff
         }
         val message = when {
-            startupIntegrityOk == false -> if (language == AppLanguage.KINYARWANDA)
-                "Igenzura ry'ububiko ryabonye ikibazo. Fungura Igenamiterere."
-            else "Database integrity warning detected."
-            clockRollbackDetected -> if (language == AppLanguage.KINYARWANDA)
-                "Isaha ya telefoni yasubiye inyuma. Kosora isaha kugira ngo sync ikore."
-            else "Device clock rollback detected; sync protection active."
-            deadLetterSyncCount > 0 -> if (language == AppLanguage.KINYARWANDA)
-                "Hari amakuru $deadLetterSyncCount yananiwe koherezwa kuri cloud."
-            else "$deadLetterSyncCount sync item(s) paused after retries."
-            else -> if (language == AppLanguage.KINYARWANDA)
-                "Nta internet — amakuru $pendingSyncCount abitswe neza, azoherezwa nimubona umuyoboro."
-            else "Offline mode — $pendingSyncCount change(s) queued safely."
+            startupIntegrityOk == false -> Localization.get("banner_db_warning", language)
+            clockRollbackDetected -> Localization.get("banner_clock_rollback", language)
+            deadLetterSyncCount > 0 -> "${Localization.get("banner_dead_letter", language)} ($deadLetterSyncCount)"
+            else -> "${Localization.get("banner_offline_queue", language)} ($pendingSyncCount)"
         }
         val actionLabel = when {
-            deadLetterSyncCount > 0 -> if (language == AppLanguage.KINYARWANDA) "Ongera" else "Retry"
-            isCritical -> if (language == AppLanguage.KINYARWANDA) "Reba" else "Inspect"
+            deadLetterSyncCount > 0 -> Localization.get("retry", language)
+            isCritical -> Localization.get("inspect", language)
             else -> null
         }
 

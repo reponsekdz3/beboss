@@ -3,7 +3,9 @@ package com.example.util
 import android.content.Context
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
+import android.security.keystore.StrongBoxUnavailableException
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
 import java.security.SecureRandom
@@ -12,13 +14,15 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.Mac
 import javax.crypto.SecretKey
+import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
  * Hardware-backed cryptographic key and AES-256-GCM envelope manager.
- * Uses AndroidKeyStore to wrap at-rest SQLCipher database passphrases and
- * provides domain-separated HKDF subkeys + AES-GCM encryption for LAN P2P sync.
+ * Uses AndroidKeyStore (preferring StrongBox on API 28+ with TEE fallback)
+ * to wrap at-rest SQLCipher database passphrases and provides domain-separated
+ * HKDF subkeys + AES-GCM encryption for LAN P2P sync.
  * Zero hardcoded secret keys or deterministic key fallbacks.
  */
 object CryptoKeyManager {
@@ -58,8 +62,8 @@ object CryptoKeyManager {
 
     /**
      * Retrieves or generates a random 32-byte SQLCipher passphrase wrapped with an
-     * AndroidKeyStore hardware AES-256-GCM master key. Fails closed on Android devices
-     * if AndroidKeyStore cannot protect the key (zero hardcoded passphrase fallbacks).
+     * AndroidKeyStore hardware AES-256-GCM master key (StrongBox preferred on API 28+).
+     * Fails closed on Android devices if AndroidKeyStore cannot protect the key.
      */
     @Synchronized
     fun getOrCreateDatabasePassphrase(context: Context): ByteArray {
@@ -106,6 +110,33 @@ object CryptoKeyManager {
             if (existing != null) return existing
         }
 
+        // Prefer dedicated StrongBox HSM on API 28+, transparently falling back to TEE AndroidKeyStore
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                return generateAndroidKeyStoreAesKey(
+                    alias = alias,
+                    requireUserAuth = requireUserAuth,
+                    useStrongBox = true
+                )
+            } catch (_: StrongBoxUnavailableException) {
+                // Device lacks StrongBox chip; fall back to hardware TEE AndroidKeyStore
+            } catch (_: Exception) {
+                // Some OEMs throw ProviderException when StrongBox cannot satisfy spec
+            }
+        }
+
+        return generateAndroidKeyStoreAesKey(
+            alias = alias,
+            requireUserAuth = requireUserAuth,
+            useStrongBox = false
+        )
+    }
+
+    private fun generateAndroidKeyStoreAesKey(
+        alias: String,
+        requireUserAuth: Boolean,
+        useStrongBox: Boolean
+    ): SecretKey {
         val keyGen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         val builder = KeyGenParameterSpec.Builder(
             alias,
@@ -115,6 +146,10 @@ object CryptoKeyManager {
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setKeySize(256)
             .setRandomizedEncryptionRequired(true)
+
+        if (useStrongBox && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            builder.setIsStrongBoxBacked(true)
+        }
 
         if (requireUserAuth) {
             builder.setUserAuthenticationRequired(true)
@@ -128,6 +163,35 @@ object CryptoKeyManager {
 
         keyGen.init(builder.build())
         return keyGen.generateKey()
+    }
+
+    /**
+     * Reports whether the database wrapping master key resides inside hardware security
+     * (StrongBox or TEE) for display in the Security & Diagnostics console.
+     */
+    fun getHardwareKeystoreStatus(): String {
+        if (isRobolectricJvm()) return "JVM Test Harness"
+        return try {
+            val ks = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+            val key = ks.getKey(DB_MASTER_KEY_ALIAS, null) as? SecretKey
+                ?: return "AndroidKeyStore Ready (Unprovisioned)"
+            val factory = SecretKeyFactory.getInstance(key.algorithm, ANDROID_KEYSTORE)
+            val info = factory.getKeySpec(key, KeyInfo::class.java) as? KeyInfo
+            if (info == null) return "AndroidKeyStore AES-256-GCM"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                when (info.securityLevel) {
+                    KeyProperties.SECURITY_LEVEL_STRONGBOX -> "StrongBox HSM (AES-256-GCM)"
+                    KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> "Hardware TEE (AES-256-GCM)"
+                    else -> "AndroidKeyStore Software"
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                if (info.isInsideSecureHardware) "Hardware TEE / StrongBox (AES-256-GCM)"
+                else "AndroidKeyStore AES-256-GCM"
+            }
+        } catch (_: Throwable) {
+            "AndroidKeyStore AES-256-GCM"
+        }
     }
 
     private fun wrapWithKeyStoreKey(key: SecretKey, plain: ByteArray): String {

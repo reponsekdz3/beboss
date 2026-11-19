@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class AdminConsoleCoordinator(
+    private val application: android.app.Application,
     private val repository: BeBossRepository,
     private val scope: CoroutineScope,
     private val currentUser: StateFlow<User?>,
@@ -68,9 +69,12 @@ class AdminConsoleCoordinator(
     private val _isAdminLoading = MutableStateFlow(false)
     val isAdminLoading: StateFlow<Boolean> = _isAdminLoading.asStateFlow()
 
+    private val _adminLastSyncedAt = MutableStateFlow(0L)
+    val adminLastSyncedAt: StateFlow<Long> = _adminLastSyncedAt.asStateFlow()
+
     private fun resolveOwnerUser(): User? {
-        return currentUser.value
-            ?: allUsers.value.firstOrNull { it.role == UserRole.OWNER }
+        return allUsers.value.firstOrNull { it.role == UserRole.OWNER }
+            ?: currentUser.value
             ?: allUsers.value.firstOrNull()
     }
 
@@ -268,6 +272,7 @@ class AdminConsoleCoordinator(
             _adminBranchSnapshots.value = SupabaseAdminClient.fetchAllBranchSnapshots()
             _adminUnlockCodes.value = SupabaseAdminClient.fetchAllUnlockCodes()
             _adminAuditLogs.value = SupabaseAdminClient.fetchAdminAuditLogs()
+            _adminLastSyncedAt.value = System.currentTimeMillis()
             _isAdminLoading.value = false
         }
     }
@@ -546,6 +551,27 @@ class AdminConsoleCoordinator(
         }
     }
 
+    fun adminResetShopTrial(shop: SupabaseShopAccountDto, trialDays: Int = ShopProfile.FREE_TRIAL_DAYS) {
+        scope.launch {
+            _isAdminLoading.value = true
+            val ok = SupabaseAdminClient.adminResetShopTrial(shop, trialDays)
+            if (ok) {
+                repository.recordLocalAudit(
+                    actorName = _adminSession.value?.fullName ?: "MASTER_ADMIN",
+                    actorRole = "MASTER_ADMIN",
+                    action = "ADMIN_RESET_TRIAL",
+                    targetId = shop.ownerUsername,
+                    details = "Reset ${shop.shopName} to ${trialDays}-day TRIAL"
+                )
+                refreshAdminDashboardData()
+                emitSnackbar("Reset ${shop.shopName} to $trialDays-day Free Trial.")
+            } else {
+                emitSnackbar("Failed resetting trial in Supabase.")
+            }
+            _isAdminLoading.value = false
+        }
+    }
+
     fun processDirectSubscriptionPayment(
         provider: String,
         phone: String,
@@ -555,6 +581,7 @@ class AdminConsoleCoordinator(
     ) {
         scope.launch {
             val currentProf = shopProfile.value
+            val owner = resolveOwnerUser()
             val branchCount = branches.value.size.coerceAtLeast(1)
             val workerCount = allUsers.value.size.coerceAtLeast(1)
             val breakdown = OfflineSubscriptionManager.calculateSubscriptionPrice(
@@ -562,35 +589,45 @@ class AdminConsoleCoordinator(
                 workerCount = workerCount,
                 durationMonths = durationMonths
             )
-            val pastRefs = setOfNotNull(currentProf.lastPaymentRef)
-            val result = OfflineSubscriptionManager.processDirectMoMoPayment(
+            val pastRefs = setOfNotNull(currentProf.lastPaymentRef.takeIf { it.isNotBlank() })
+            val result = OfflineSubscriptionManager.processMoMoPaymentAsync(
+                context = application,
                 shopProfile = currentProf,
                 payerPhone = phone,
                 provider = provider,
                 branchCount = branchCount,
                 workerCount = workerCount,
                 durationMonths = durationMonths,
-                smsTransactionReference = userReference,
+                userEnteredReference = userReference,
                 alreadyUsedRefs = pastRefs
             )
 
             if (result.isSuccess) {
-                val currentExpiry = if (currentProf.subscriptionExpiresAt > System.currentTimeMillis())
+                val now = com.example.util.ClockGuard.effectiveNowMs()
+                val currentExpiry = if (currentProf.subscriptionExpiresAt > now && !currentProf.isSuspended)
                     currentProf.subscriptionExpiresAt
-                else System.currentTimeMillis()
-                val newExpiry = currentExpiry + (result.planDays.toLong() * 24 * 60 * 60 * 1000)
+                else now
+                val newExpiry = currentExpiry + (result.planDays.toLong() * 24 * 60 * 60 * 1000L)
 
                 val updatedProf = currentProf.copy(
-                    subscriptionStatus = "ACTIVE",
+                    subscriptionStatus = ShopProfile.STATUS_ACTIVE,
                     subscriptionExpiresAt = newExpiry,
                     lastPaymentRef = result.transactionRef,
                     lastPaymentAmount = result.amountPaid,
-                    lastPaymentDate = result.timestamp,
+                    lastPaymentDate = now,
                     monthlyFeeRwf = breakdown.monthlySubtotal,
-                    updatedAt = result.timestamp
+                    updatedAt = now
                 )
                 repository.updateShopProfile(updatedProf)
+                repository.recordLocalAudit(
+                    actorName = owner?.name ?: currentProf.name.ifBlank { "Shop Owner" },
+                    actorRole = owner?.role?.name ?: "OWNER",
+                    action = "ONLINE_PAYMENT_VERIFIED",
+                    targetId = result.transactionRef,
+                    details = "$provider verified ${result.amountPaid} FRw (+${result.planDays}d)"
+                )
                 emitSnackbar(result.message)
+                syncAdminDataToSupabase(silent = true)
                 triggerCloudSync()
             } else {
                 emitSnackbar(result.message)

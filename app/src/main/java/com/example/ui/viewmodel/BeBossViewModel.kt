@@ -81,13 +81,33 @@ enum class AppScreen(val stringKey: String, val title: String) {
     SETTINGS("settings", "Settings")
 }
 
+data class HeldCart(
+    val id: String = UUID.randomUUID().toString(),
+    val label: String,
+    val heldAt: Long = System.currentTimeMillis(),
+    val items: List<CartItem>,
+    val selectedCustomerId: String? = null,
+    val selectedCustomerName: String = "Walk-in Customer",
+    val discountAmount: Double = 0.0,
+    val paymentMethod: String = "CASH",
+    val notes: String = ""
+) {
+    val netTotal: Double
+        get() = (items.sumOf { it.effectiveUnitPrice * it.quantity } - discountAmount).coerceAtLeast(0.0)
+
+    val totalUnits: Double
+        get() = items.sumOf { it.quantity }
+}
+
 data class CartState(
     val items: List<CartItem> = emptyList(),
     val selectedCustomerId: String? = null,
     val selectedCustomerName: String = "Walk-in Customer",
     val discountAmount: Double = 0.0,
-    val paymentMethod: String = "CASH", // CASH, MOMO, AIRTEL, CARD, CREDIT_DEBT
+    val paymentMethod: String = "CASH", // CASH, MOMO, AIRTEL, CARD, SPLIT, CREDIT_DEBT
     val amountPaidInput: String = "",
+    val splitCashInput: String = "",
+    val splitMomoInput: String = "",
     val notes: String = ""
 ) {
     val rawTotal: Double
@@ -102,8 +122,29 @@ data class CartState(
     val estimatedProfit: Double
         get() = netTotal - totalCost
 
+    val splitCashAmount: Double
+        get() = (splitCashInput.toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0)
+
+    val splitMomoAmount: Double
+        get() = (splitMomoInput.toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0)
+
+    val splitTotalPaid: Double
+        get() = com.example.util.MoneyUtils.centsToDouble(
+            com.example.util.MoneyUtils.toCents(splitCashAmount) +
+                com.example.util.MoneyUtils.toCents(splitMomoAmount)
+        )
+
+    val splitRemainingAmount: Double
+        get() = com.example.util.MoneyUtils.centsToDouble(
+            (com.example.util.MoneyUtils.toCents(netTotal) -
+                com.example.util.MoneyUtils.toCents(splitTotalPaid)).coerceAtLeast(0L)
+        )
+
     val effectiveAmountPaid: Double
         get() {
+            if (paymentMethod == "SPLIT") {
+                return if (splitTotalPaid > 0.0) splitTotalPaid else netTotal
+            }
             val parsed = amountPaidInput.toDoubleOrNull()
             return when {
                 parsed != null -> parsed
@@ -129,14 +170,15 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     val deviceIntegrityStatus: StateFlow<DeviceIntegrityStatus> = _deviceIntegrityStatus.asStateFlow()
 
     private var idleLockJob: Job? = null
-    private val idleLockTimeoutMs: Long = 5 * 60_000L
+    private val _idleLockMinutes = MutableStateFlow(prefs.getInt("idle_lock_minutes", 5).coerceIn(1, 60))
+    val idleLockMinutes: StateFlow<Int> = _idleLockMinutes.asStateFlow()
 
     private val _snackbarMessage = MutableSharedFlow<String>()
     val snackbarMessage: SharedFlow<String> = _snackbarMessage.asSharedFlow()
 
-    // Language & Theme State
+    // Language & Theme State (EN / RW / FR / SW — 100% local offline translations)
     private val _currentLanguage = MutableStateFlow(
-        if (prefs.getString("lang", "en") == "rw") AppLanguage.KINYARWANDA else AppLanguage.ENGLISH
+        AppLanguage.fromCode(prefs.getString("lang", "en"))
     )
     val currentLanguage: StateFlow<AppLanguage> = _currentLanguage.asStateFlow()
 
@@ -327,6 +369,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         )
 
         adminCoordinator = AdminConsoleCoordinator(
+            application = application,
             repository = repository,
             scope = viewModelScope,
             currentUser = authCoordinator.currentUser,
@@ -387,13 +430,21 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun onUserInteraction() {
         idleLockJob?.cancel()
         if (!isLocked.value && !isRegistrationNeeded.value) {
+            val timeoutMs = _idleLockMinutes.value.coerceIn(1, 60) * 60_000L
             idleLockJob = viewModelScope.launch {
-                delay(idleLockTimeoutMs)
+                delay(timeoutMs)
                 if (!isLocked.value && !isRegistrationNeeded.value) {
                     lockApp()
                 }
             }
         }
+    }
+
+    fun setIdleLockMinutes(minutes: Int) {
+        val clamped = minutes.coerceIn(1, 60)
+        _idleLockMinutes.value = clamped
+        prefs.edit().putInt("idle_lock_minutes", clamped).apply()
+        onUserInteraction()
     }
 
     // Delegated Auth Flows
@@ -404,6 +455,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
 
     // Delegated POS Flows
     val cartState: StateFlow<CartState> = posCoordinator.cartState
+    val heldCarts: StateFlow<List<HeldCart>> = posCoordinator.heldCarts
     val activeReceiptSale: StateFlow<SaleWithItems?> = posCoordinator.activeReceiptSale
 
     // Delegated Sync & LAN P2P Flows
@@ -431,6 +483,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     val adminUnlockCodes: StateFlow<List<SupabaseUnlockCodeDto>> = adminCoordinator.adminUnlockCodes
     val adminAuditLogs: StateFlow<List<SupabaseAuditLogDto>> = adminCoordinator.adminAuditLogs
     val isAdminLoading: StateFlow<Boolean> = adminCoordinator.isAdminLoading
+    val adminLastSyncedAt: StateFlow<Long> = adminCoordinator.adminLastSyncedAt
 
     // Delegated Database Engine Flows
     val databaseStats: StateFlow<DatabaseEngineStats?> = dbCoordinator.databaseStats
@@ -442,7 +495,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     // LANGUAGE, THEME & NAVIGATION
     // ------------------------------------------------------------------------
     fun toggleLanguage() {
-        val next = if (_currentLanguage.value == AppLanguage.ENGLISH) AppLanguage.KINYARWANDA else AppLanguage.ENGLISH
+        val next = _currentLanguage.value.next()
         _currentLanguage.value = next
         prefs.edit().putString("lang", next.code).apply()
     }
@@ -514,7 +567,12 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     fun setCartPaymentMethod(method: String) = posCoordinator.setCartPaymentMethod(method)
     fun setCartDiscount(discount: Double) = posCoordinator.setCartDiscount(discount)
     fun setCartAmountPaidInput(input: String) = posCoordinator.setCartAmountPaidInput(input)
+    fun setCartSplitCashInput(input: String) = posCoordinator.setCartSplitCashInput(input)
+    fun setCartSplitMomoInput(input: String) = posCoordinator.setCartSplitMomoInput(input)
     fun setCartNotes(notes: String) = posCoordinator.setCartNotes(notes)
+    fun holdCurrentCart(label: String = "") = posCoordinator.holdCurrentCart(label)
+    fun resumeHeldCart(heldId: String) = posCoordinator.resumeHeldCart(heldId)
+    fun deleteHeldCart(heldId: String) = posCoordinator.deleteHeldCart(heldId)
     fun checkoutSale() = posCoordinator.checkoutSale()
     fun performQuickCustomSale(description: String, amount: Double, paymentMethod: String, isDirectCheckout: Boolean = true) =
         posCoordinator.performQuickCustomSale(description, amount, paymentMethod, isDirectCheckout)
@@ -584,6 +642,8 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     ) = adminCoordinator.adminIssueManualCode(username, registeredPhone, tierCode, days, amountRwf, onGenerated)
 
     fun adminExtendShopSubscription(shop: SupabaseShopAccountDto, addDays: Int) = adminCoordinator.adminExtendShopSubscription(shop, addDays)
+    fun adminResetShopTrial(shop: SupabaseShopAccountDto, trialDays: Int = ShopProfile.FREE_TRIAL_DAYS) =
+        adminCoordinator.adminResetShopTrial(shop, trialDays)
     fun adminSetShopStatus(shop: SupabaseShopAccountDto, status: String) = adminCoordinator.adminSetShopStatus(shop, status)
     fun adminUpdateShopLimits(shop: SupabaseShopAccountDto, branchCount: Int, workerCount: Int) =
         adminCoordinator.adminUpdateShopLimits(shop, branchCount, workerCount)
@@ -1050,19 +1110,36 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun deleteSale(saleId: String) {
+    fun deleteSale(saleId: String, refundReason: String = "") {
         viewModelScope.launch {
             try {
+                val saleSnapshot = allSales.value.firstOrNull { it.id == saleId }
                 repository.deleteSale(saleId, actor = currentUser.value)
+                repository.recordLocalAudit(
+                    actorName = currentUser.value?.name ?: "Manager",
+                    actorRole = currentUser.value?.role?.name ?: "MANAGER",
+                    action = "SALE_REFUNDED_VOIDED",
+                    targetId = saleSnapshot?.receiptNumber ?: saleId,
+                    details = buildString {
+                        append("Voided/refunded receipt #${saleSnapshot?.receiptNumber ?: saleId}")
+                        if (saleSnapshot != null) {
+                            append(" (${saleSnapshot.totalAmount.toLong()} ${shopProfile.value.currencySymbol})")
+                        }
+                        if (refundReason.isNotBlank()) {
+                            append(" • Reason: ${refundReason.trim()}")
+                        }
+                    }
+                )
+                scheduleAutoBranchSync()
                 refreshDatabaseStats()
                 val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                    "Ibyagurishijwe byasibwe, ububiko bwasubijweho."
-                else "Sale transaction deleted and stock restored."
+                    "Igurisha ryasubijwe/ryasibwe neza, ububiko bwasubijweho."
+                else "Sale refunded/voided with audit log and stock restored."
                 _snackbarMessage.emit(msg)
             } catch (e: SecurityException) {
-                _snackbarMessage.emit(e.message ?: "Permission denied")
+                _snackbarMessage.emit(e.message ?: "Manager/Owner approval required to refund or void sales.")
             } catch (e: Exception) {
-                _snackbarMessage.emit("Failed to delete sale: ${e.message}")
+                _snackbarMessage.emit("Failed to refund/void sale: ${e.message}")
             }
         }
     }

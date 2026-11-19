@@ -9,6 +9,7 @@ import com.example.data.model.UserRole
 import com.example.data.repository.BeBossRepository
 import com.example.util.AppLanguage
 import com.example.util.AuthRateLimiter
+import com.example.util.Localization
 import com.example.util.SecurityUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -90,6 +91,7 @@ class AuthSessionCoordinator(
                     return@launch
                 }
 
+                val now = com.example.util.ClockGuard.effectiveNowMs()
                 val profile = ShopProfile(
                     id = 1L,
                     name = ownerFullName.trim(),
@@ -99,13 +101,13 @@ class AuthSessionCoordinator(
                     address = address.trim().ifBlank { "Kigali, Rwanda" },
                     currencyCode = currencyCode.trim(),
                     currencySymbol = currencySymbol.trim(),
-                    subscriptionStatus = "ACTIVE",
+                    subscriptionStatus = ShopProfile.STATUS_TRIAL,
                     monthlyFeeRwf = 5000,
-                    subscriptionExpiresAt = System.currentTimeMillis() + (30L * 24 * 60 * 60 * 1000),
-                    trialStartedAt = System.currentTimeMillis(),
-                    receiptFooter = if (language.value == AppLanguage.KINYARWANDA)
-                        "Murakoze cyane! Mwongere kugaruka!"
-                    else "Thank you for your business! Please visit again!"
+                    subscriptionExpiresAt = now + ShopProfile.FREE_TRIAL_DURATION_MS,
+                    trialStartedAt = now,
+                    lastPaymentRef = "FREE-TRIAL-4D",
+                    lastPaymentAmount = 0,
+                    receiptFooter = Localization.get("default_receipt_footer", language.value)
                 )
                 repository.updateShopProfile(profile)
 
@@ -151,7 +153,7 @@ class AuthSessionCoordinator(
                     actorRole = ownerUser.role.name,
                     action = "SHOP_REGISTERED",
                     targetId = ownerUser.username,
-                    details = "Initialized shop '${profile.shopName}' with PBKDF2-secured owner credentials"
+                    details = "Initialized shop '${profile.shopName}' on ${ShopProfile.FREE_TRIAL_DAYS}-Day Free Trial with PBKDF2 owner credentials"
                 )
 
                 prefs.edit().putString("active_user_id", ownerUser.id).apply()
@@ -159,7 +161,7 @@ class AuthSessionCoordinator(
                 _isRegistrationNeeded.value = false
                 _isLocked.value = false
                 _authError.value = null
-                emitSnackbar("Store '$shopName' & Owner account created successfully!")
+                emitSnackbar("${shopName.trim()} — ${Localization.get("reg_success_trial", language.value)}")
             } catch (e: Exception) {
                 _authError.value = "Registration failed: ${e.message}"
             }
@@ -200,9 +202,7 @@ class AuthSessionCoordinator(
                     targetId = user.username,
                     details = "Unlocked terminal via PBKDF2 PIN verification"
                 )
-                val welcome = if (language.value == AppLanguage.KINYARWANDA)
-                    "Murakaza neza, ${user.name}!"
-                else "Welcome back, ${user.name}!"
+                val welcome = "${Localization.get("welcome_back_prefix", language.value)}, ${user.name}!"
                 emitSnackbar(welcome)
             } else {
                 val failResult = AuthRateLimiter.recordFailure(rateKey, application)
@@ -210,12 +210,8 @@ class AuthSessionCoordinator(
                     failResult.message
                 } else {
                     val remainingBeforeLockout = (3 - failResult.failedAttempts).coerceAtLeast(0)
-                    val attemptsNote = if (remainingBeforeLockout > 0) {
-                        " ($remainingBeforeLockout attempts before lockout)"
-                    } else ""
-                    if (language.value == AppLanguage.KINYARWANDA)
-                        "Umubare wa PIN si wo. Ongera ugerageze.$attemptsNote"
-                    else "Incorrect PIN code. Please try again.$attemptsNote"
+                    val attemptsNote = if (remainingBeforeLockout > 0) " ($remainingBeforeLockout)" else ""
+                    "${Localization.get("incorrect_pin", language.value)}$attemptsNote"
                 }
                 repository.recordLocalAudit(
                     actorName = _currentUser.value?.username ?: "Unknown",
@@ -250,9 +246,7 @@ class AuthSessionCoordinator(
         scope.launch {
             val user = repository.getUserByUsername(cleanUsername)
             if (user != null && !user.isActive) {
-                _authError.value = if (language.value == AppLanguage.KINYARWANDA)
-                    "Konti yawe yahagaritswe n'Umuyobozi Mukuru (Admin)."
-                else "Account suspended by Master Administrator."
+                _authError.value = Localization.get("account_suspended_err", language.value)
                 repository.recordLocalAudit(
                     actorName = user.username,
                     actorRole = user.role.name,
@@ -281,18 +275,14 @@ class AuthSessionCoordinator(
                     targetId = user.username,
                     details = "Authenticated with PBKDF2 password/PIN"
                 )
-                val welcome = if (language.value == AppLanguage.KINYARWANDA)
-                    "Winjiye nka ${user.name} (${user.role.displayName})"
-                else "Logged in as ${user.name} (${user.role.displayName})"
+                val welcome = "${Localization.get("logged_in_as_prefix", language.value)} ${user.name} (${user.role.displayName})"
                 emitSnackbar(welcome)
             } else {
                 val failResult = AuthRateLimiter.recordFailure(rateKey, application)
                 _authError.value = if (!failResult.allowed) {
                     failResult.message
                 } else {
-                    if (language.value == AppLanguage.KINYARWANDA)
-                        "Izina cyangwa ijambobanga si byo"
-                    else "Invalid username or password"
+                    Localization.get("invalid_credentials", language.value)
                 }
                 repository.recordLocalAudit(
                     actorName = cleanUsername.ifBlank { "Unknown" },
@@ -340,9 +330,7 @@ class AuthSessionCoordinator(
         val active = _currentUser.value
         if (!verifiedByHardware || active == null || !active.isActive) {
             _isLocked.value = true
-            _authError.value = if (language.value == AppLanguage.KINYARWANDA)
-                "Igikumwe cyemejwe n'igikoresho kirakenewe kuri konti iriho."
-            else "Hardware biometric verification and an active account are required."
+            _authError.value = Localization.get("biometric_required_err", language.value)
             scope.launch {
                 repository.recordLocalAudit(
                     actorName = active?.username ?: "Unknown",
@@ -369,10 +357,7 @@ class AuthSessionCoordinator(
                 targetId = active.username,
                 details = "Unlocked via BIOMETRIC_STRONG CryptoObject"
             )
-            val welcome = if (language.value == AppLanguage.KINYARWANDA)
-                "Urubuga rufunguwe n'igikumwe: ${active.name}"
-            else "Unlocked with biometric: ${active.name}"
-            emitSnackbar(welcome)
+            emitSnackbar("${Localization.get("unlocked_biometric_prefix", language.value)}: ${active.name}")
         }
     }
 
@@ -412,7 +397,7 @@ class AuthSessionCoordinator(
                     details = "Operator logged out"
                 )
             }
-            emitSnackbar("Logged out successfully.")
+            emitSnackbar(Localization.get("logged_out_success", language.value))
         }
     }
 
@@ -421,7 +406,7 @@ class AuthSessionCoordinator(
         _isLocked.value = true
         _authError.value = null
         scope.launch {
-            emitSnackbar("Selected operator ${user.name} — enter PIN to unlock.")
+            emitSnackbar("${user.name} — ${Localization.get("selected_operator_pin_prompt", language.value)}")
         }
     }
 

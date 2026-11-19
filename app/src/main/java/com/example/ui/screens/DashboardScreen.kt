@@ -223,11 +223,17 @@ fun DashboardScreen(
                     }
                 }
 
-                // Monthly Subscription Countdown Pill
+                // Monthly Subscription / 4-Day Free Trial Countdown Pill
                 val subColor = when {
                     daysRemaining <= 0 -> LossRed
+                    shopProfile.isFreeTrial -> OrangePrimary
                     daysRemaining <= 5 -> WarningAmber
                     else -> ProfitGreen
+                }
+                val subPillLabel = when {
+                    daysRemaining <= 0 -> "Locked"
+                    shopProfile.isFreeTrial -> "Trial ${daysRemaining}d"
+                    else -> "${daysRemaining}d"
                 }
                 Surface(
                     onClick = { onNavigate(AppScreen.SETTINGS) },
@@ -245,10 +251,80 @@ fun DashboardScreen(
                     ) {
                         Icon(Icons.Default.VerifiedUser, contentDescription = "License status", tint = subColor, modifier = Modifier.size(14.dp))
                         Text(
-                            text = if (daysRemaining > 0) "${daysRemaining}d" else "Renew",
+                            text = subPillLabel,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = subColor
+                        )
+                    }
+                }
+            }
+        }
+
+        // 4-Day Free Trial Countdown Banner (Visible during active trial)
+        if (shopProfile.isFreeTrial && shopProfile.isSubscriptionActive) {
+            item {
+                val hoursLeft = shopProfile.hoursRemaining
+                val isUrgent = hoursLeft <= 24
+                val accent = if (isUrgent) LossRed else OrangePrimary
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("dashboard_trial_banner"),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = 0.09f)),
+                    border = BorderStroke(1.dp, accent.copy(alpha = 0.35f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (language == AppLanguage.KINYARWANDA)
+                                        "IGERAGEZA RY'IMINSI 4 Y'UBUNTU"
+                                    else "4-DAY FREE TRIAL ACTIVE",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = accent,
+                                    letterSpacing = 0.8.sp
+                                )
+                                Text(
+                                    text = if (language == AppLanguage.KINYARWANDA)
+                                        "Hasigaye iminsi $daysRemaining (${hoursLeft}h) mbere y'uko porogaramu ifungwa."
+                                    else "$daysRemaining day(s) (${hoursLeft}h) left before terminal locks for activation.",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = { onNavigate(AppScreen.SETTINGS) },
+                                colors = ButtonDefaults.buttonColors(containerColor = accent),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.testTag("dashboard_trial_activate_button")
+                            ) {
+                                Text(
+                                    text = if (language == AppLanguage.KINYARWANDA) "Fungura" else "Activate",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        androidx.compose.material3.LinearProgressIndicator(
+                            progress = { shopProfile.trialProgressFraction },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp),
+                            color = accent,
+                            trackColor = accent.copy(alpha = 0.2f)
                         )
                     }
                 }

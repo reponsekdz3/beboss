@@ -103,7 +103,9 @@ import com.example.ui.theme.OrangeLight
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
 import com.example.ui.theme.WarningAmber
+import com.example.util.AppLanguage
 import com.example.util.ExcelCsvExporter
+import com.example.util.Localization
 import com.example.util.PdfReportGenerator
 import com.example.util.ReceiptGenerator
 import java.util.UUID
@@ -120,6 +122,7 @@ fun InventoryScreen(
     shopProfile: ShopProfile,
     purchases: List<PurchaseRecord> = emptyList(),
     purchaseSummary: PurchaseSummary = PurchaseSummary(),
+    language: AppLanguage = AppLanguage.ENGLISH,
     onSaveProduct: (Product) -> Unit,
     onAdjustStock: (String, Double, String) -> Unit,
     onDeleteProduct: (String) -> Unit,
@@ -213,7 +216,7 @@ fun InventoryScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Stock Spreadsheet",
+                                text = Localization.get("excel_mode", language),
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (selectedInventoryTab == 0) Color.White else InkDark
@@ -240,7 +243,7 @@ fun InventoryScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Purchases & Inflow (${purchases.size})",
+                                text = "${Localization.get("inventory_title", language)} (${purchases.size})",
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (selectedInventoryTab == 1) Color.White else InkDark

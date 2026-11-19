@@ -123,8 +123,8 @@ class SyncResilienceTest {
             db.syncQueueDao().enqueue(
                 SyncQueueItem(
                     id = "sq_dlq_1",
-                    entityType = "SALE",
-                    entityId = "s_1",
+                    tableName = "sales",
+                    recordId = "s_1",
                     operation = "UPSERT",
                     payloadJson = "{}",
                     status = "DEAD_LETTER"

@@ -98,12 +98,15 @@ class AuthSecurityTest {
 
             assertTrue(coord.isLocked.value)
             assertNotNull(coord.authError.value)
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
             delay(150)
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
 
             val audits = db.localAuditLogDao().getRecentLogsDirect(10)
             assertTrue(audits.any { it.action == "UNLOCK_BIOMETRIC_REJECTED" })
         } finally {
             scope.cancel()
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
             db.close()
         }
     }

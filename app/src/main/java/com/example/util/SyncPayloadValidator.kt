@@ -5,11 +5,12 @@ import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 
 /**
- * Strict schema, size, nesting-depth, and numeric bounds validator for all incoming
- * DataShare packages, P2P LAN packets, and cloud snapshots.
+ * Strict schema, version, size, nesting-depth, foreign-key, and numeric bounds validator
+ * for all incoming DataShare packages, P2P LAN packets, and cloud snapshots.
  */
 object SyncPayloadValidator {
 
+    const val CURRENT_SCHEMA_VERSION = 3
     const val MAX_RAW_PAYLOAD_BYTES = 5 * 1024 * 1024 // 5 MB max JSON package
     const val MAX_TOKEN_LENGTH = 4 * 1024 * 1024
     const val MAX_JSON_DEPTH = 12
@@ -49,6 +50,14 @@ object SyncPayloadValidator {
             allowedArrayKeys.any { root.has(it) }
         require(hasKnownSection) { "Unrecognized BeBoss sync payload schema." }
 
+        // Enforce schema version compatibility when declared
+        val declaredSchemaVersion = root.optInt("schemaVersion",
+            root.optJSONObject("metadata")?.optInt("schemaVersion", 1) ?: 1
+        )
+        require(declaredSchemaVersion in 1..CURRENT_SCHEMA_VERSION) {
+            "Unsupported sync schema version ($declaredSchemaVersion > $CURRENT_SCHEMA_VERSION). Update BeBoss before importing."
+        }
+
         for (key in allowedArrayKeys) {
             if (!root.has(key)) continue
             val arr = root.optJSONArray(key)
@@ -59,9 +68,29 @@ object SyncPayloadValidator {
             validateArrayEntries(key, arr)
         }
 
+        // Cross-section referential integrity: prevent orphan saleItems when sales array is included
+        val salesArr = root.optJSONArray("sales")
+        val saleItemsArr = root.optJSONArray("saleItems")
+        if (salesArr != null && saleItemsArr != null) {
+            val saleIds = HashSet<String>(salesArr.length())
+            for (i in 0 until salesArr.length()) {
+                val id = salesArr.optJSONObject(i)?.optString("id", "").orEmpty().trim()
+                if (id.isNotEmpty()) saleIds.add(id)
+            }
+            for (i in 0 until saleItemsArr.length()) {
+                val item = saleItemsArr.optJSONObject(i) ?: continue
+                val fkSaleId = item.optString("saleId", "").trim()
+                require(fkSaleId.isNotEmpty() && fkSaleId in saleIds) {
+                    "Orphan foreign key at saleItems[$i]: saleId '$fkSaleId' missing from sales."
+                }
+            }
+        }
+
         root.optJSONObject("shopProfile")?.let { sp ->
             val taxRate = sp.optDouble("taxRate", 0.0)
             require(taxRate.isFinite() && taxRate in 0.0..100.0) { "Invalid shopProfile taxRate." }
+            val monthlyFee = sp.optInt("monthlyFeeRwf", 5000)
+            require(monthlyFee >= 0) { "Invalid shopProfile monthlyFeeRwf." }
         }
 
         return root
@@ -76,6 +105,12 @@ object SyncPayloadValidator {
                 "Missing or invalid record id at $section[$i]."
             }
             when (section) {
+                "branches" -> {
+                    require(obj.optString("name", "").isNotBlank()) { "Blank branch name at branches[$i]." }
+                }
+                "users" -> {
+                    require(obj.optString("username", "").isNotBlank()) { "Blank username at users[$i]." }
+                }
                 "products" -> {
                     require(obj.optString("name", "").isNotBlank()) { "Blank product name at products[$i]." }
                     assertFiniteNonNegative(obj.optDouble("costPrice", 0.0), "products[$i].costPrice")
@@ -93,10 +128,14 @@ object SyncPayloadValidator {
                     assertFiniteNonNegative(obj.optDouble("discountAmount", 0.0), "sales[$i].discountAmount")
                 }
                 "saleItems" -> {
+                    require(obj.optString("saleId", "").isNotBlank()) { "Blank saleId at saleItems[$i]." }
                     assertFiniteNonNegative(obj.optDouble("quantitySold", 0.0), "saleItems[$i].quantitySold")
+                    assertFiniteNonNegative(obj.optDouble("unitPriceAtSale", 0.0), "saleItems[$i].unitPriceAtSale")
+                    assertFiniteNonNegative(obj.optDouble("costPriceAtSale", 0.0), "saleItems[$i].costPriceAtSale")
                     assertFiniteNonNegative(obj.optDouble("subtotal", 0.0), "saleItems[$i].subtotal")
                 }
                 "customerPayments" -> {
+                    require(obj.optString("customerId", "").isNotBlank()) { "Blank customerId at customerPayments[$i]." }
                     assertFiniteNonNegative(obj.optDouble("amount", 0.0), "customerPayments[$i].amount")
                 }
                 "purchases" -> {

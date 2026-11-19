@@ -132,6 +132,7 @@ fun AuthLockScreen(
     onSelectUser: (User) -> Unit,
     onClearError: () -> Unit,
     onToggleLanguage: () -> Unit,
+    onSelectLanguage: ((AppLanguage) -> Unit)? = null,
     onToggleTheme: () -> Unit,
     onOpenRegister: () -> Unit
 ) {
@@ -175,33 +176,43 @@ fun AuthLockScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // 1. Top Bar Controls
+            // 1. Top Bar Controls: 1-Tap 4-Language Selector + Theme Toggle
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    onClick = onToggleLanguage,
-                    shape = RoundedCornerShape(16.dp),
-                    color = topPillBg,
-                    border = BorderStroke(1.dp, topPillBorder),
-                    shadowElevation = if (isDarkTheme) 0.dp else 2.dp,
-                    modifier = Modifier.heightIn(min = 48.dp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(Icons.Default.Translate, contentDescription = "Toggle Language", tint = topPillText, modifier = Modifier.size(16.dp))
-                        Text(
-                            text = if (language == AppLanguage.ENGLISH) "EN • English" else "RW • Ikinyarwanda",
-                            fontFamily = GopherFontFamily,
-                            color = topPillText,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                    AppLanguage.entries.forEach { langOption ->
+                        val isSelected = langOption == language
+                        Surface(
+                            onClick = {
+                                if (onSelectLanguage != null) onSelectLanguage(langOption) else onToggleLanguage()
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) OrangePrimary else topPillBg,
+                            border = BorderStroke(1.dp, if (isSelected) OrangePrimary else topPillBorder),
+                            shadowElevation = if (isDarkTheme) 0.dp else 2.dp,
+                            modifier = Modifier
+                                .heightIn(min = 42.dp)
+                                .testTag("auth_lang_${langOption.code}")
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = langOption.flag,
+                                    fontFamily = GopherFontFamily,
+                                    color = if (isSelected) Color.White else topPillText,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -216,7 +227,7 @@ fun AuthLockScreen(
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
-                            contentDescription = "Toggle Theme",
+                            contentDescription = Localization.get("theme", language),
                             tint = if (isDarkTheme) Color(0xFFFFD166) else OrangePrimary,
                             modifier = Modifier.size(20.dp)
                         )
@@ -273,7 +284,7 @@ fun AuthLockScreen(
                             text = if (activeUser != null) {
                                 "${activeUser.assignedBranchName.ifBlank { "HQ" }.uppercase()} • @${activeUser.username}"
                             } else {
-                                "OFFLINE-FIRST BRANCH POS"
+                                Localization.get("offline_branch_pos_badge", language)
                             },
                             fontFamily = GopherFontFamily,
                             fontSize = 10.sp,
@@ -294,7 +305,7 @@ fun AuthLockScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = if (language == AppLanguage.KINYARWANDA) "HITAMO UMUKOZI WO KWINJIRA" else "OPERATOR TERMINAL",
+                        text = Localization.get("operator_terminal_header", language),
                         fontFamily = GopherFontFamily,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.ExtraBold,
@@ -395,7 +406,7 @@ fun AuthLockScreen(
                             onClick = { selectedTab = 0; onClearError() },
                             text = {
                                 Text(
-                                    text = if (language == AppLanguage.KINYARWANDA) "PIN (4)" else "Fast 4-Digit PIN",
+                                    text = Localization.get("fast_pin_tab", language),
                                     fontFamily = GopherFontFamily,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
@@ -408,7 +419,7 @@ fun AuthLockScreen(
                             onClick = { selectedTab = 1; onClearError() },
                             text = {
                                 Text(
-                                    text = if (language == AppLanguage.KINYARWANDA) "Ijambobanga" else "Username & Password",
+                                    text = Localization.get("credentials_tab", language),
                                     fontFamily = GopherFontFamily,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
@@ -527,7 +538,7 @@ fun AuthLockScreen(
                                 IconButton(onClick = { showPassword = !showPassword }) {
                                     Icon(
                                         imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                        contentDescription = "Toggle password",
+                                        contentDescription = Localization.get("toggle_password", language),
                                         tint = textSecondary
                                     )
                                 }
@@ -610,11 +621,12 @@ fun ShopRegistrationScreen(
     onRegister: (shopName: String, currencyCode: String, currencySymbol: String, address: String, phone: String, ownerName: String, username: String, pin: String, password: String) -> Unit,
     onCancel: () -> Unit,
     onToggleLanguage: () -> Unit,
+    onSelectLanguage: ((AppLanguage) -> Unit)? = null,
     onToggleTheme: () -> Unit
 ) {
     var step by remember { mutableIntStateOf(0) } // 0, 1, 2
     var shopName by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf("Retail & Grocery") }
+    var selectedCategory by remember { mutableStateOf("sector_retail") }
     var currencySymbol by remember { mutableStateOf("FRw") }
     var currencyCode by remember { mutableStateOf("RWF") }
     var phone by remember { mutableStateOf("+250 ") }
@@ -627,14 +639,14 @@ fun ShopRegistrationScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val categories = listOf(
-        Pair("Retail & Grocery", Icons.Default.Storefront),
-        Pair("Fashion & Boutique", Icons.Default.Checkroom),
-        Pair("Electronics & Phones", Icons.Default.Smartphone),
-        Pair("Pharmacy & Health", Icons.Default.LocalPharmacy),
-        Pair("Hardware & Tools", Icons.Default.Build),
-        Pair("Restaurant & Bar", Icons.Default.Restaurant),
-        Pair("Wholesale Supply", Icons.Default.Inventory2),
-        Pair("Salon & Spa", Icons.Default.ContentCut)
+        Pair("sector_retail", Icons.Default.Storefront),
+        Pair("sector_fashion", Icons.Default.Checkroom),
+        Pair("sector_electronics", Icons.Default.Smartphone),
+        Pair("sector_pharmacy", Icons.Default.LocalPharmacy),
+        Pair("sector_hardware", Icons.Default.Build),
+        Pair("sector_restaurant", Icons.Default.Restaurant),
+        Pair("sector_wholesale", Icons.Default.Inventory2),
+        Pair("sector_salon", Icons.Default.ContentCut)
     )
 
     val currencies = listOf(
@@ -661,11 +673,11 @@ fun ShopRegistrationScreen(
     val chipBg = if (isDarkTheme) Color(0xFF0F172A) else Color(0xFFF8FAFC)
     val chipBorder = if (isDarkTheme) Color(0xFF334155) else Color(0xFFE2E8F0)
 
-    val stepTitles = if (language == AppLanguage.KINYARWANDA) {
-        listOf("1. Ububiko", "2. Aho Bukorera", "3. Umutekano")
-    } else {
-        listOf("1. Store", "2. Contact & HQ", "3. Credentials")
-    }
+    val stepTitles = listOf(
+        Localization.get("reg_step_1", language),
+        Localization.get("reg_step_2", language),
+        Localization.get("reg_step_3", language)
+    )
 
     Box(
         modifier = Modifier
@@ -682,26 +694,42 @@ fun ShopRegistrationScreen(
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top Controls
+            // Top Controls: 1-Tap 4-Language Selector + Theme Toggle
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    onClick = onToggleLanguage,
-                    shape = RoundedCornerShape(16.dp),
-                    color = topPillBg,
-                    border = BorderStroke(1.dp, topPillBorder),
-                    modifier = Modifier.heightIn(min = 48.dp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Icon(Icons.Default.Translate, contentDescription = "Language", tint = topPillText, modifier = Modifier.size(15.dp))
-                        Text(if (language == AppLanguage.ENGLISH) "EN" else "RW", fontFamily = GopherFontFamily, color = topPillText, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    AppLanguage.entries.forEach { langOption ->
+                        val isSelected = langOption == language
+                        Surface(
+                            onClick = {
+                                if (onSelectLanguage != null) onSelectLanguage(langOption) else onToggleLanguage()
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) OrangePrimary else topPillBg,
+                            border = BorderStroke(1.dp, if (isSelected) OrangePrimary else topPillBorder),
+                            modifier = Modifier
+                                .heightIn(min = 42.dp)
+                                .testTag("reg_lang_${langOption.code}")
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = langOption.flag,
+                                    fontFamily = GopherFontFamily,
+                                    color = if (isSelected) Color.White else topPillText,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -715,7 +743,7 @@ fun ShopRegistrationScreen(
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
-                            contentDescription = "Theme",
+                            contentDescription = Localization.get("theme", language),
                             tint = if (isDarkTheme) Color(0xFFFFD166) else OrangePrimary,
                             modifier = Modifier.size(18.dp)
                         )
@@ -753,7 +781,7 @@ fun ShopRegistrationScreen(
                 textAlign = TextAlign.Center
             )
             Text(
-                text = "Offline-First SQLite • Auto Branch Sync • Monthly Licensing",
+                text = Localization.get("reg_subtitle", language),
                 fontFamily = GopherFontFamily,
                 fontSize = 11.sp,
                 color = textSecondary,
@@ -860,8 +888,8 @@ fun ShopRegistrationScreen(
                                     OutlinedTextField(
                                         value = shopName,
                                         onValueChange = { shopName = it; errorMessage = null },
-                                        label = { Text(if (language == AppLanguage.KINYARWANDA) "Izina ry'Ububiko *" else "Shop / Business Name *", fontFamily = GopherFontFamily) },
-                                        placeholder = { Text("e.g. Kigali Smart Groceries") },
+                                        label = { Text(Localization.get("reg_shop_name_label", language), fontFamily = GopherFontFamily) },
+                                        placeholder = { Text(Localization.get("reg_shop_name_placeholder", language)) },
                                         leadingIcon = { Icon(Icons.Default.Store, contentDescription = null, tint = OrangePrimary) },
                                         singleLine = true,
                                         modifier = Modifier
@@ -879,13 +907,14 @@ fun ShopRegistrationScreen(
                                     )
 
                                     Column {
-                                        Text("Business Sector:", fontFamily = GopherFontFamily, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = textSecondary)
+                                        Text(Localization.get("reg_sector_label", language), fontFamily = GopherFontFamily, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = textSecondary)
                                         Spacer(modifier = Modifier.height(6.dp))
                                         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            items(categories) { (catName, catIcon) ->
-                                                val selected = selectedCategory == catName
+                                            items(categories) { (catKey, catIcon) ->
+                                                val selected = selectedCategory == catKey
+                                                val catLabel = Localization.get(catKey, language)
                                                 Surface(
-                                                    onClick = { selectedCategory = catName },
+                                                    onClick = { selectedCategory = catKey },
                                                     shape = RoundedCornerShape(10.dp),
                                                     color = if (selected) OrangePrimary.copy(alpha = 0.2f) else chipBg,
                                                     border = if (selected) BorderStroke(1.5.dp, OrangePrimary) else BorderStroke(1.dp, chipBorder),
@@ -896,9 +925,9 @@ fun ShopRegistrationScreen(
                                                         verticalAlignment = Alignment.CenterVertically,
                                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                                     ) {
-                                                        Icon(catIcon, contentDescription = catName, tint = if (selected) OrangePrimary else textSecondary, modifier = Modifier.size(16.dp))
+                                                        Icon(catIcon, contentDescription = catLabel, tint = if (selected) OrangePrimary else textSecondary, modifier = Modifier.size(16.dp))
                                                         Text(
-                                                            text = catName,
+                                                            text = catLabel,
                                                             fontFamily = GopherFontFamily,
                                                             fontSize = 11.5.sp,
                                                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
@@ -911,7 +940,7 @@ fun ShopRegistrationScreen(
                                     }
 
                                     Column {
-                                        Text("Primary Currency:", fontFamily = GopherFontFamily, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = textSecondary)
+                                        Text(Localization.get("reg_currency_label", language), fontFamily = GopherFontFamily, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = textSecondary)
                                         Spacer(modifier = Modifier.height(6.dp))
                                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                             currencies.forEach { (sym, code, _) ->
@@ -944,8 +973,8 @@ fun ShopRegistrationScreen(
                                     OutlinedTextField(
                                         value = phone,
                                         onValueChange = { phone = it; errorMessage = null },
-                                        label = { Text("Owner Registered Phone (MoMo & WhatsApp) *", fontFamily = GopherFontFamily) },
-                                        placeholder = { Text("+250 788 123 456") },
+                                        label = { Text(Localization.get("reg_phone_label", language), fontFamily = GopherFontFamily) },
+                                        placeholder = { Text(Localization.get("reg_phone_placeholder", language)) },
                                         leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null, tint = OrangePrimary) },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                                         singleLine = true,
@@ -967,7 +996,7 @@ fun ShopRegistrationScreen(
                                         value = address,
                                         onValueChange = { address = it },
                                         label = { Text(Localization.get("address", language), fontFamily = GopherFontFamily) },
-                                        placeholder = { Text("e.g. Kigali, Nyarugenge Market #12") },
+                                        placeholder = { Text(Localization.get("reg_address_placeholder", language)) },
                                         leadingIcon = { Icon(Icons.Default.Place, contentDescription = null, tint = OrangePrimary) },
                                         singleLine = true,
                                         modifier = Modifier.fillMaxWidth(),
@@ -996,14 +1025,14 @@ fun ShopRegistrationScreen(
                                             Icon(Icons.Default.CloudSync, contentDescription = null, tint = ProfitGreen)
                                             Column {
                                                 Text(
-                                                    text = "Starter HQ Plan: 5,000 FRw / month",
+                                                    text = Localization.get("reg_trial_card_title", language),
                                                     fontFamily = GopherFontFamily,
                                                     fontSize = 12.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = ProfitGreen
                                                 )
                                                 Text(
-                                                    text = "Monthly USSD payments & admin unlock codes bind securely to this registered phone number.",
+                                                    text = Localization.get("reg_trial_card_desc", language),
                                                     fontFamily = GopherFontFamily,
                                                     fontSize = 10.5.sp,
                                                     color = textSecondary
@@ -1029,18 +1058,18 @@ fun ShopRegistrationScreen(
                                     else -> ProfitGreen
                                 }
                                 val strengthLabel = when (strengthScore) {
-                                    0 -> "Too short"
-                                    1 -> "Basic"
-                                    2 -> "Good"
-                                    else -> "Strong"
+                                    0 -> Localization.get("strength_too_short", language)
+                                    1 -> Localization.get("strength_basic", language)
+                                    2 -> Localization.get("strength_good", language)
+                                    else -> Localization.get("strength_strong", language)
                                 }
 
                                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     OutlinedTextField(
                                         value = ownerName,
                                         onValueChange = { ownerName = it; errorMessage = null },
-                                        label = { Text(if (language == AppLanguage.KINYARWANDA) "Amazina ya Nyir'ububiko *" else "Owner Full Name *", fontFamily = GopherFontFamily) },
-                                        placeholder = { Text("Jean Paul Mugisha") },
+                                        label = { Text(Localization.get("reg_owner_name_label", language), fontFamily = GopherFontFamily) },
+                                        placeholder = { Text(Localization.get("reg_owner_name_placeholder", language)) },
                                         leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = OrangePrimary) },
                                         singleLine = true,
                                         modifier = Modifier
@@ -1060,12 +1089,12 @@ fun ShopRegistrationScreen(
                                     OutlinedTextField(
                                         value = username,
                                         onValueChange = { username = it; errorMessage = null },
-                                        label = { Text("Owner Username (Used for Unlock Codes) *", fontFamily = GopherFontFamily) },
-                                        placeholder = { Text("e.g. jeanpaul") },
+                                        label = { Text(Localization.get("reg_username_label", language), fontFamily = GopherFontFamily) },
+                                        placeholder = { Text(Localization.get("reg_username_placeholder", language)) },
                                         leadingIcon = { Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = OrangePrimary) },
                                         supportingText = {
                                             if (normalizedUsername.isNotEmpty()) {
-                                                Text("Account handle: @$normalizedUsername", fontSize = 10.5.sp, color = OrangePrimary)
+                                                Text("${Localization.get("reg_account_handle", language)}: @$normalizedUsername", fontSize = 10.5.sp, color = OrangePrimary)
                                             }
                                         },
                                         singleLine = true,
@@ -1087,8 +1116,8 @@ fun ShopRegistrationScreen(
                                         OutlinedTextField(
                                             value = pin,
                                             onValueChange = { if (it.length <= 4 && it.all { c -> c.isDigit() }) pin = it; errorMessage = null },
-                                            label = { Text("4-Digit Fast PIN *", fontFamily = GopherFontFamily) },
-                                            placeholder = { Text("e.g. 2580") },
+                                            label = { Text(Localization.get("reg_pin_label", language), fontFamily = GopherFontFamily) },
+                                            placeholder = { Text(Localization.get("reg_pin_placeholder", language)) },
                                             leadingIcon = { Icon(Icons.Default.Shield, contentDescription = null, tint = OrangePrimary) },
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                                             visualTransformation = PasswordVisualTransformation(),
@@ -1126,7 +1155,7 @@ fun ShopRegistrationScreen(
                                                 ) {
                                                     Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(14.dp))
                                                     Text(
-                                                        text = if (language == AppLanguage.KINYARWANDA) "Kora PIN mu buryo bwikora" else "Generate Strong PIN",
+                                                        text = Localization.get("reg_gen_pin", language),
                                                         fontFamily = GopherFontFamily,
                                                         fontSize = 11.sp,
                                                         color = OrangePrimary,
@@ -1147,7 +1176,7 @@ fun ShopRegistrationScreen(
                                                 IconButton(onClick = { showPassword = !showPassword }) {
                                                     Icon(
                                                         imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                                        contentDescription = "Toggle password",
+                                                        contentDescription = Localization.get("toggle_password", language),
                                                         tint = textSecondary
                                                     )
                                                 }
@@ -1212,7 +1241,7 @@ fun ShopRegistrationScreen(
                             ) {
                                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Back", fontFamily = GopherFontFamily, fontWeight = FontWeight.Bold)
+                                Text(Localization.get("back", language), fontFamily = GopherFontFamily, fontWeight = FontWeight.Bold)
                             }
                         } else {
                             OutlinedButton(
@@ -1231,9 +1260,9 @@ fun ShopRegistrationScreen(
                             Button(
                                 onClick = {
                                     if (step == 0 && shopName.isBlank()) {
-                                        errorMessage = if (language == AppLanguage.KINYARWANDA) "Injiza izina ry'ububiko" else "Please enter your shop name."
+                                        errorMessage = Localization.get("reg_err_shop_name", language)
                                     } else if (step == 1 && phone.filter { it.isDigit() }.length < 9) {
-                                        errorMessage = "Please enter a valid owner phone number (for USSD & unlock code binding)."
+                                        errorMessage = Localization.get("reg_err_phone", language)
                                     } else {
                                         errorMessage = null
                                         step++
@@ -1246,7 +1275,7 @@ fun ShopRegistrationScreen(
                                 shape = RoundedCornerShape(12.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary)
                             ) {
-                                Text("Continue", fontFamily = GopherFontFamily, fontWeight = FontWeight.Bold)
+                                Text(Localization.get("continue_btn", language), fontFamily = GopherFontFamily, fontWeight = FontWeight.Bold)
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(18.dp))
                             }
@@ -1254,13 +1283,13 @@ fun ShopRegistrationScreen(
                             Button(
                                 onClick = {
                                     if (ownerName.isBlank()) {
-                                        errorMessage = if (language == AppLanguage.KINYARWANDA) "Injiza amazina ya nyir'ububiko" else "Please enter owner full name."
+                                        errorMessage = Localization.get("reg_err_owner_name", language)
                                     } else if (username.isBlank()) {
-                                        errorMessage = if (language == AppLanguage.KINYARWANDA) "Injiza username" else "Please enter a username."
+                                        errorMessage = Localization.get("reg_err_username", language)
                                     } else if (pin.length != 4) {
-                                        errorMessage = if (language == AppLanguage.KINYARWANDA) "PIN igomba kuba imibare 4" else "PIN must be exactly 4 digits."
-                                    } else if (password.length < 4) {
-                                        errorMessage = if (language == AppLanguage.KINYARWANDA) "Ijambobanga rigomba kuba nibura inyuguti 4" else "Password must be at least 4 characters."
+                                        errorMessage = Localization.get("reg_err_pin", language)
+                                    } else if (password.length < 6) {
+                                        errorMessage = Localization.get("reg_err_password", language)
                                     } else {
                                         errorMessage = null
                                         onRegister(
@@ -1286,7 +1315,7 @@ fun ShopRegistrationScreen(
                                 Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = if (language == AppLanguage.KINYARWANDA) "Kora Ububiko" else "Create & Launch",
+                                    text = Localization.get("reg_create_launch", language),
                                     fontFamily = GopherFontFamily,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold

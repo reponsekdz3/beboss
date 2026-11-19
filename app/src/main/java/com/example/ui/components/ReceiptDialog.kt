@@ -6,7 +6,10 @@ import android.print.PrintManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -299,13 +302,12 @@ fun ReceiptDialog(
                             color = InkMedium,
                             textAlign = TextAlign.Center
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Seal: ${ReceiptGenerator.computeOfflineReceiptSeal(sale, shopProfile)}",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = InkMedium,
-                            textAlign = TextAlign.Center
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        val offlineSeal = ReceiptGenerator.computeOfflineReceiptSeal(sale, shopProfile)
+                        OfflineReceiptVerificationMatrix(
+                            payload = "${sale.receiptNumber}|$offlineSeal|${sale.totalAmount.toLong()}",
+                            sealCode = offlineSeal
                         )
                     }
                 }
@@ -389,5 +391,68 @@ private fun printHtmlReceipt(context: Context, htmlContent: String, jobName: Str
         webView.loadDataWithBaseURL(null, htmlContent, "text/html", "UTF-8", null)
     } catch (e: Exception) {
         Toast.makeText(context, "Unable to launch print service: ${e.message}", Toast.LENGTH_LONG).show()
+    }
+}
+
+@Composable
+private fun OfflineReceiptVerificationMatrix(
+    payload: String,
+    sealCode: String
+) {
+    val digestBytes = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(payload.toByteArray(Charsets.UTF_8))
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = Color.White,
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFD1D5DB))
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .padding(8.dp)
+                    .size(84.dp)
+            ) {
+                val gridSize = 15
+                val cell = size.width / gridSize
+
+                fun isFinder(r: Int, c: Int): Boolean {
+                    val topLeft = r < 4 && c < 4
+                    val topRight = r < 4 && c >= gridSize - 4
+                    val bottomLeft = r >= gridSize - 4 && c < 4
+                    return topLeft || topRight || bottomLeft
+                }
+
+                for (r in 0 until gridSize) {
+                    for (c in 0 until gridSize) {
+                        val filled = if (isFinder(r, c)) {
+                            val lr = if (r >= gridSize - 4) r - (gridSize - 4) else r
+                            val lc = if (c >= gridSize - 4) c - (gridSize - 4) else c
+                            lr == 0 || lr == 3 || lc == 0 || lc == 3 || (lr in 1..2 && lc in 1..2 && (lr == 1 || lc == 1))
+                        } else {
+                            val bitIndex = (r * gridSize + c) % (digestBytes.size * 8)
+                            val byteVal = digestBytes[bitIndex / 8].toInt()
+                            ((byteVal ushr (bitIndex % 8)) and 1) == 1
+                        }
+                        if (filled) {
+                            drawRect(
+                                color = Color(0xFF111827),
+                                topLeft = Offset(c * cell, r * cell),
+                                size = Size(cell, cell)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "Offline Verification Seal: $sealCode",
+            fontSize = 10.5.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            color = InkDark,
+            textAlign = TextAlign.Center
+        )
     }
 }

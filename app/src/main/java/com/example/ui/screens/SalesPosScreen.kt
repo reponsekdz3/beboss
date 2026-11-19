@@ -35,7 +35,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Discount
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.PauseCircle
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
@@ -90,6 +92,9 @@ import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
 import com.example.ui.theme.WarningAmber
 import com.example.ui.viewmodel.CartState
+import com.example.ui.viewmodel.HeldCart
+import com.example.util.AppLanguage
+import com.example.util.Localization
 import com.example.util.ReceiptGenerator
 import kotlinx.coroutines.launch
 
@@ -100,7 +105,9 @@ fun SalesPosScreen(
     categories: List<String>,
     customers: List<Customer>,
     cartState: CartState,
+    heldCarts: List<HeldCart> = emptyList(),
     shopProfile: ShopProfile,
+    language: AppLanguage = AppLanguage.ENGLISH,
     onAddToCart: (Product) -> Unit,
     onUpdateQuantity: (String, Double) -> Unit,
     onRemoveItem: (String) -> Unit,
@@ -109,7 +116,12 @@ fun SalesPosScreen(
     onSetPaymentMethod: (String) -> Unit,
     onSetDiscount: (Double) -> Unit,
     onSetAmountPaid: (String) -> Unit,
+    onSetSplitCash: (String) -> Unit = {},
+    onSetSplitMomo: (String) -> Unit = {},
     onSetNotes: (String) -> Unit,
+    onHoldCart: (String) -> Unit = {},
+    onResumeHeldCart: (String) -> Unit = {},
+    onDeleteHeldCart: (String) -> Unit = {},
     onCheckout: () -> Unit,
     onQuickAddProduct: () -> Unit
 ) {
@@ -117,6 +129,7 @@ fun SalesPosScreen(
     var selectedCategory by remember { mutableStateOf("All") }
     var showCheckoutSheet by remember { mutableStateOf(false) }
     var showScannerDialog by remember { mutableStateOf(false) }
+    var showHeldCartsDialog by remember { mutableStateOf(false) }
 
     val filteredProducts = products.filter { product ->
         val matchesCategory = selectedCategory == "All" || product.category.equals(selectedCategory, ignoreCase = true)
@@ -143,8 +156,8 @@ fun SalesPosScreen(
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
-                            placeholder = { Text("Search product or barcode...", fontSize = 13.sp) },
-                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = InkMedium) },
+                            placeholder = { Text(Localization.get("search_product_hint", language), fontSize = 13.sp) },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = Localization.get("search", language), tint = InkMedium) },
                             trailingIcon = {
                                 if (searchQuery.isNotBlank()) {
                                     IconButton(onClick = { searchQuery = "" }) {
@@ -180,6 +193,37 @@ fun SalesPosScreen(
                                 )
                             }
                         }
+
+                        if (heldCarts.isNotEmpty()) {
+                            Surface(
+                                onClick = { showHeldCartsDialog = true },
+                                shape = RoundedCornerShape(12.dp),
+                                color = WarningAmber.copy(alpha = 0.16f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, WarningAmber),
+                                modifier = Modifier
+                                    .height(52.dp)
+                                    .testTag("pos_held_carts_btn")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PauseCircle,
+                                        contentDescription = "Held Carts",
+                                        tint = WarningAmber,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "${heldCarts.size}",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = InkDark
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -195,7 +239,7 @@ fun SalesPosScreen(
                             FilterChip(
                                 selected = isSelected,
                                 onClick = { selectedCategory = cat },
-                                label = { Text(cat, fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                                label = { Text(if (cat == "All") Localization.get("all_categories", language) else cat, fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = OrangePrimary,
                                     selectedLabelColor = Color.White,
@@ -415,21 +459,39 @@ fun SalesPosScreen(
                         }
                     }
 
-                    Button(
-                        onClick = { showCheckoutSheet = true },
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                        modifier = Modifier
-                            .height(48.dp)
-                            .testTag("checkout_button")
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            text = "Checkout",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(Icons.Default.ShoppingCartCheckout, contentDescription = null, modifier = Modifier.size(18.dp))
+                        OutlinedButton(
+                            onClick = { onHoldCart("") },
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp),
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("hold_cart_button")
+                        ) {
+                            Icon(Icons.Default.PauseCircle, contentDescription = Localization.get("hold_cart", language), tint = WarningAmber, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(Localization.get("hold_cart", language), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = InkDark)
+                        }
+
+                        Button(
+                            onClick = { showCheckoutSheet = true },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("checkout_button")
+                        ) {
+                            Text(
+                                text = Localization.get("add_and_checkout", language),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(Icons.Default.ShoppingCartCheckout, contentDescription = null, modifier = Modifier.size(18.dp))
+                        }
                     }
                 }
             }
@@ -459,7 +521,7 @@ fun SalesPosScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Sale Checkout",
+                        text = Localization.get("pos_title", language),
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = InkDark
@@ -623,19 +685,20 @@ fun SalesPosScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // Payment Method
-                Text("Payment Method", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = InkMedium)
+                Text(Localization.get("payment_method", language), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = InkMedium)
                 Spacer(modifier = Modifier.height(6.dp))
 
                 val paymentMethods = listOf(
-                    "CASH" to "Cash",
-                    "MOMO" to "MoMo (Mobile Money)",
-                    "CARD" to "Card / POS",
-                    "CREDIT_DEBT" to "Credit / Pay Later"
+                    "CASH" to Localization.get("cash", language),
+                    "MOMO" to Localization.get("momo", language),
+                    "SPLIT" to Localization.get("split_payment", language),
+                    "CARD" to Localization.get("card", language),
+                    "CREDIT_DEBT" to Localization.get("credit_debt", language)
                 )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     paymentMethods.forEach { (code, label) ->
                         val isSelected = cartState.paymentMethod == code
@@ -643,14 +706,15 @@ fun SalesPosScreen(
                             onClick = { onSetPaymentMethod(code) },
                             modifier = Modifier
                                 .weight(1f)
-                                .height(44.dp),
+                                .height(44.dp)
+                                .testTag("pos_pay_${code.lowercase()}"),
                             shape = RoundedCornerShape(10.dp),
                             color = if (isSelected) OrangePrimary else Color(0xFFF3F4F6),
                             border = if (isSelected) null else androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE5E7EB))
                         ) {
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(4.dp)) {
                                 Text(
-                                    text = if (code == "CREDIT_DEBT") "Credit" else if (code == "MOMO") "MoMo" else label,
+                                    text = label,
                                     fontSize = 11.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                     color = if (isSelected) Color.White else InkDark,
@@ -662,6 +726,75 @@ fun SalesPosScreen(
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
+
+                // Split Payment Inputs (Cash + MoMo)
+                if (cartState.paymentMethod == "SPLIT") {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFFF0FDF4),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, ProfitGreen.copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Split Payment Breakdown (Cash + MoMo)",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = InkDark
+                                )
+                                Text(
+                                    text = "Left: ${ReceiptGenerator.formatMoney(cartState.splitRemainingAmount, shopProfile)}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (cartState.splitRemainingAmount > 0.0) WarningAmber else ProfitGreen
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = cartState.splitCashInput,
+                                    onValueChange = { input ->
+                                        onSetSplitCash(input)
+                                        val cashVal = input.toDoubleOrNull() ?: 0.0
+                                        val remainder = (cartState.netTotal - cashVal).coerceAtLeast(0.0)
+                                        if (cartState.splitMomoInput.isBlank() && cashVal > 0.0 && remainder > 0.0) {
+                                            onSetSplitMomo(remainder.toLong().toString())
+                                        }
+                                    },
+                                    label = { Text("Cash (${shopProfile.currencySymbol})", fontSize = 11.sp) },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("split_cash_input"),
+                                    shape = RoundedCornerShape(10.dp),
+                                    singleLine = true
+                                )
+                                OutlinedTextField(
+                                    value = cartState.splitMomoInput,
+                                    onValueChange = onSetSplitMomo,
+                                    label = { Text("MoMo (${shopProfile.currencySymbol})", fontSize = 11.sp) },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("split_momo_input"),
+                                    shape = RoundedCornerShape(10.dp),
+                                    singleLine = true
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
 
                 // Discount and Amount Paid inputs
                 Row(
@@ -678,16 +811,18 @@ fun SalesPosScreen(
                         singleLine = true
                     )
 
-                    OutlinedTextField(
-                        value = cartState.amountPaidInput,
-                        onValueChange = onSetAmountPaid,
-                        label = { Text("Amount Paid", fontSize = 12.sp) },
-                        placeholder = { Text("${cartState.netTotal.toInt()}") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true
-                    )
+                    if (cartState.paymentMethod != "SPLIT") {
+                        OutlinedTextField(
+                            value = cartState.amountPaidInput,
+                            onValueChange = onSetAmountPaid,
+                            label = { Text("Amount Paid", fontSize = 12.sp) },
+                            placeholder = { Text("${cartState.netTotal.toInt()}") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -787,6 +922,75 @@ fun SalesPosScreen(
                 showScannerDialog = false
             },
             onDismiss = { showScannerDialog = false }
+        )
+    }
+
+    // Held Carts Resume / Discard Dialog
+    if (showHeldCartsDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showHeldCartsDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.PauseCircle, contentDescription = null, tint = WarningAmber)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Held Carts (${heldCarts.size})", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (heldCarts.isEmpty()) {
+                        Text("No held orders right now.", fontSize = 12.sp, color = InkMedium)
+                    } else {
+                        heldCarts.forEach { held ->
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFFF9FAFB),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(held.label, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = InkDark)
+                                        Text(
+                                            text = "${held.totalUnits.toInt()} items • ${ReceiptGenerator.formatMoney(held.netTotal, shopProfile)}",
+                                            fontSize = 11.5.sp,
+                                            color = OrangePrimary,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(
+                                            onClick = {
+                                                onResumeHeldCart(held.id)
+                                                showHeldCartsDialog = false
+                                            }
+                                        ) {
+                                            Icon(Icons.Default.PlayArrow, contentDescription = "Resume cart", tint = ProfitGreen)
+                                        }
+                                        IconButton(
+                                            onClick = { onDeleteHeldCart(held.id) }
+                                        ) {
+                                            Icon(Icons.Default.Delete, contentDescription = "Delete held cart", tint = Color(0xFFDC2626))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                OutlinedButton(onClick = { showHeldCartsDialog = false }) {
+                    Text("Close")
+                }
+            }
         )
     }
 }

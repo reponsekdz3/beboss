@@ -236,13 +236,13 @@ fun BeBossTopBar(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Translate,
-                        contentDescription = "Language",
+                        contentDescription = Localization.get("language", language),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = if (language == AppLanguage.ENGLISH) "EN" else "RW",
+                        text = language.flag,
                         fontFamily = GopherFontFamily,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,

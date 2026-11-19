@@ -147,6 +147,29 @@ object SubscriptionSecurityManager {
     }
 
     /**
+     * Returns true when the pasted or typed text matches a complete cryptographic
+     * BB2 account-bound unlock code or BB hardware voucher token so the UI can
+     * immediately verify and auto-unlock without extra clicks.
+     */
+    fun isCompleteUnlockCodeFormat(input: String): Boolean {
+        val clean = input.trim().uppercase(Locale.ROOT)
+        val parts = clean.split("-")
+        if (parts.size != 6) return false
+        val prefix = parts[0]
+        if (prefix != "BB2" && prefix != "BB") return false
+        val tierOk = parts[1].length in 2..12 && parts[1].all { it.isLetter() }
+        val daysOk = (parts[2].toIntOrNull() ?: 0) > 0
+        val expiryOk = parts[3].length in 3..8 && parts[3].all { it in '0'..'9' || it in 'A'..'F' }
+        val bindOk = if (prefix == "BB2") {
+            parts[4].length == 6 && parts[4].all { it in '0'..'9' || it in 'A'..'F' }
+        } else {
+            parts[4].length == 5 && parts[4].all { it.isDigit() }
+        }
+        val sigOk = parts[5].length == 8 && parts[5].all { it in '0'..'9' || it in 'A'..'F' }
+        return tierOk && daysOk && expiryOk && bindOk && sigOk
+    }
+
+    /**
      * Verifies an Admin Unlock Code (BB2) or hardware-bound voucher (BB).
      * Rejects unverified payment references and wildcard hashes.
      */
@@ -157,7 +180,8 @@ object SubscriptionSecurityManager {
         workerCount: Int = 1,
         alreadyRedeemedHashes: Set<String> = emptySet(),
         ownerUsername: String = "",
-        ownerPhoneOverride: String = ""
+        ownerPhoneOverride: String = "",
+        signingSecretOverride: String? = null
     ): VoucherValidationResult {
         val cleanCode = voucherInput.trim().uppercase(Locale.ROOT)
         if (cleanCode.isBlank()) {
@@ -223,7 +247,11 @@ object SubscriptionSecurityManager {
             }
 
             val signingSecret = try {
-                getCrossPlatformSigningSecret()
+                if (signingSecretOverride != null) {
+                    CryptoKeyManager.requireConfiguredSecret(signingSecretOverride, "BEBOSS_UNLOCK_SIGNING_SECRET")
+                } else {
+                    getCrossPlatformSigningSecret()
+                }
             } catch (e: SecurityException) {
                 return VoucherValidationResult(
                     isValid = false,

@@ -9,6 +9,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.dp
 import com.example.data.model.Sale
 import com.example.data.model.SaleItem
@@ -116,7 +117,11 @@ class BeBossNavigationUiTest {
         }
 
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithText("Incl. Tax (18.0%):", substring = false).assertIsDisplayed()
-        composeTestRule.onNodeWithText("Seal: $expectedSeal", substring = false).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Incl. Tax (18.0%):", substring = false)
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithText("Offline Verification Seal: $expectedSeal", substring = false)
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 }

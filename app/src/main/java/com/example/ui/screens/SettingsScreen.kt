@@ -22,8 +22,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import com.example.data.model.LocalAuditLog
+import com.example.util.SubscriptionSecurityManager
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -60,8 +62,10 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Storefront
@@ -102,6 +106,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -223,7 +229,9 @@ fun SettingsScreen(
     onLogout: () -> Unit = {},
     onSwitchUser: (User) -> Unit = {},
     onActivateVoucher: (String) -> Unit = {},
-    onProcessDirectPayment: ((provider: String, phone: String, durationMonths: Int, onSuccess: (com.example.util.PaymentProcessingResult, com.example.util.SubscriptionPriceBreakdown) -> Unit) -> Unit)? = null,
+    onProcessDirectPayment: ((provider: String, phone: String, durationMonths: Int, userReference: String?, onSuccess: (com.example.util.PaymentProcessingResult, com.example.util.SubscriptionPriceBreakdown) -> Unit) -> Unit)? = null,
+    deadLetterSyncCount: Int = 0,
+    deviceIntegrityStatus: com.example.util.DeviceIntegrityStatus? = null,
     paymentVerificationRequests: List<PaymentVerificationRequest> = emptyList(),
     discoveredHubs: List<DiscoveredBranchHub> = emptyList(),
     isDiscoveringHubs: Boolean = false,
@@ -255,6 +263,7 @@ fun SettingsScreen(
     onAdminIssueManualCode: ((username: String, registeredPhone: String, tierCode: String, days: Int, amountRwf: Int, onDone: (Boolean, String) -> Unit) -> Unit)? = null,
     onAdminRevokeCode: (SupabaseUnlockCodeDto) -> Unit = {},
     onAdminExtendShopSubscription: (SupabaseShopAccountDto, Int) -> Unit = { _, _ -> },
+    onAdminResetShopTrial: (SupabaseShopAccountDto) -> Unit = {},
     onAdminSetShopStatus: (SupabaseShopAccountDto, String) -> Unit = { _, _ -> },
     onAdminUpdateShopLimits: (SupabaseShopAccountDto, Int, Int) -> Unit = { _, _, _ -> },
     onAdminDeleteShopAccount: (SupabaseShopAccountDto) -> Unit = {},
@@ -265,7 +274,11 @@ fun SettingsScreen(
     onShareAdminWebPortal: () -> Unit = {},
     onShowSplashScreen: () -> Unit = {},
     onTestNotification: (String) -> Unit = {},
-    onRequestPermissions: () -> Unit = {}
+    onRequestPermissions: () -> Unit = {},
+    onSelectLanguage: ((AppLanguage) -> Unit)? = null,
+    idleLockMinutes: Int = 5,
+    onSetIdleLockMinutes: (Int) -> Unit = {},
+    adminLastSyncedAt: Long = 0L
 ) {
     val context = LocalContext.current
     var shopName by remember(shopProfile.shopName) { mutableStateOf(shopProfile.shopName) }
@@ -307,6 +320,30 @@ fun SettingsScreen(
     var showResetWholeAppDialog by remember { mutableStateOf(false) }
     var permissionsUpdated by remember { mutableStateOf(false) }
     var showLogoutConfirm by remember { mutableStateOf(false) }
+    var showDiagnosticsDialog by remember { mutableStateOf(false) }
+    var settingsSearchQuery by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf("ALL") }
+    var lastAutoSubmittedCode by remember { mutableStateOf("") }
+
+    val settingsCategories = remember(language) {
+        listOf(
+            "ALL" to Localization.get("cat_all", language),
+            "LANGUAGE" to Localization.get("cat_language", language),
+            "LICENSE" to Localization.get("cat_license", language),
+            "SYNC" to Localization.get("cat_sync", language),
+            "SHOP" to Localization.get("cat_shop", language),
+            "TEAM" to Localization.get("cat_team", language),
+            "SECURITY" to Localization.get("cat_security", language)
+        )
+    }
+
+    fun shouldShowSection(category: String, keywords: String): Boolean {
+        val catOk = selectedCategory == "ALL" || selectedCategory == category
+        if (!catOk) return false
+        val q = settingsSearchQuery.trim()
+        if (q.isEmpty()) return true
+        return keywords.contains(q, ignoreCase = true) || category.contains(q, ignoreCase = true)
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -390,7 +427,7 @@ fun SettingsScreen(
                             )
                             Spacer(modifier = Modifier.width(5.dp))
                             Text(
-                                text = "Offline Database Active • Cloud Synced",
+                                text = Localization.get("offline_db_active", language),
                                 fontSize = 10.5.sp,
                                 color = ProfitGreen,
                                 fontWeight = FontWeight.Bold
@@ -401,8 +438,76 @@ fun SettingsScreen(
             }
         }
 
-        // 1. Language & Theme Quick Switch Card
+        // 0.5 Interactive Settings Search Bar & Category Filter Pills
         item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = settingsSearchQuery,
+                    onValueChange = { settingsSearchQuery = it },
+                    placeholder = {
+                        Text(
+                            text = Localization.get("settings_search_hint", language),
+                            fontSize = 13.sp
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = Localization.get("search", language),
+                            tint = OrangePrimary
+                        )
+                    },
+                    trailingIcon = {
+                        if (settingsSearchQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = { settingsSearchQuery = "" },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = Localization.get("close", language)
+                                )
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("settings_search_input")
+                )
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(settingsCategories) { (catId, catLabel) ->
+                        val isSelected = selectedCategory == catId
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { selectedCategory = catId },
+                            label = {
+                                Text(
+                                    text = catLabel,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = OrangePrimary,
+                                selectedLabelColor = Color.White
+                            ),
+                            modifier = Modifier
+                                .heightIn(min = 40.dp)
+                                .testTag("settings_cat_${catId.lowercase()}")
+                        )
+                    }
+                }
+            }
+        }
+
+        // 1. Language (4 Full Local Languages) & Theme Quick Switch Card
+        if (shouldShowSection("LANGUAGE", "language theme dark light english kinyarwanda french swahili ururimi langue lugha display")) item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -410,72 +515,119 @@ fun SettingsScreen(
                 elevation = CardDefaults.cardElevation(2.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = Localization.get("display_and_language", language),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Language Toggle Row
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onToggleLanguage() }
-                            .padding(vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                shape = CircleShape,
-                                color = OrangePrimary.copy(alpha = 0.15f),
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.Language, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(20.dp))
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = Localization.get("language", language),
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 14.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "${language.flag} ${language.displayName}",
-                                    fontSize = 12.sp,
-                                    color = OrangePrimary,
-                                    fontWeight = FontWeight.Bold
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            shape = CircleShape,
+                            color = OrangePrimary.copy(alpha = 0.15f),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Language,
+                                    contentDescription = Localization.get("language", language),
+                                    tint = OrangePrimary,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
-
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = OrangePrimary.copy(alpha = 0.15f)
-                        ) {
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = if (language == AppLanguage.ENGLISH) "Switch to Kinyarwanda" else "Hindura mu Cyongereza",
-                                fontSize = 11.sp,
-                                color = OrangePrimary,
+                                text = Localization.get("display_and_language", language),
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = Localization.get("select_language_subtitle", language),
+                                fontSize = 11.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
 
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Interactive 2x2 Grid for All 4 Offline Local Languages
+                    val languagePairs = AppLanguage.entries.chunked(2)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        languagePairs.forEach { pair ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                pair.forEach { langOption ->
+                                    val isSelected = langOption == language
+                                    Surface(
+                                        onClick = {
+                                            if (onSelectLanguage != null) {
+                                                onSelectLanguage(langOption)
+                                            } else if (!isSelected) {
+                                                onToggleLanguage()
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (isSelected) OrangePrimary.copy(alpha = 0.14f)
+                                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                        border = BorderStroke(
+                                            width = if (isSelected) 1.6.dp else 1.dp,
+                                            color = if (isSelected) OrangePrimary else MaterialTheme.colorScheme.outlineVariant
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .heightIn(min = 50.dp)
+                                            .testTag("settings_lang_${langOption.code}")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = if (isSelected) OrangePrimary else DarkNavy.copy(alpha = 0.15f)
+                                                ) {
+                                                    Text(
+                                                        text = langOption.flag,
+                                                        fontSize = 10.5.sp,
+                                                        fontWeight = FontWeight.Black,
+                                                        color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = langOption.displayName,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                    color = if (isSelected) OrangePrimary else MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                            if (isSelected) {
+                                                Icon(
+                                                    Icons.Default.CheckCircle,
+                                                    contentDescription = null,
+                                                    tint = OrangePrimary,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outlineVariant)
 
                     // Theme Toggle Row
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onToggleTheme() }
-                            .padding(vertical = 6.dp),
+                            .padding(vertical = 6.dp)
+                            .testTag("settings_theme_toggle_row"),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -488,7 +640,7 @@ fun SettingsScreen(
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                        contentDescription = null,
+                                        contentDescription = Localization.get("app_theme", language),
                                         tint = if (isDarkTheme) Color(0xFFFFD166) else MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.size(20.dp)
                                     )
@@ -524,7 +676,7 @@ fun SettingsScreen(
         }
 
         // 2. Active User & Role Card
-        item {
+        if (shouldShowSection("TEAM", "staff users branches backup export share apk logout lock terminal role abakozi amashami")) item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -604,7 +756,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.Storefront, contentDescription = null, modifier = Modifier.size(16.dp), tint = OrangePrimary)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text(if (language == AppLanguage.KINYARWANDA) "Amashami" else "Branches (${branches.size})", fontSize = 12.sp, color = OrangePrimary, fontWeight = FontWeight.Bold)
+                            Text("${Localization.get("branches_title", language)} (${branches.size})", fontSize = 12.sp, color = OrangePrimary, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -633,7 +785,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp), tint = OrangePrimary)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Share APK", fontSize = 12.sp, color = OrangePrimary, fontWeight = FontWeight.Bold)
+                            Text(Localization.get("share_app_apk", language), fontSize = 12.sp, color = OrangePrimary, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -651,8 +803,8 @@ fun SettingsScreen(
             }
         }
 
-        // 2.5 Real-Time Firebase Cloud Auto-Sync Card
-        item {
+        // 2.5 Real-Time Cloud & LAN Multi-Device Sync Card
+        if (shouldShowSection("SYNC", "cloud sync lan network branch hub offline online push supabase")) item {
             val isOnline = connectivityStatus == com.example.util.ConnectivityStatus.AVAILABLE
             val isSyncingNow = isSyncing
 
@@ -686,17 +838,14 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    text = if (language == AppLanguage.KINYARWANDA) "Guhuza n'Ububiko bwo hejuru (Cloud)" else "Cloud & Multi-Device Sync",
+                                    text = Localization.get("cloud_sync_card_title", language),
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 15.sp,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = if (isOnline) {
-                                        if (language == AppLanguage.KINYARWANDA) "Interineti irahari • Guhuza byikora" else "Online • Auto-syncing on changes"
-                                    } else {
-                                        if (language == AppLanguage.KINYARWANDA) "Nta interineti • Ibintu byose bibitswe muri telefoni" else "Offline • Safe local storage active"
-                                    },
+                                    text = if (isOnline) Localization.get("cloud_online_desc", language)
+                                    else Localization.get("cloud_offline_desc", language),
                                     fontSize = 11.sp,
                                     color = if (isOnline) ProfitGreen else Color(0xFF64748B),
                                     fontWeight = FontWeight.SemiBold
@@ -709,7 +858,7 @@ fun SettingsScreen(
                             color = if (isOnline) ProfitGreen.copy(alpha = 0.15f) else Color(0xFF64748B).copy(alpha = 0.15f)
                         ) {
                             Text(
-                                text = if (isOnline) "LIVE" else "OFFLINE",
+                                text = if (isOnline) Localization.get("status_live", language) else Localization.get("status_offline", language),
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Black,
                                 color = if (isOnline) ProfitGreen else Color(0xFF64748B),
@@ -727,16 +876,16 @@ fun SettingsScreen(
                         ) {
                             Column(modifier = Modifier.padding(10.dp)) {
                                 Text(
-                                    text = if (language == AppLanguage.KINYARWANDA) "Ibiherutse guhuzwa na Cloud:" else "Last Cloud Sync Payload:",
+                                    text = Localization.get("sync_completed", language),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = DarkNavy
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Spacer(modifier = Modifier.height(3.dp))
                                 Text(
-                                    text = "• ${cloudSyncReport.productsCount} Products  • ${cloudSyncReport.debtsCount} Debts/Customers  • ${cloudSyncReport.salesCount} Sales  • ${cloudSyncReport.branchesCount} Branches",
+                                    text = "• ${cloudSyncReport.productsCount} Products  • ${cloudSyncReport.debtsCount} Debts  • ${cloudSyncReport.salesCount} Sales  • ${cloudSyncReport.branchesCount} Branches",
                                     fontSize = 11.sp,
-                                    color = InkMedium
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -746,7 +895,10 @@ fun SettingsScreen(
 
                     Button(
                         onClick = onSyncToCloudNow,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag("settings_push_cloud_btn"),
                         colors = ButtonDefaults.buttonColors(containerColor = if (isOnline) OrangePrimary else Color(0xFF475569)),
                         shape = RoundedCornerShape(10.dp),
                         enabled = !isSyncingNow
@@ -754,11 +906,8 @@ fun SettingsScreen(
                         Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (isSyncingNow) {
-                                if (language == AppLanguage.KINYARWANDA) "Kugenzura no Guhuza..." else "Pushing to Cloud..."
-                            } else {
-                                if (language == AppLanguage.KINYARWANDA) "Ohereza Amakuru kuri Cloud Nonaha" else "Push All Data to Cloud Now"
-                            },
+                            text = if (isSyncingNow) Localization.get("pushing_to_cloud", language)
+                            else Localization.get("push_to_cloud_now", language),
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp
                         )
@@ -768,13 +917,16 @@ fun SettingsScreen(
 
                     OutlinedButton(
                         onClick = { showSyncHubDialog = true },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag("settings_open_sync_hub_btn"),
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(18.dp), tint = OrangePrimary)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (language == AppLanguage.KINYARWANDA) "Fungura Urubuga rwo Gusangiza Amashami" else "Open Branch & Worker Sync Hub",
+                            text = Localization.get("open_sync_hub", language),
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.5.sp,
                             color = OrangePrimary
@@ -784,8 +936,8 @@ fun SettingsScreen(
             }
         }
 
-        // 3. Monthly Shop Subscription, USSD WhatsApp Verification & Direct Settings Unlock Code Entry
-        item {
+        // 3. Monthly Shop Subscription, USSD WhatsApp Verification & Smart Auto-Unlock Code Entry
+        if (shouldShowSection("LICENSE", "subscription license unlock code bb2 momo airtel ussd whatsapp trial pay")) item {
             val isActive = shopProfile.isSubscriptionActive
             val daysRemaining = shopProfile.daysRemaining
             val activeBranchCount = branches.size.coerceAtLeast(1)
@@ -796,10 +948,19 @@ fun SettingsScreen(
                 durationMonths = 1
             )
             val ownerAccount = remember(currentUser, allUsers) {
-                currentUser ?: allUsers.firstOrNull { it.role == UserRole.OWNER } ?: allUsers.firstOrNull()
+                allUsers.firstOrNull { it.role == UserRole.OWNER } ?: currentUser ?: allUsers.firstOrNull()
             }
             val deviceCode = remember(shopProfile) {
                 OfflineSubscriptionManager.getDeviceChallengeCode(shopProfile)
+            }
+            val isCompleteCode = SubscriptionSecurityManager.isCompleteUnlockCodeFormat(settingsUnlockCodeInput)
+            LaunchedEffect(settingsUnlockCodeInput) {
+                val clean = settingsUnlockCodeInput.trim().uppercase()
+                if (SubscriptionSecurityManager.isCompleteUnlockCodeFormat(clean) && clean != lastAutoSubmittedCode) {
+                    lastAutoSubmittedCode = clean
+                    onActivateVoucher(clean)
+                    settingsUnlockCodeInput = ""
+                }
             }
 
             Card(
@@ -934,7 +1095,7 @@ fun SettingsScreen(
                         Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (language == AppLanguage.KINYARWANDA) "Ishyura USSD & Ohereza Gihamya kuri WhatsApp" else "Pay USSD & Send WhatsApp Verification",
+                            text = Localization.get("pay_ussd_whatsapp_cta", language),
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.5.sp
@@ -945,16 +1106,16 @@ fun SettingsScreen(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Step 3: Insert Admin Unlock Code right inside Settings
+                    // Step 3: Insert Admin Unlock Code right inside Settings (Auto-Unlocks Instantly!)
                     Text(
-                        text = if (language == AppLanguage.KINYARWANDA) "Injiza Kode yo Gufungura yoherejwe na Admin" else "Insert Admin Unlock Code (via Settings)",
+                        text = Localization.get("insert_unlock_code_title", language),
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "After Admin verifies your real USSD payment & account (@${ownerAccount?.username ?: "owner"}), paste the BB2-... unlock code received from Admin:",
+                        text = "@${ownerAccount?.username?.ifBlank { "owner" } ?: "owner"} • ${ownerAccount?.phone?.ifBlank { shopProfile.phone } ?: shopProfile.phone}",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -963,7 +1124,7 @@ fun SettingsScreen(
                     OutlinedTextField(
                         value = settingsUnlockCodeInput,
                         onValueChange = { settingsUnlockCodeInput = it },
-                        label = { Text("Unlock Code (BB2-... or BB-...)") },
+                        label = { Text(Localization.get("enter_voucher_code", language)) },
                         placeholder = { Text("BB2-SINGLE-030D-...") },
                         leadingIcon = { Icon(Icons.Default.Key, contentDescription = null, tint = OrangePrimary) },
                         singleLine = true,
@@ -973,6 +1134,31 @@ fun SettingsScreen(
                         shape = RoundedCornerShape(10.dp)
                     )
 
+                    if (isCompleteCode) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = ProfitGreen.copy(alpha = 0.14f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("settings_auto_unlock_badge")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = Localization.get("auto_unlock_detected", language),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ProfitGreen
+                                )
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Row(
@@ -981,8 +1167,10 @@ fun SettingsScreen(
                     ) {
                         Button(
                             onClick = {
-                                if (settingsUnlockCodeInput.isNotBlank()) {
-                                    onActivateVoucher(settingsUnlockCodeInput.trim())
+                                val code = settingsUnlockCodeInput.trim()
+                                if (code.isNotBlank()) {
+                                    lastAutoSubmittedCode = code.uppercase()
+                                    onActivateVoucher(code)
                                     settingsUnlockCodeInput = ""
                                 }
                             },
@@ -996,7 +1184,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.VerifiedUser, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Verify & Activate", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(Localization.get("activate_code", language), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
 
                         OutlinedButton(
@@ -1009,7 +1197,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(16.dp), tint = OrangePrimary)
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Cloud Sync", fontSize = 11.5.sp, color = OrangePrimary, fontWeight = FontWeight.Bold)
+                            Text(Localization.get("sync_cloud_approvals", language), fontSize = 11.sp, color = OrangePrimary, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -1071,7 +1259,7 @@ fun SettingsScreen(
         }
 
         // 3.5 Admin Licensing & Supabase Web Platform Card
-        item {
+        if (shouldShowSection("LICENSE", "admin console master supabase web portal unlock codes verification")) item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -1093,16 +1281,16 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Admin Verification & Web Platform",
+                                text = Localization.get("admin_portal_title", language),
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.5.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
                                 text = if (adminSession != null) {
-                                    "Signed in as ${adminSession.email} • Verify payments & issue BB2 codes"
+                                    "Signed in as ${adminSession.email} • Live Supabase Sync"
                                 } else {
-                                    "Supabase Auth licensing portal for payment verification & BB2 unlock codes"
+                                    "Supabase Auth licensing portal • Multi-shop management & BB2 codes"
                                 },
                                 fontSize = 11.sp,
                                 color = if (adminSession != null) ProfitGreen else MaterialTheme.colorScheme.onSurfaceVariant
@@ -1130,7 +1318,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.VerifiedUser, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Admin Console", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(Localization.get("open_admin_console", language), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
 
                         OutlinedButton(
@@ -1143,7 +1331,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(16.dp), tint = OrangePrimary)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Web Admin Portal", fontSize = 12.sp, color = OrangePrimary, fontWeight = FontWeight.Bold)
+                            Text(Localization.get("web_admin_portal", language), fontSize = 12.sp, color = OrangePrimary, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -1151,7 +1339,7 @@ fun SettingsScreen(
         }
 
         // 4. Shop Profile & Business Registration Form
-        item {
+        if (shouldShowSection("SHOP", "shop profile name owner phone tin tax vat currency address")) item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -1345,7 +1533,7 @@ fun SettingsScreen(
         }
 
         // 5. Financial Targets & Cash Register Float
-        item {
+        if (shouldShowSection("SHOP", "financial targets daily monthly goal margin cash register float")) item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -1418,7 +1606,7 @@ fun SettingsScreen(
         }
 
         // 6. Thermal POS Receipt & Hardware Printer Settings
-        item {
+        if (shouldShowSection("SHOP", "thermal printer receipt paper 58mm 80mm esc pos logo tax barcode qr")) item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -1596,7 +1784,7 @@ fun SettingsScreen(
         }
 
         // 7. Sound FX & Haptic Touch Sensory Feedback
-        item {
+        if (shouldShowSection("SHOP", "audio sound chime haptic vibration feedback pos")) item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -1654,8 +1842,108 @@ fun SettingsScreen(
             }
         }
 
+        // 7.5 Terminal Security, Hardware Integrity & Auto-Lock Timeout Card
+        if (shouldShowSection("SECURITY", "security autolock idle timeout hardware integrity strongbox keystore sqlcipher aes audit")) item {
+            val integrity = deviceIntegrityStatus ?: remember { com.example.util.DeviceSecurityManager.inspectDeviceIntegrity() }
+            val keystoreLabel = remember { com.example.util.CryptoKeyManager.getHardwareKeystoreStatus() }
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, ProfitGreen.copy(alpha = 0.35f)),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Surface(
+                                shape = CircleShape,
+                                color = ProfitGreen.copy(alpha = 0.14f),
+                                modifier = Modifier.size(38.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.Timer, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(20.dp))
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = Localization.get("security_autolock_title", language),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "${integrity.postureLabel} • $keystoreLabel",
+                                    fontSize = 11.sp,
+                                    color = if (integrity.isCompromisedRisk) LossRed else ProfitGreen,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = Localization.get("idle_lock_timeout", language),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(1, 5, 15, 30).forEach { mins ->
+                            val selected = idleLockMinutes == mins
+                            FilterChip(
+                                selected = selected,
+                                onClick = { onSetIdleLockMinutes(mins) },
+                                label = {
+                                    Text(
+                                        text = "${mins}m",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = OrangePrimary,
+                                    selectedLabelColor = Color.White
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("settings_idle_lock_${mins}m")
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedButton(
+                        onClick = { showDiagnosticsDialog = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag("settings_security_audit_card_btn"),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Security Posture & HLC Sync Diagnostics", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = ProfitGreen)
+                    }
+                }
+            }
+        }
+
         // 8. Supercharged SQLite Database Engine & Maintenance Hub
-        item {
+        if (shouldShowSection("SECURITY", "sqlite database engine sqlcipher pragma integrity wal checkpoint reset wipe factory")) item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
@@ -1693,7 +1981,7 @@ fun SettingsScreen(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "Room SQLite v9 • WAL Journal Active",
+                                    text = "Room SQLite v11 • SQLCipher AES-256 + WAL",
                                     fontSize = 11.sp,
                                     color = Color(0xFF0284C7),
                                     fontWeight = FontWeight.Medium
@@ -1824,13 +2112,15 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedButton(
-                            onClick = { onSeedSampleData() },
-                            modifier = Modifier.weight(1f),
+                            onClick = { showDiagnosticsDialog = true },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("settings_open_diagnostics_btn"),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(15.dp), tint = OrangePrimary)
+                            Icon(Icons.Default.VerifiedUser, contentDescription = null, modifier = Modifier.size(15.dp), tint = OrangePrimary)
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Seed Rwanda Catalog", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Sync & Security Audit", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
 
                         OutlinedButton(
@@ -1893,7 +2183,7 @@ fun SettingsScreen(
         }
 
         // 9. Device Permissions & System Integration Hub
-        item {
+        if (shouldShowSection("SECURITY", "permissions contacts sms messages notifications camera scanner")) item {
             val hasContacts = PermissionManager.hasContactsPermission(context)
             val hasSms = PermissionManager.hasSmsPermission(context)
             val hasNotifications = PermissionManager.hasNotificationPermission(context)
@@ -2030,7 +2320,7 @@ fun SettingsScreen(
         }
 
         // 9.5 Enterprise Push Notification System & Live Alert Testing Hub
-        item {
+        if (shouldShowSection("SECURITY", "notifications alerts push sale low stock debt transfer goal sync")) item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
@@ -2187,7 +2477,7 @@ fun SettingsScreen(
         }
 
         // 10. Official App Branding & Security Verification Card
-        item {
+        if (shouldShowSection("LANGUAGE", "about brand version splash intro beboss")) item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
@@ -2683,6 +2973,8 @@ fun SettingsScreen(
             auditLogs = adminAuditLogs,
             localAuditLogs = localAuditLogs,
             isLoading = isAdminLoading,
+            language = language,
+            lastSyncedAt = adminLastSyncedAt,
             onSignInAdmin = onAdminSignIn,
             onSignUpAdmin = onAdminSignUp,
             onSignOutAdmin = onAdminSignOut,
@@ -2701,6 +2993,7 @@ fun SettingsScreen(
             },
             onRevokeCode = onAdminRevokeCode,
             onExtendShopSubscription = onAdminExtendShopSubscription,
+            onResetShopTrial = onAdminResetShopTrial,
             onSetShopStatus = onAdminSetShopStatus,
             onUpdateShopLimits = onAdminUpdateShopLimits,
             onDeleteShopAccount = onAdminDeleteShopAccount,
@@ -2713,12 +3006,142 @@ fun SettingsScreen(
         )
     }
 
+    // Sync Conflict Resolution & Terminal Security Diagnostics Dialog
+    if (showDiagnosticsDialog) {
+        val integrity = deviceIntegrityStatus ?: remember { com.example.util.DeviceSecurityManager.inspectDeviceIntegrity() }
+        val keystoreStatus = remember { com.example.util.CryptoKeyManager.getHardwareKeystoreStatus() }
+        val rollbackFlag = remember { com.example.util.ClockGuard.isClockRollbackDetected() }
+        val conflictLogs = remember(localAuditLogs) {
+            localAuditLogs.filter {
+                it.action.contains("CONFLICT", ignoreCase = true) ||
+                    it.action.contains("REFUND", ignoreCase = true) ||
+                    it.action.contains("WARNING", ignoreCase = true)
+            }
+        }
+        AlertDialog(
+            onDismissRequest = { showDiagnosticsDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = OrangePrimary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Sync Conflicts & Security Posture", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Terminal Security", fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                            Text(
+                                text = "Integrity: ${integrity.postureLabel}",
+                                fontSize = 11.5.sp,
+                                color = if (integrity.isCompromisedRisk) LossRed else ProfitGreen,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text("Keystore: $keystoreStatus", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("DB Encryption: SQLCipher AES-256 (Keystore-wrapped)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                text = "ClockGuard: ${if (rollbackFlag) "Rollback Detected" else "Monotonic Verified"}",
+                                fontSize = 11.sp,
+                                color = if (rollbackFlag) LossRed else ProfitGreen
+                            )
+                            Text(
+                                text = "TLS Cert Pinning: ${if (com.example.BuildConfig.SUPABASE_CERT_PINS.contains("sha256/")) "Pinned" else "Standard TLS"}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Outbox & Sync Engine", fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                            Text("Pending Outbox Items: $pendingSyncCount", fontSize = 11.5.sp)
+                            Text(
+                                text = "Dead-Letter / Retrying: $deadLetterSyncCount",
+                                fontSize = 11.5.sp,
+                                color = if (deadLetterSyncCount > 0) LossRed else ProfitGreen,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (pendingSyncCount > 0 || deadLetterSyncCount > 0) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Button(
+                                    onClick = {
+                                        onSyncToCloudNow()
+                                        showDiagnosticsDialog = false
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary)
+                                ) {
+                                    Text("Retry Sync Outbox Now", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "Conflict & Audit Events (${conflictLogs.size})",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.5.sp
+                    )
+                    if (conflictLogs.isEmpty()) {
+                        Text(
+                            text = "No unresolved HLC sync conflicts or security alerts recorded.",
+                            fontSize = 11.5.sp,
+                            color = ProfitGreen
+                        )
+                    } else {
+                        conflictLogs.take(10).forEach { entry ->
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(8.dp)) {
+                                    Text("${entry.action} • ${entry.actorName}", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = OrangePrimary)
+                                    Text(entry.details, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onVerifyDatabaseIntegrity()
+                        showDiagnosticsDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary)
+                ) {
+                    Text("Run PRAGMA Check", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showDiagnosticsDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
     // Logout Confirmation Dialog
     if (showLogoutConfirm) {
         AlertDialog(
             onDismissRequest = { showLogoutConfirm = false },
             title = { Text(Localization.get("logout", language), fontWeight = FontWeight.Bold) },
-            text = { Text("Are you sure you want to log out of your BeBoss session on this device?") },
+            text = { Text(Localization.get("logout_confirm_msg", language)) },
             confirmButton = {
                 Button(
                     onClick = {

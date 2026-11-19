@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -87,6 +89,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Security
+import com.example.BuildConfig
 import com.example.data.model.LocalAuditLog
 import com.example.data.model.ShopProfile
 import com.example.ui.theme.DarkNavy
@@ -94,6 +99,9 @@ import com.example.ui.theme.LossRed
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.ProfitGreen
 import com.example.ui.theme.WarningAmber
+import com.example.util.ClockGuard
+import com.example.util.CryptoKeyManager
+import com.example.util.DeviceSecurityManager
 import com.example.util.OfflineSubscriptionManager
 import com.example.util.PdfReportGenerator
 import com.example.util.SupabaseAdminClient
@@ -101,6 +109,9 @@ import com.example.util.SupabaseAdminSession
 import com.example.util.SupabaseAuditLogDto
 import com.example.util.SupabaseBranchSnapshotDto
 import com.example.util.SupabasePaymentRequestDto
+import com.example.util.AppLanguage
+import com.example.util.Localization
+import com.example.util.SubscriptionSecurityManager
 import com.example.util.SupabaseShopAccountDto
 import com.example.util.SupabaseShopUserDto
 import com.example.util.SupabaseUnlockCodeDto
@@ -122,6 +133,8 @@ fun AdminVerificationConsoleDialog(
     auditLogs: List<SupabaseAuditLogDto>,
     localAuditLogs: List<LocalAuditLog> = emptyList(),
     isLoading: Boolean,
+    language: AppLanguage = AppLanguage.ENGLISH,
+    lastSyncedAt: Long = 0L,
     onSignInAdmin: (email: String, password: String) -> Unit,
     onSignUpAdmin: (email: String, password: String, fullName: String) -> Unit,
     onSignOutAdmin: () -> Unit,
@@ -132,6 +145,7 @@ fun AdminVerificationConsoleDialog(
     onIssueManualCode: (username: String, registeredPhone: String, tierCode: String, days: Int, amountRwf: Int, onDone: (Boolean, String) -> Unit) -> Unit,
     onRevokeCode: (SupabaseUnlockCodeDto) -> Unit,
     onExtendShopSubscription: (SupabaseShopAccountDto, Int) -> Unit = { _, _ -> },
+    onResetShopTrial: (SupabaseShopAccountDto) -> Unit = {},
     onSetShopStatus: (SupabaseShopAccountDto, String) -> Unit = { _, _ -> },
     onUpdateShopLimits: (SupabaseShopAccountDto, Int, Int) -> Unit = { _, _, _ -> },
     onDeleteShopAccount: (SupabaseShopAccountDto) -> Unit = {},
@@ -157,12 +171,15 @@ fun AdminVerificationConsoleDialog(
     var adminFullName by remember { mutableStateOf("BeBoss Master Admin") }
     var showAdminPassword by remember { mutableStateOf(false) }
 
-    // Queue, Users, Shops, Audit Filters
+    // Queue, Users, Shops, Codes, Audit Filters
     var queueStatusFilter by remember { mutableStateOf("ALL") }
     var queueSearchQuery by remember { mutableStateOf("") }
     var userSearchQuery by remember { mutableStateOf("") }
     var shopSearchQuery by remember { mutableStateOf("") }
-    var showLocalSecurityAudit by remember { mutableStateOf(false) }
+    var shopStatusFilter by remember { mutableStateOf("ALL") }
+    var codeSearchQuery by remember { mutableStateOf("") }
+    var codeStatusFilter by remember { mutableStateOf("ALL") }
+    var auditSubTab by remember { mutableIntStateOf(0) } // 0 = Cloud, 1 = Local Security, 2 = Security Diagnostics
 
     // Reject Modal State
     var requestToReject by remember { mutableStateOf<SupabasePaymentRequestDto?>(null) }
@@ -176,6 +193,7 @@ fun AdminVerificationConsoleDialog(
     var manualAmountText by remember { mutableStateOf("5000") }
 
     val dateFormatter = remember { SimpleDateFormat("dd MMM HH:mm", Locale.getDefault()) }
+    val syncTimeFormatter = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -218,7 +236,7 @@ fun AdminVerificationConsoleDialog(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "BeBoss Master Admin Console",
+                                text = Localization.get("admin_console_title", language),
                                 fontWeight = FontWeight.Black,
                                 fontSize = 15.5.sp,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -451,15 +469,25 @@ fun AdminVerificationConsoleDialog(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
+                    val nowMs = ClockGuard.effectiveNowMs()
                     val pendingCount = paymentRequests.count { it.status == "PENDING_VERIFICATION" }
                     val pendingTotalRwf = paymentRequests
                         .filter { it.status == "PENDING_VERIFICATION" }
                         .sumOf { it.amountRwf }
-                    val activeShopsCount = shopAccounts.count {
-                        it.subscriptionStatus == "ACTIVE" && it.subscriptionExpiresAt > System.currentTimeMillis()
+                    val paidActiveShops = shopAccounts.filter {
+                        it.subscriptionStatus == ShopProfile.STATUS_ACTIVE && it.subscriptionExpiresAt > nowMs
                     }
+                    val activeTrialShopsCount = shopAccounts.count {
+                        it.subscriptionStatus == ShopProfile.STATUS_TRIAL && it.subscriptionExpiresAt > nowMs
+                    }
+                    val lockedShopsCount = shopAccounts.count {
+                        it.subscriptionStatus == ShopProfile.STATUS_SUSPENDED ||
+                            it.subscriptionStatus == ShopProfile.STATUS_EXPIRED ||
+                            it.subscriptionExpiresAt <= nowMs
+                    }
+                    val monthlyMrrRwf = paidActiveShops.sumOf { it.monthlyFeeRwf }
 
-                    // Master Admin KPI Summary Strip
+                    // Master Admin KPI Summary Strip (Row 1: Revenue & Queue)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -477,17 +505,75 @@ fun AdminVerificationConsoleDialog(
                             modifier = Modifier.weight(1f)
                         )
                         AdminKpiCard(
-                            label = "Active Shops",
-                            value = "$activeShopsCount/${shopAccounts.size}",
+                            label = "Paid Active",
+                            value = "${paidActiveShops.size}",
                             accent = ProfitGreen,
+                            modifier = Modifier.weight(1f)
+                        )
+                        AdminKpiCard(
+                            label = "MRR FRw",
+                            value = "${monthlyMrrRwf / 1000}k",
+                            accent = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Row 2: Trials, Locked Terminals, Unlock Codes
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        AdminKpiCard(
+                            label = "4-Day Trials",
+                            value = "$activeTrialShopsCount",
+                            accent = Color(0xFF0284C7),
+                            modifier = Modifier.weight(1f)
+                        )
+                        AdminKpiCard(
+                            label = "Locked Shops",
+                            value = "$lockedShopsCount",
+                            accent = if (lockedShopsCount > 0) LossRed else ProfitGreen,
                             modifier = Modifier.weight(1f)
                         )
                         AdminKpiCard(
                             label = "BB2 Issued",
                             value = "${unlockCodes.size}",
-                            accent = MaterialTheme.colorScheme.primary,
+                            accent = OrangePrimary,
                             modifier = Modifier.weight(1f)
                         )
+                    }
+
+                    if (lastSyncedAt > 0L) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = ProfitGreen.copy(alpha = 0.1f),
+                            border = BorderStroke(1.dp, ProfitGreen.copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Icon(Icons.Default.CloudSync, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(14.dp))
+                                    Text(
+                                        text = "Live Supabase Sync • ${syncTimeFormatter.format(Date(lastSyncedAt))}",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = ProfitGreen
+                                    )
+                                }
+                                Text(
+                                    text = "${shopAccounts.size} shops • ${shopUsers.size} users • ${unlockCodes.size} codes",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -501,37 +587,37 @@ fun AdminVerificationConsoleDialog(
                         Tab(
                             selected = selectedTab == 0,
                             onClick = { selectedTab = 0 },
-                            text = { Text("Queue ($pendingCount/${paymentRequests.size})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
+                            text = { Text("${Localization.get("admin_tab_queue", language)} ($pendingCount/${paymentRequests.size})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
                         )
                         Tab(
                             selected = selectedTab == 1,
                             onClick = { selectedTab = 1 },
-                            text = { Text("Users (${shopUsers.size})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
+                            text = { Text("${Localization.get("admin_tab_users", language)} (${shopUsers.size})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
                         )
                         Tab(
                             selected = selectedTab == 2,
                             onClick = { selectedTab = 2 },
-                            text = { Text("Shops (${shopAccounts.size})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
+                            text = { Text("${Localization.get("admin_tab_shops", language)} (${shopAccounts.size})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
                         )
                         Tab(
                             selected = selectedTab == 3,
                             onClick = { selectedTab = 3 },
-                            text = { Text("Issue Code", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
+                            text = { Text(Localization.get("admin_tab_issue", language), fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
                         )
                         Tab(
                             selected = selectedTab == 4,
                             onClick = { selectedTab = 4 },
-                            text = { Text("Codes (${unlockCodes.size})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
+                            text = { Text("${Localization.get("admin_tab_codes", language)} (${unlockCodes.size})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
                         )
                         Tab(
                             selected = selectedTab == 5,
                             onClick = { selectedTab = 5 },
-                            text = { Text("Branches (${branchSnapshots.size})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
+                            text = { Text("${Localization.get("admin_tab_branches", language)} (${branchSnapshots.size})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
                         )
                         Tab(
                             selected = selectedTab == 6,
                             onClick = { selectedTab = 6 },
-                            text = { Text("Audit (${auditLogs.size + localAuditLogs.size})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
+                            text = { Text("${Localization.get("admin_tab_audit", language)} (${auditLogs.size + localAuditLogs.size})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
                         )
                     }
 
@@ -972,7 +1058,7 @@ fun AdminVerificationConsoleDialog(
                         }
 
                         2 -> {
-                            // ALL SHOPS LICENSING & STATUS MANAGEMENT
+                            // ALL SHOPS LICENSING, 4-DAY TRIAL & REMOTE LOCK MANAGEMENT
                             OutlinedTextField(
                                 value = shopSearchQuery,
                                 onValueChange = { shopSearchQuery = it },
@@ -981,38 +1067,88 @@ fun AdminVerificationConsoleDialog(
                                 singleLine = true,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(bottom = 8.dp),
+                                    .padding(bottom = 6.dp)
+                                    .testTag("admin_shop_search_input"),
                                 shape = RoundedCornerShape(12.dp)
                             )
 
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                listOf("ALL", "ACTIVE", "TRIAL", "EXPIRED", "SUSPENDED").forEach { statusOpt ->
+                                    val selected = shopStatusFilter == statusOpt
+                                    OutlinedButton(
+                                        onClick = { shopStatusFilter = statusOpt },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .heightIn(min = 42.dp),
+                                        contentPadding = PaddingValues(horizontal = 2.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            containerColor = if (selected) OrangePrimary.copy(alpha = 0.16f) else Color.Transparent
+                                        )
+                                    ) {
+                                        Text(
+                                            text = if (statusOpt == "SUSPENDED") "LOCKED" else statusOpt,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (selected) OrangePrimary else MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
+
+                            val nowCheck = ClockGuard.effectiveNowMs()
                             val filteredShops = shopAccounts.filter { s ->
+                                val isExpiredTime = s.subscriptionExpiresAt <= nowCheck
+                                val derivedStatus = when {
+                                    s.subscriptionStatus == ShopProfile.STATUS_SUSPENDED -> ShopProfile.STATUS_SUSPENDED
+                                    s.subscriptionStatus == ShopProfile.STATUS_EXPIRED || isExpiredTime -> ShopProfile.STATUS_EXPIRED
+                                    s.subscriptionStatus == ShopProfile.STATUS_TRIAL -> ShopProfile.STATUS_TRIAL
+                                    else -> ShopProfile.STATUS_ACTIVE
+                                }
+                                val matchesFilter = shopStatusFilter == "ALL" || derivedStatus == shopStatusFilter
                                 val q = shopSearchQuery.trim().lowercase(Locale.ROOT)
-                                q.isBlank() ||
+                                val matchesQuery = q.isBlank() ||
                                     s.shopName.lowercase(Locale.ROOT).contains(q) ||
                                     s.ownerUsername.lowercase(Locale.ROOT).contains(q) ||
                                     s.ownerPhone.contains(q)
+                                matchesFilter && matchesQuery
                             }
 
                             if (filteredShops.isEmpty()) {
                                 Text(
-                                    text = "No Supabase shop accounts synced yet.",
+                                    text = "No Supabase shop accounts match this filter.",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(8.dp)
                                 )
                             } else {
                                 filteredShops.forEach { acc ->
-                                    val daysLeft = ((acc.subscriptionExpiresAt - System.currentTimeMillis()) / 86_400_000L).toInt()
-                                    val isSuspended = acc.subscriptionStatus == "SUSPENDED"
+                                    val millisLeft = (acc.subscriptionExpiresAt - nowCheck).coerceAtLeast(0L)
+                                    val daysLeft = if (millisLeft <= 0L) 0 else ((millisLeft + 86_399_999L) / 86_400_000L).toInt()
+                                    val isSuspended = acc.subscriptionStatus == ShopProfile.STATUS_SUSPENDED
+                                    val isTrial = acc.subscriptionStatus == ShopProfile.STATUS_TRIAL && millisLeft > 0L
+                                    val isLockedOut = isSuspended || acc.subscriptionStatus == ShopProfile.STATUS_EXPIRED || millisLeft <= 0L
                                     val statusColor = when {
                                         isSuspended -> LossRed
-                                        acc.subscriptionStatus == "ACTIVE" && daysLeft > 0 -> ProfitGreen
-                                        else -> WarningAmber
+                                        isLockedOut -> LossRed
+                                        isTrial -> Color(0xFF0284C7)
+                                        else -> ProfitGreen
+                                    }
+                                    val badgeLabel = when {
+                                        isSuspended -> "SUSPENDED"
+                                        isLockedOut -> "EXPIRED (LOCKED)"
+                                        isTrial -> "TRIAL (${daysLeft}d)"
+                                        else -> "ACTIVE (${daysLeft}d)"
                                     }
                                     Surface(
                                         shape = RoundedCornerShape(12.dp),
                                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                        border = BorderStroke(1.dp, statusColor.copy(alpha = 0.35f)),
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(vertical = 4.dp)
@@ -1028,12 +1164,18 @@ fun AdminVerificationConsoleDialog(
                                                     Spacer(modifier = Modifier.width(6.dp))
                                                     Text("${acc.shopName} (@${acc.ownerUsername})", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                                 }
-                                                Text(
-                                                    text = if (isSuspended) "SUSPENDED" else "${acc.subscriptionStatus} (${daysLeft.coerceAtLeast(0)}d)",
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.Black,
-                                                    color = statusColor
-                                                )
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = statusColor.copy(alpha = 0.15f)
+                                                ) {
+                                                    Text(
+                                                        text = badgeLabel,
+                                                        fontSize = 9.5.sp,
+                                                        fontWeight = FontWeight.Black,
+                                                        color = statusColor,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
                                             }
                                             Text(
                                                 text = "Phone: ${acc.ownerPhone} • ${acc.branchCount} br / ${acc.workerCount} stf • ${acc.monthlyFeeRwf} FRw/mo",
@@ -1107,20 +1249,52 @@ fun AdminVerificationConsoleDialog(
                                                 }
                                             }
 
+                                            // Quick Duration Extension Row (+4d Trial, +30d, +90d, +365d)
                                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                OutlinedButton(
+                                                    onClick = { onResetShopTrial(acc) },
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .heightIn(min = 44.dp),
+                                                    contentPadding = PaddingValues(horizontal = 4.dp),
+                                                    border = BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.5f))
+                                                ) {
+                                                    Icon(Icons.Default.RestartAlt, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(14.dp))
+                                                    Spacer(modifier = Modifier.width(3.dp))
+                                                    Text("4d Trial", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0284C7))
+                                                }
                                                 Button(
                                                     onClick = { onExtendShopSubscription(acc, 30) },
                                                     modifier = Modifier
                                                         .weight(1f)
-                                                        .heightIn(min = 48.dp),
-                                                    contentPadding = PaddingValues(horizontal = 6.dp),
+                                                        .heightIn(min = 44.dp),
+                                                    contentPadding = PaddingValues(horizontal = 4.dp),
                                                     colors = ButtonDefaults.buttonColors(containerColor = ProfitGreen)
                                                 ) {
-                                                    Icon(Icons.Default.AddCircleOutline, contentDescription = null, modifier = Modifier.size(14.dp))
-                                                    Spacer(modifier = Modifier.width(4.dp))
-                                                    Text("+30d", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                    Text("+30d", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
                                                 }
+                                                OutlinedButton(
+                                                    onClick = { onExtendShopSubscription(acc, 90) },
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .heightIn(min = 44.dp),
+                                                    contentPadding = PaddingValues(horizontal = 4.dp)
+                                                ) {
+                                                    Text("+90d", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = ProfitGreen)
+                                                }
+                                                OutlinedButton(
+                                                    onClick = { onExtendShopSubscription(acc, 365) },
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .heightIn(min = 44.dp),
+                                                    contentPadding = PaddingValues(horizontal = 4.dp)
+                                                ) {
+                                                    Text("+1yr", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = OrangePrimary)
+                                                }
+                                            }
 
+                                            // Controls Row: BB2 Code, Remote Lock/Activate, WhatsApp, Delete
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                                                 OutlinedButton(
                                                     onClick = {
                                                         manualUsername = acc.ownerUsername
@@ -1135,24 +1309,38 @@ fun AdminVerificationConsoleDialog(
                                                 ) {
                                                     Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(14.dp))
                                                     Spacer(modifier = Modifier.width(4.dp))
-                                                    Text("BB2", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                    Text("Issue BB2", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
                                                 }
 
                                                 OutlinedButton(
                                                     onClick = {
-                                                        onSetShopStatus(acc, if (isSuspended) "ACTIVE" else "SUSPENDED")
+                                                        onSetShopStatus(
+                                                            acc,
+                                                            if (isLockedOut) ShopProfile.STATUS_ACTIVE else ShopProfile.STATUS_SUSPENDED
+                                                        )
                                                     },
                                                     modifier = Modifier
                                                         .weight(1f)
                                                         .heightIn(min = 48.dp),
-                                                    contentPadding = PaddingValues(horizontal = 6.dp)
+                                                    contentPadding = PaddingValues(horizontal = 6.dp),
+                                                    border = BorderStroke(1.dp, if (isLockedOut) ProfitGreen else LossRed.copy(alpha = 0.6f))
                                                 ) {
                                                     Text(
-                                                        text = if (isSuspended) "Activate" else "Suspend",
+                                                        text = if (isLockedOut) "Unlock" else "Lock App",
                                                         fontSize = 10.5.sp,
                                                         fontWeight = FontWeight.Bold,
-                                                        color = if (isSuspended) ProfitGreen else WarningAmber
+                                                        color = if (isLockedOut) ProfitGreen else LossRed
                                                     )
+                                                }
+
+                                                IconButton(
+                                                    onClick = {
+                                                        val msg = "Hello ${acc.shopName} (@${acc.ownerUsername}), this is BeBoss Master Support. Your current plan status is $badgeLabel (${acc.monthlyFeeRwf} FRw/mo). Reply here if you need renewal assistance."
+                                                        PdfReportGenerator.sendWhatsAppDirect(context, acc.ownerPhone, msg)
+                                                    },
+                                                    modifier = Modifier.size(48.dp)
+                                                ) {
+                                                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Message shop on WhatsApp", tint = ProfitGreen)
                                                 }
 
                                                 IconButton(
@@ -1169,15 +1357,65 @@ fun AdminVerificationConsoleDialog(
                         }
 
                         3 -> {
-                            // Manual BB2 Unlock Code Generator
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Real Account-Bound BB2 Unlock Code Generator with Registered Shop Picker & Duration Presets
+                            val previewBindingHash = remember(manualUsername, manualPhone) {
+                                if (manualUsername.trim().isNotEmpty() && SubscriptionSecurityManager.normalizePhoneLast9(manualPhone).isNotEmpty()) {
+                                    SubscriptionSecurityManager.computeAccountBindingHash(manualUsername, manualPhone)
+                                } else null
+                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                if (shopAccounts.isNotEmpty()) {
+                                    Text(
+                                        text = Localization.get("admin_pick_registered_shop", language),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        items(shopAccounts) { acc ->
+                                            val isPicked = manualUsername.equals(acc.ownerUsername, ignoreCase = true) &&
+                                                SubscriptionSecurityManager.normalizePhoneLast9(manualPhone) ==
+                                                SubscriptionSecurityManager.normalizePhoneLast9(acc.ownerPhone)
+                                            Surface(
+                                                onClick = {
+                                                    manualUsername = acc.ownerUsername
+                                                    manualPhone = acc.ownerPhone
+                                                    manualTier = when {
+                                                        acc.branchCount >= 3 -> "MULTI"
+                                                        acc.branchCount == 2 -> "DUAL"
+                                                        else -> "SINGLE"
+                                                    }
+                                                    val months = ((manualDaysText.toIntOrNull() ?: 30) / 30).coerceAtLeast(1)
+                                                    val calc = OfflineSubscriptionManager.calculateSubscriptionPrice(
+                                                        branchCount = acc.branchCount.coerceAtLeast(1),
+                                                        workerCount = acc.workerCount.coerceAtLeast(1),
+                                                        durationMonths = months
+                                                    )
+                                                    manualAmountText = calc.totalPayable.toString()
+                                                },
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = if (isPicked) OrangePrimary.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                                                border = BorderStroke(1.dp, if (isPicked) OrangePrimary else MaterialTheme.colorScheme.outlineVariant),
+                                                modifier = Modifier.heightIn(min = 42.dp)
+                                            ) {
+                                                Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                                                    Text(acc.shopName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                                    Text("@${acc.ownerUsername} • ${acc.ownerPhone}", fontSize = 9.5.sp, color = if (isPicked) OrangePrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
                                 OutlinedTextField(
                                     value = manualUsername,
                                     onValueChange = { manualUsername = it },
                                     label = { Text("Shop Owner Created Username *") },
                                     placeholder = { Text("e.g. jeanpaul") },
                                     singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("admin_manual_username_input")
                                 )
                                 OutlinedTextField(
                                     value = manualPhone,
@@ -1186,31 +1424,96 @@ fun AdminVerificationConsoleDialog(
                                     placeholder = { Text("+250 788 123 456") },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                                     singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("admin_manual_phone_input")
                                 )
+
+                                // Tier Selector
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    listOf("SINGLE", "MULTI", "PRO").forEach { tier ->
+                                    listOf(
+                                        Triple("SINGLE", 1, 5000),
+                                        Triple("DUAL", 2, 10000),
+                                        Triple("MULTI", 3, 20000),
+                                        Triple("ANNUAL", 1, 48000)
+                                    ).forEach { (tier, br, baseAmt) ->
                                         val selected = manualTier == tier
                                         OutlinedButton(
                                             onClick = {
                                                 manualTier = tier
-                                                manualAmountText = when (tier) {
-                                                    "SINGLE" -> "5000"
-                                                    "MULTI" -> "10000"
-                                                    else -> "20000"
+                                                if (tier == "ANNUAL") {
+                                                    manualDaysText = "365"
+                                                    manualAmountText = baseAmt.toString()
+                                                } else {
+                                                    val months = ((manualDaysText.toIntOrNull() ?: 30) / 30).coerceAtLeast(1)
+                                                    val calc = OfflineSubscriptionManager.calculateSubscriptionPrice(
+                                                        branchCount = br,
+                                                        workerCount = 1,
+                                                        durationMonths = months
+                                                    )
+                                                    manualAmountText = calc.totalPayable.toString()
                                                 }
                                             },
                                             modifier = Modifier
                                                 .weight(1f)
-                                                .heightIn(min = 48.dp),
+                                                .heightIn(min = 44.dp),
+                                            contentPadding = PaddingValues(horizontal = 4.dp),
                                             colors = ButtonDefaults.outlinedButtonColors(
                                                 containerColor = if (selected) OrangePrimary.copy(alpha = 0.15f) else Color.Transparent
                                             )
                                         ) {
-                                            Text(tier, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (selected) OrangePrimary else MaterialTheme.colorScheme.onSurface)
+                                            Text(tier, fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = if (selected) OrangePrimary else MaterialTheme.colorScheme.onSurface)
                                         }
                                     }
                                 }
+
+                                // Duration Presets (4d Trial, 30d, 90d, 180d, 365d)
+                                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    listOf(
+                                        Triple("4d", 4, 0),
+                                        Triple("30d", 30, 1),
+                                        Triple("90d", 90, 3),
+                                        Triple("180d", 180, 6),
+                                        Triple("365d", 365, 12)
+                                    ).forEach { (label, daysVal, monthsVal) ->
+                                        val isCurrent = manualDaysText == daysVal.toString()
+                                        Surface(
+                                            onClick = {
+                                                manualDaysText = daysVal.toString()
+                                                if (monthsVal == 0) {
+                                                    manualAmountText = "0"
+                                                } else {
+                                                    val br = when (manualTier) {
+                                                        "MULTI" -> 3
+                                                        "DUAL" -> 2
+                                                        else -> 1
+                                                    }
+                                                    val calc = OfflineSubscriptionManager.calculateSubscriptionPrice(
+                                                        branchCount = br,
+                                                        workerCount = 1,
+                                                        durationMonths = monthsVal
+                                                    )
+                                                    manualAmountText = calc.totalPayable.toString()
+                                                }
+                                            },
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (isCurrent) DarkNavy else MaterialTheme.colorScheme.surfaceVariant,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .heightIn(min = 40.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(
+                                                    text = label,
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isCurrent) Color.White else MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     OutlinedTextField(
                                         value = manualDaysText,
@@ -1229,6 +1532,38 @@ fun AdminVerificationConsoleDialog(
                                         modifier = Modifier.weight(1f)
                                     )
                                 }
+
+                                if (previewBindingHash != null) {
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = ProfitGreen.copy(alpha = 0.08f),
+                                        border = BorderStroke(1.dp, ProfitGreen.copy(alpha = 0.35f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(10.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = "Cryptographic Account Binding Ready",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = ProfitGreen
+                                                )
+                                                Text(
+                                                    text = "@${manualUsername.trim().lowercase(Locale.ROOT)} + *${SubscriptionSecurityManager.normalizePhoneLast9(manualPhone)} → Hash #$previewBindingHash",
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 10.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(18.dp))
+                                        }
+                                    }
+                                }
+
                                 Button(
                                     onClick = {
                                         val days = manualDaysText.toIntOrNull()?.coerceAtLeast(1) ?: 30
@@ -1241,7 +1576,7 @@ fun AdminVerificationConsoleDialog(
                                             lastTargetDays = days
                                         }
                                     },
-                                    enabled = manualUsername.isNotBlank() && manualPhone.isNotBlank(),
+                                    enabled = manualUsername.isNotBlank() && SubscriptionSecurityManager.normalizePhoneLast9(manualPhone).length >= 7,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .heightIn(min = 48.dp)
@@ -1250,67 +1585,134 @@ fun AdminVerificationConsoleDialog(
                                 ) {
                                     Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Generate Account-Bound BB2 Unlock Code", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text(Localization.get("admin_generate_bb2_cta", language), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
 
                         4 -> {
-                            // Unlock Codes Ledger with Revoke
-                            if (unlockCodes.isEmpty()) {
-                                Text(
-                                    text = "No BB2 unlock codes recorded in Supabase yet.",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(8.dp)
+                            // Unlock Codes Ledger with Search, Status Filter, Copy, WhatsApp & Revoke
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = codeSearchQuery,
+                                    onValueChange = { codeSearchQuery = it },
+                                    label = { Text("Search BB2 code, @username, phone or tier") },
+                                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
                                 )
-                            } else {
-                                unlockCodes.forEach { codeDto ->
-                                    val isRevoked = codeDto.status == "REVOKED"
-                                    val isRedeemed = codeDto.status == "REDEEMED"
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                                        border = BorderStroke(
-                                            1.dp,
-                                            when {
-                                                isRevoked -> LossRed.copy(alpha = 0.4f)
-                                                isRedeemed -> ProfitGreen.copy(alpha = 0.4f)
-                                                else -> MaterialTheme.colorScheme.outlineVariant
-                                            }
-                                        ),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 4.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(10.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    listOf("ALL", "ISSUED", "REDEEMED", "REVOKED").forEach { st ->
+                                        val selected = codeStatusFilter == st
+                                        OutlinedButton(
+                                            onClick = { codeStatusFilter = st },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .heightIn(min = 40.dp),
+                                            contentPadding = PaddingValues(horizontal = 4.dp),
+                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                containerColor = if (selected) OrangePrimary.copy(alpha = 0.16f) else Color.Transparent
+                                            )
                                         ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = codeDto.unlockCode,
-                                                    fontFamily = FontFamily.Monospace,
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = if (isRevoked) LossRed else MaterialTheme.colorScheme.onSurface
-                                                )
-                                                Text(
-                                                    text = "@${codeDto.shopUsername} • ${codeDto.tierCode} (${codeDto.planDays}d / ${codeDto.amountRwf} FRw) • ${codeDto.status}",
-                                                    fontSize = 10.5.sp,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                            if (!isRevoked) {
-                                                OutlinedButton(
-                                                    onClick = { onRevokeCode(codeDto) },
-                                                    modifier = Modifier.heightIn(min = 48.dp),
-                                                    border = BorderStroke(1.dp, LossRed.copy(alpha = 0.5f))
-                                                ) {
-                                                    Icon(Icons.Default.Block, contentDescription = "Revoke code", tint = LossRed, modifier = Modifier.size(14.dp))
-                                                    Spacer(modifier = Modifier.width(4.dp))
-                                                    Text("Revoke", fontSize = 10.5.sp, color = LossRed, fontWeight = FontWeight.Bold)
+                                            Text(st, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (selected) OrangePrimary else MaterialTheme.colorScheme.onSurface)
+                                        }
+                                    }
+                                }
+
+                                val filteredCodes = unlockCodes.filter { dto ->
+                                    val statusOk = codeStatusFilter == "ALL" || dto.status.equals(codeStatusFilter, ignoreCase = true)
+                                    val q = codeSearchQuery.trim().lowercase(Locale.ROOT)
+                                    val queryOk = q.isBlank() ||
+                                        dto.unlockCode.lowercase(Locale.ROOT).contains(q) ||
+                                        dto.shopUsername.lowercase(Locale.ROOT).contains(q) ||
+                                        dto.shopPhone.contains(q) ||
+                                        dto.tierCode.lowercase(Locale.ROOT).contains(q)
+                                    statusOk && queryOk
+                                }
+
+                                if (filteredCodes.isEmpty()) {
+                                    Text(
+                                        text = "No BB2 unlock codes match the filter.",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(8.dp)
+                                    )
+                                } else {
+                                    filteredCodes.forEach { codeDto ->
+                                        val isRevoked = codeDto.status == "REVOKED"
+                                        val isRedeemed = codeDto.status == "REDEEMED"
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                            border = BorderStroke(
+                                                1.dp,
+                                                when {
+                                                    isRevoked -> LossRed.copy(alpha = 0.4f)
+                                                    isRedeemed -> ProfitGreen.copy(alpha = 0.4f)
+                                                    else -> MaterialTheme.colorScheme.outlineVariant
+                                                }
+                                            ),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 2.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(10.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = codeDto.unlockCode,
+                                                        fontFamily = FontFamily.Monospace,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = if (isRevoked) LossRed else MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                    Text(
+                                                        text = "@${codeDto.shopUsername} (${codeDto.shopPhone}) • ${codeDto.tierCode} (${codeDto.planDays}d / ${codeDto.amountRwf} FRw) • ${codeDto.status}",
+                                                        fontSize = 10.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                                if (!isRevoked) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        IconButton(
+                                                            onClick = {
+                                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                                clipboard.setPrimaryClip(ClipData.newPlainText("BeBoss Unlock Code", codeDto.unlockCode))
+                                                                Toast.makeText(context, "Copied ${codeDto.unlockCode}", Toast.LENGTH_SHORT).show()
+                                                            },
+                                                            modifier = Modifier.size(42.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy unlock code", tint = OrangePrimary, modifier = Modifier.size(17.dp))
+                                                        }
+                                                        IconButton(
+                                                            onClick = {
+                                                                val msg = OfflineSubscriptionManager.buildAdminUnlockReplyWhatsAppMessage(
+                                                                    shopName = shopAccounts.firstOrNull { it.ownerUsername.equals(codeDto.shopUsername, true) }?.shopName ?: "BeBoss Shop",
+                                                                    username = codeDto.shopUsername,
+                                                                    unlockCode = codeDto.unlockCode,
+                                                                    daysAdded = codeDto.planDays,
+                                                                    tierName = "${codeDto.tierCode} (${codeDto.amountRwf} FRw)"
+                                                                )
+                                                                PdfReportGenerator.sendWhatsAppDirect(context, codeDto.shopPhone, msg)
+                                                            },
+                                                            modifier = Modifier.size(42.dp)
+                                                        ) {
+                                                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send code via WhatsApp", tint = ProfitGreen, modifier = Modifier.size(17.dp))
+                                                        }
+                                                        IconButton(
+                                                            onClick = { onRevokeCode(codeDto) },
+                                                            modifier = Modifier.size(42.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Block, contentDescription = "Revoke code", tint = LossRed, modifier = Modifier.size(17.dp))
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -1367,116 +1769,180 @@ fun AdminVerificationConsoleDialog(
                         }
 
                         else -> {
-                            // Unified Cloud + Local Security Audit Trail
+                            // Unified Cloud + Local Security Audit Trail + Hardware Security Diagnostics
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(bottom = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                OutlinedButton(
-                                    onClick = { showLocalSecurityAudit = false },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .heightIn(min = 44.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(
-                                        containerColor = if (!showLocalSecurityAudit) OrangePrimary.copy(alpha = 0.16f) else Color.Transparent
-                                    )
-                                ) {
-                                    Text("Cloud Logs (${auditLogs.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-                                OutlinedButton(
-                                    onClick = { showLocalSecurityAudit = true },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .heightIn(min = 44.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(
-                                        containerColor = if (showLocalSecurityAudit) OrangePrimary.copy(alpha = 0.16f) else Color.Transparent
-                                    )
-                                ) {
-                                    Text("Local Security (${localAuditLogs.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                listOf(
+                                    0 to "Cloud (${auditLogs.size})",
+                                    1 to "Local (${localAuditLogs.size})",
+                                    2 to "Security"
+                                ).forEach { (idx, label) ->
+                                    OutlinedButton(
+                                        onClick = { auditSubTab = idx },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .heightIn(min = 44.dp),
+                                        contentPadding = PaddingValues(horizontal = 4.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            containerColor = if (auditSubTab == idx) OrangePrimary.copy(alpha = 0.16f) else Color.Transparent
+                                        )
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (auditSubTab == idx) OrangePrimary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
                                 }
                             }
 
-                            if (!showLocalSecurityAudit) {
-                                if (auditLogs.isEmpty()) {
-                                    Text(
-                                        text = "No cloud admin audit events recorded yet.",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(8.dp)
-                                    )
-                                } else {
-                                    auditLogs.forEach { entry ->
-                                        Surface(
-                                            shape = RoundedCornerShape(10.dp),
-                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 3.dp)
-                                        ) {
-                                            Column(modifier = Modifier.padding(10.dp)) {
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween
-                                                ) {
-                                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                                        Icon(Icons.Default.History, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(14.dp))
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(entry.action, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = OrangePrimary)
+                            when (auditSubTab) {
+                                0 -> {
+                                    if (auditLogs.isEmpty()) {
+                                        Text(
+                                            text = "No cloud admin audit events recorded yet.",
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(8.dp)
+                                        )
+                                    } else {
+                                        auditLogs.forEach { entry ->
+                                            Surface(
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 3.dp)
+                                            ) {
+                                                Column(modifier = Modifier.padding(10.dp)) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween
+                                                    ) {
+                                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                                            Icon(Icons.Default.History, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(14.dp))
+                                                            Spacer(modifier = Modifier.width(4.dp))
+                                                            Text(entry.action, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = OrangePrimary)
+                                                        }
+                                                        Text(
+                                                            text = dateFormatter.format(Date(entry.createdAt)),
+                                                            fontSize = 10.sp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
                                                     }
                                                     Text(
-                                                        text = dateFormatter.format(Date(entry.createdAt)),
-                                                        fontSize = 10.sp,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        text = "${entry.adminEmail} • ${entry.details}",
+                                                        fontSize = 11.sp,
+                                                        color = MaterialTheme.colorScheme.onSurface
                                                     )
                                                 }
-                                                Text(
-                                                    text = "${entry.adminEmail} • ${entry.details}",
-                                                    fontSize = 11.sp,
-                                                    color = MaterialTheme.colorScheme.onSurface
-                                                )
                                             }
                                         }
                                     }
                                 }
-                            } else {
-                                if (localAuditLogs.isEmpty()) {
-                                    Text(
-                                        text = "No local security audit events recorded yet.",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(8.dp)
-                                    )
-                                } else {
-                                    localAuditLogs.forEach { entry ->
-                                        Surface(
-                                            shape = RoundedCornerShape(10.dp),
-                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 3.dp)
-                                        ) {
-                                            Column(modifier = Modifier.padding(10.dp)) {
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween
-                                                ) {
-                                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                                        Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(14.dp))
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(entry.action, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = ProfitGreen)
+
+                                1 -> {
+                                    if (localAuditLogs.isEmpty()) {
+                                        Text(
+                                            text = "No local security audit events recorded yet.",
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(8.dp)
+                                        )
+                                    } else {
+                                        localAuditLogs.forEach { entry ->
+                                            val isConflict = entry.action.contains("CONFLICT", ignoreCase = true) ||
+                                                entry.action.contains("WARNING", ignoreCase = true) ||
+                                                entry.action.contains("REFUND", ignoreCase = true)
+                                            val accent = if (isConflict) WarningAmber else ProfitGreen
+                                            Surface(
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 3.dp)
+                                            ) {
+                                                Column(modifier = Modifier.padding(10.dp)) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween
+                                                    ) {
+                                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                                            Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = accent, modifier = Modifier.size(14.dp))
+                                                            Spacer(modifier = Modifier.width(4.dp))
+                                                            Text(entry.action, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = accent)
+                                                        }
+                                                        Text(
+                                                            text = dateFormatter.format(Date(entry.createdAt)),
+                                                            fontSize = 10.sp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
                                                     }
                                                     Text(
-                                                        text = dateFormatter.format(Date(entry.createdAt)),
-                                                        fontSize = 10.sp,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        text = "${entry.actorName} (${entry.actorRole}) • ${entry.details}",
+                                                        fontSize = 11.sp,
+                                                        color = MaterialTheme.colorScheme.onSurface
                                                     )
                                                 }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                else -> {
+                                    val integrity = remember { DeviceSecurityManager.inspectDeviceIntegrity() }
+                                    val keystoreStatus = remember { CryptoKeyManager.getHardwareKeystoreStatus() }
+                                    val rollbackFlag = remember { ClockGuard.isClockRollbackDetected() }
+                                    val pinConfigured = BuildConfig.SUPABASE_CERT_PINS.contains("sha256/")
+
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (integrity.isCompromisedRisk || rollbackFlag) LossRed.copy(alpha = 0.45f) else ProfitGreen.copy(alpha = 0.45f)
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(
+                                                    Icons.Default.Security,
+                                                    contentDescription = null,
+                                                    tint = if (integrity.isCompromisedRisk) LossRed else ProfitGreen,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
                                                 Text(
-                                                    text = "${entry.actorName} (${entry.actorRole}) • ${entry.details}",
-                                                    fontSize = 11.sp,
+                                                    text = "Live Terminal Security Posture",
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp,
                                                     color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                            Text("• Integrity: ${integrity.postureLabel}", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = if (integrity.isCompromisedRisk) LossRed else ProfitGreen)
+                                            Text("• Keystore Hardware: $keystoreStatus", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurface)
+                                            Text("• Database Encryption: SQLCipher AES-256 (Keystore-wrapped)", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurface)
+                                            Text(
+                                                text = "• Anti-Rollback ClockGuard: ${if (rollbackFlag) "ROLLBACK DETECTED" else "Verified Monotonic"}",
+                                                fontSize = 11.5.sp,
+                                                color = if (rollbackFlag) LossRed else ProfitGreen
+                                            )
+                                            Text(
+                                                text = "• Supabase TLS Certificate Pinning: ${if (pinConfigured) "Pinned (Fail-Closed)" else "Standard TLS (Configure SUPABASE_CERT_PINS)"}",
+                                                fontSize = 11.5.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            if (integrity.signals.isNotEmpty()) {
+                                                Text(
+                                                    text = "Signals: ${integrity.signals.joinToString(", ")}",
+                                                    fontSize = 10.5.sp,
+                                                    color = WarningAmber
                                                 )
                                             }
                                         }
