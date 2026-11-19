@@ -1,10 +1,14 @@
 package com.example.domain
 
 import com.example.data.dao.SyncQueueDao
+import com.example.data.dao.SyncTombstoneDao
 import com.example.data.dao.UserDao
 import com.example.data.model.SyncQueueItem
+import com.example.data.model.SyncTombstone
 import com.example.data.model.User
 import com.example.data.model.UserRole
+import com.example.util.ClockGuard
+import com.example.util.HlcClock
 import com.example.util.SecurityUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -18,7 +22,8 @@ import java.util.UUID
  */
 class StaffAuthManager(
     private val userDao: UserDao,
-    private val syncQueueDao: SyncQueueDao
+    private val syncQueueDao: SyncQueueDao,
+    private val syncTombstoneDao: SyncTombstoneDao? = null
 ) {
     val allActiveUsers: Flow<List<User>> = userDao.getAllActiveUsers()
 
@@ -93,7 +98,17 @@ class StaffAuthManager(
     }
 
     suspend fun deleteUser(userId: String) = withContext(Dispatchers.IO) {
+        val now = ClockGuard.effectiveNowMs()
         userDao.deleteUser(userId)
+        syncTombstoneDao?.insertTombstone(
+            SyncTombstone(
+                id = SyncTombstone.keyFor("users", userId),
+                tableName = "users",
+                recordId = userId,
+                deletedAt = now,
+                hlcTimestamp = HlcClock.tick(now)
+            )
+        )
         syncQueueDao.enqueue(
             SyncQueueItem(
                 tableName = "users",

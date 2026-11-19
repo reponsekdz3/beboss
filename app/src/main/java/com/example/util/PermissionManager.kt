@@ -43,6 +43,14 @@ object PermissionManager {
         }
     }
 
+    fun hasNearbyWifiPermission(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            hasPermission(context, Manifest.permission.NEARBY_WIFI_DEVICES)
+        } else {
+            true
+        }
+    }
+
     fun getAllPermissionsStatus(context: Context): List<AppPermissionItem> {
         val list = mutableListOf<AppPermissionItem>()
 
@@ -100,6 +108,18 @@ object PermissionManager {
                     isGranted = hasNotificationPermission(context),
                     isCrucial = false,
                     iconName = "notifications"
+                )
+            )
+            list.add(
+                AppPermissionItem(
+                    permission = Manifest.permission.NEARBY_WIFI_DEVICES,
+                    title = "Nearby Branch LAN Sync",
+                    titleRw = "Guhuza Amashami kuri Wi-Fi",
+                    description = "Discover local master POS hubs over Wi-Fi without requiring device location access.",
+                    descriptionRw = "Kubona amashami ari kuri Wi-Fi imwe mudakenera GPS.",
+                    isGranted = hasNearbyWifiPermission(context),
+                    isCrucial = false,
+                    iconName = "wifi"
                 )
             )
         }

@@ -190,7 +190,7 @@ fun SalesPosScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         contentPadding = PaddingValues(horizontal = 2.dp)
                     ) {
-                        items(allCats) { cat ->
+                        items(allCats, key = { it }) { cat ->
                             val isSelected = selectedCategory == cat
                             FilterChip(
                                 selected = isSelected,
@@ -244,7 +244,7 @@ fun SalesPosScreen(
                 }
             } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
+                    columns = GridCells.Adaptive(minSize = 156.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
@@ -253,7 +253,7 @@ fun SalesPosScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = if (cartState.items.isNotEmpty()) 90.dp else 16.dp)
                 ) {
-                    items(filteredProducts) { product ->
+                    items(filteredProducts, key = { it.id }) { product ->
                         val cartItem = cartState.items.find { it.product.id == product.id }
                         val inCartQty = cartItem?.quantity ?: 0.0
 

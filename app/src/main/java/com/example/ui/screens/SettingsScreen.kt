@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import com.example.data.model.LocalAuditLog
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -223,7 +224,6 @@ fun SettingsScreen(
     onSwitchUser: (User) -> Unit = {},
     onActivateVoucher: (String) -> Unit = {},
     onProcessDirectPayment: ((provider: String, phone: String, durationMonths: Int, onSuccess: (com.example.util.PaymentProcessingResult, com.example.util.SubscriptionPriceBreakdown) -> Unit) -> Unit)? = null,
-    onGrantEmergencyGrace: () -> Unit = {},
     paymentVerificationRequests: List<PaymentVerificationRequest> = emptyList(),
     discoveredHubs: List<DiscoveredBranchHub> = emptyList(),
     isDiscoveringHubs: Boolean = false,
@@ -243,17 +243,20 @@ fun SettingsScreen(
     adminBranchSnapshots: List<com.example.util.SupabaseBranchSnapshotDto> = emptyList(),
     adminUnlockCodes: List<SupabaseUnlockCodeDto> = emptyList(),
     adminAuditLogs: List<SupabaseAuditLogDto> = emptyList(),
+    localAuditLogs: List<LocalAuditLog> = emptyList(),
     isAdminLoading: Boolean = false,
     onAdminSignIn: (String, String) -> Unit = { _, _ -> },
     onAdminSignUp: (String, String, String) -> Unit = { _, _, _ -> },
     onAdminSignOut: () -> Unit = {},
     onRefreshAdminDashboard: () -> Unit = {},
     onAdminApprovePayment: ((SupabasePaymentRequestDto, (Boolean, String) -> Unit) -> Unit)? = null,
+    onAdminApproveBatch: ((Int, Int) -> Unit) -> Unit = { _ -> },
     onAdminRejectPayment: (SupabasePaymentRequestDto, String) -> Unit = { _, _ -> },
     onAdminIssueManualCode: ((username: String, registeredPhone: String, tierCode: String, days: Int, amountRwf: Int, onDone: (Boolean, String) -> Unit) -> Unit)? = null,
     onAdminRevokeCode: (SupabaseUnlockCodeDto) -> Unit = {},
     onAdminExtendShopSubscription: (SupabaseShopAccountDto, Int) -> Unit = { _, _ -> },
     onAdminSetShopStatus: (SupabaseShopAccountDto, String) -> Unit = { _, _ -> },
+    onAdminUpdateShopLimits: (SupabaseShopAccountDto, Int, Int) -> Unit = { _, _, _ -> },
     onAdminDeleteShopAccount: (SupabaseShopAccountDto) -> Unit = {},
     onAdminUpdateShopUserRole: (com.example.util.SupabaseShopUserDto, String) -> Unit = { _, _ -> },
     onAdminToggleShopUserActive: (com.example.util.SupabaseShopUserDto, Boolean) -> Unit = { _, _ -> },
@@ -2254,7 +2257,7 @@ fun SettingsScreen(
                         Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp), tint = OrangePrimary)
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (language == AppLanguage.KINYARWANDA) "Reba Uburyo App Ifunguka (Instagram Animation)" else "Replay Instagram-Style Launch Screen",
+                            text = if (language == AppLanguage.KINYARWANDA) "Reba Intangiriro ya BeBoss" else "Replay Brand Launch Intro",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -2658,7 +2661,6 @@ fun SettingsScreen(
                         onProcessDirectPayment = onProcessDirectPayment,
                         onSubmitPaymentVerification = onSubmitPaymentVerification,
                         onCheckCloudApproval = onCheckCloudApproval,
-                        onGrantEmergencyGrace = onGrantEmergencyGrace,
                         onClose = { showSubscriptionDialog = false }
                     )
                 }
@@ -2679,6 +2681,7 @@ fun SettingsScreen(
             branchSnapshots = adminBranchSnapshots,
             unlockCodes = adminUnlockCodes,
             auditLogs = adminAuditLogs,
+            localAuditLogs = localAuditLogs,
             isLoading = isAdminLoading,
             onSignInAdmin = onAdminSignIn,
             onSignUpAdmin = onAdminSignUp,
@@ -2689,6 +2692,7 @@ fun SettingsScreen(
                     onAdminApprovePayment(req, onDone)
                 }
             },
+            onBatchApprovePending = onAdminApproveBatch,
             onRejectPayment = onAdminRejectPayment,
             onIssueManualCode = { username, regPhone, tierCode, days, amountRwf, onDone ->
                 if (onAdminIssueManualCode != null) {
@@ -2698,6 +2702,7 @@ fun SettingsScreen(
             onRevokeCode = onAdminRevokeCode,
             onExtendShopSubscription = onAdminExtendShopSubscription,
             onSetShopStatus = onAdminSetShopStatus,
+            onUpdateShopLimits = onAdminUpdateShopLimits,
             onDeleteShopAccount = onAdminDeleteShopAccount,
             onUpdateShopUserRole = onAdminUpdateShopUserRole,
             onToggleShopUserActive = onAdminToggleShopUserActive,

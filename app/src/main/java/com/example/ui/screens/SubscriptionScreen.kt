@@ -118,7 +118,6 @@ fun SubscriptionScreen(
     onProcessDirectPayment: ((provider: String, phone: String, durationMonths: Int, onSuccess: (PaymentProcessingResult, SubscriptionPriceBreakdown) -> Unit) -> Unit)? = null,
     onSubmitPaymentVerification: ((provider: String, payerPhone: String, username: String, registeredPhone: String, durationMonths: Int, branchCount: Int, workerCount: Int, telcoRef: String, onDone: (PaymentVerificationRequest, Boolean) -> Unit) -> Unit)? = null,
     onCheckCloudApproval: () -> Unit = {},
-    onGrantEmergencyGrace: () -> Unit,
     onClose: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -850,16 +849,17 @@ fun SubscriptionScreen(
                     }
 
                     OutlinedButton(
-                        onClick = onGrantEmergencyGrace,
+                        onClick = onCheckCloudApproval,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 48.dp),
+                            .heightIn(min = 48.dp)
+                            .testTag("check_cloud_unlock_button"),
                         shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = LossRed)
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = OrangePrimary)
                     ) {
-                        Icon(Icons.Default.LockClock, contentDescription = null, modifier = Modifier.size(16.dp), tint = LossRed)
+                        Icon(Icons.Default.CloudDone, contentDescription = null, modifier = Modifier.size(16.dp), tint = OrangePrimary)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Emergency 3-Day Grace Extension", fontSize = 12.sp, color = LossRed, fontWeight = FontWeight.Bold)
+                        Text("Sync Approved Cloud Unlock", fontSize = 12.sp, color = OrangePrimary, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -943,8 +943,7 @@ fun SubscriptionPaywallDialog(
     onActivateVoucher: (String) -> Unit,
     onProcessDirectPayment: ((provider: String, phone: String, durationMonths: Int, onSuccess: (PaymentProcessingResult, SubscriptionPriceBreakdown) -> Unit) -> Unit)? = null,
     onSubmitPaymentVerification: ((provider: String, payerPhone: String, username: String, registeredPhone: String, durationMonths: Int, branchCount: Int, workerCount: Int, telcoRef: String, onDone: (PaymentVerificationRequest, Boolean) -> Unit) -> Unit)? = null,
-    onCheckCloudApproval: () -> Unit = {},
-    onGrantEmergencyGrace: () -> Unit
+    onCheckCloudApproval: () -> Unit = {}
 ) {
     AlertDialog(
         onDismissRequest = { /* Non-dismissible when expired */ },
@@ -971,8 +970,7 @@ fun SubscriptionPaywallDialog(
                 onActivateVoucher = onActivateVoucher,
                 onProcessDirectPayment = onProcessDirectPayment,
                 onSubmitPaymentVerification = onSubmitPaymentVerification,
-                onCheckCloudApproval = onCheckCloudApproval,
-                onGrantEmergencyGrace = onGrantEmergencyGrace
+                onCheckCloudApproval = onCheckCloudApproval
             )
         },
         confirmButton = {}

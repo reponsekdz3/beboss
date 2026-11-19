@@ -167,57 +167,125 @@ drop policy if exists "Admin update profiles" on public.admin_profiles;
 create policy "Admin update profiles" on public.admin_profiles
     for update using (public.is_beboss_admin()) with check (public.is_beboss_admin());
 
--- Shop Accounts Policies (Shop terminals sync account metadata; Master Admin has full management & delete)
+-- Helper reading the caller's X-Shop-Sync-Key request header for multi-tenant RLS isolation:
+create or replace function public.current_shop_sync_key()
+returns text
+language sql
+stable
+as $$
+  select coalesce(
+    nullif(trim((current_setting('request.headers', true)::json ->> 'x-shop-sync-key')), ''),
+    ''
+  );
+$$;
+
+create or replace function public.computed_shop_sync_key(p_username text, p_phone text)
+returns text
+language sql
+immutable
+as $$
+  select lower(coalesce(nullif(trim(p_username), ''), 'owner'))
+    || '_'
+    || coalesce(nullif(right(regexp_replace(coalesce(p_phone, ''), '[^0-9]', '', 'g'), 9), ''), '000000000');
+$$;
+
+-- Shop Accounts Policies (Tenant-scoped via X-Shop-Sync-Key; Master Admin has full management & delete)
 drop policy if exists "Shops and admins manage shop_accounts" on public.shop_accounts;
 drop policy if exists "Shop terminals read shop_accounts" on public.shop_accounts;
 create policy "Shop terminals read shop_accounts" on public.shop_accounts
-    for select using (true);
+    for select using (
+        public.is_beboss_admin()
+        or id = public.current_shop_sync_key()
+    );
 drop policy if exists "Shop terminals upsert shop_accounts" on public.shop_accounts;
 create policy "Shop terminals upsert shop_accounts" on public.shop_accounts
-    for insert with check (true);
+    for insert with check (
+        public.is_beboss_admin()
+        or (id = public.current_shop_sync_key() and id <> '')
+    );
 drop policy if exists "Shop terminals or admin update shop_accounts" on public.shop_accounts;
 create policy "Shop terminals or admin update shop_accounts" on public.shop_accounts
-    for update using (true) with check (true);
+    for update using (
+        public.is_beboss_admin()
+        or id = public.current_shop_sync_key()
+    ) with check (
+        public.is_beboss_admin()
+        or id = public.current_shop_sync_key()
+    );
 drop policy if exists "Master admin delete shop_accounts" on public.shop_accounts;
 create policy "Master admin delete shop_accounts" on public.shop_accounts
     for delete using (public.is_beboss_admin());
 
--- Shop Users Directory Policies (Shop terminals sync staff metadata; Master Admin controls roles, status & deletion)
+-- Shop Users Directory Policies (Tenant-scoped via X-Shop-Sync-Key; Master Admin controls roles, status & deletion)
 drop policy if exists "Read shop_users" on public.shop_users;
 create policy "Read shop_users" on public.shop_users
-    for select using (true);
+    for select using (
+        public.is_beboss_admin()
+        or shop_sync_key = public.current_shop_sync_key()
+    );
 drop policy if exists "Upsert shop_users" on public.shop_users;
 create policy "Upsert shop_users" on public.shop_users
-    for insert with check (true);
+    for insert with check (
+        public.is_beboss_admin()
+        or (shop_sync_key = public.current_shop_sync_key() and shop_sync_key <> '')
+    );
 drop policy if exists "Update shop_users" on public.shop_users;
 create policy "Update shop_users" on public.shop_users
-    for update using (true) with check (true);
+    for update using (
+        public.is_beboss_admin()
+        or shop_sync_key = public.current_shop_sync_key()
+    ) with check (
+        public.is_beboss_admin()
+        or shop_sync_key = public.current_shop_sync_key()
+    );
 drop policy if exists "Master admin delete shop_users" on public.shop_users;
 create policy "Master admin delete shop_users" on public.shop_users
     for delete using (public.is_beboss_admin());
 
--- Payment Requests Policies
+-- Payment Requests Policies (Tenant-scoped by owner_username + owner_phone matching X-Shop-Sync-Key)
 drop policy if exists "Shop terminals submit and read payment_requests" on public.payment_requests;
 create policy "Shop terminals submit and read payment_requests" on public.payment_requests
-    for select using (true);
+    for select using (
+        public.is_beboss_admin()
+        or public.computed_shop_sync_key(owner_username, owner_phone) = public.current_shop_sync_key()
+    );
 
 drop policy if exists "Shop terminals insert payment_requests" on public.payment_requests;
 create policy "Shop terminals insert payment_requests" on public.payment_requests
-    for insert with check (true);
+    for insert with check (
+        public.is_beboss_admin()
+        or (
+            public.computed_shop_sync_key(owner_username, owner_phone) = public.current_shop_sync_key()
+            and public.current_shop_sync_key() <> ''
+            and status = 'PENDING_VERIFICATION'
+        )
+    );
 
 drop policy if exists "Shop redeem or admin update payment_requests" on public.payment_requests;
 create policy "Shop redeem or admin update payment_requests" on public.payment_requests
-    for update using (true)
-    with check (status = 'REDEEMED' or public.is_beboss_admin());
+    for update using (
+        public.is_beboss_admin()
+        or public.computed_shop_sync_key(owner_username, owner_phone) = public.current_shop_sync_key()
+    )
+    with check (
+        public.is_beboss_admin()
+        or (
+            status = 'REDEEMED'
+            and public.computed_shop_sync_key(owner_username, owner_phone) = public.current_shop_sync_key()
+        )
+    );
 
 drop policy if exists "Master admin delete payment_requests" on public.payment_requests;
 create policy "Master admin delete payment_requests" on public.payment_requests
     for delete using (public.is_beboss_admin());
 
--- Unlock Codes Policies (Only authenticated Master Admin issues/revokes/deletes codes; shops read & mark REDEEMED)
+-- Unlock Codes Policies (Only authenticated Master Admin issues/revokes/deletes codes; owning shop reads & marks REDEEMED)
 drop policy if exists "Read unlock_codes" on public.unlock_codes;
 create policy "Read unlock_codes" on public.unlock_codes
-    for select using (true);
+    for select using (
+        public.is_beboss_admin()
+        or public.computed_shop_sync_key(shop_username, shop_phone) = public.current_shop_sync_key()
+    );
 
 drop policy if exists "Admin insert unlock_codes" on public.unlock_codes;
 create policy "Admin insert unlock_codes" on public.unlock_codes
@@ -225,23 +293,44 @@ create policy "Admin insert unlock_codes" on public.unlock_codes
 
 drop policy if exists "Shop redeem or admin update unlock_codes" on public.unlock_codes;
 create policy "Shop redeem or admin update unlock_codes" on public.unlock_codes
-    for update using (true)
-    with check (status = 'REDEEMED' or public.is_beboss_admin());
+    for update using (
+        public.is_beboss_admin()
+        or public.computed_shop_sync_key(shop_username, shop_phone) = public.current_shop_sync_key()
+    )
+    with check (
+        public.is_beboss_admin()
+        or (
+            status = 'REDEEMED'
+            and public.computed_shop_sync_key(shop_username, shop_phone) = public.current_shop_sync_key()
+        )
+    );
 
 drop policy if exists "Master admin delete unlock_codes" on public.unlock_codes;
 create policy "Master admin delete unlock_codes" on public.unlock_codes
     for delete using (public.is_beboss_admin());
 
--- Branch Sync Snapshots Policies
+-- Branch Sync Snapshots Policies (Strictly isolated by shop_sync_key header or Master Admin)
 drop policy if exists "Branch devices relay snapshots" on public.branch_sync_snapshots;
 create policy "Branch devices relay snapshots" on public.branch_sync_snapshots
-    for select using (true);
+    for select using (
+        public.is_beboss_admin()
+        or shop_sync_key = public.current_shop_sync_key()
+    );
 drop policy if exists "Branch devices insert snapshots" on public.branch_sync_snapshots;
 create policy "Branch devices insert snapshots" on public.branch_sync_snapshots
-    for insert with check (true);
+    for insert with check (
+        public.is_beboss_admin()
+        or (shop_sync_key = public.current_shop_sync_key() and shop_sync_key <> '')
+    );
 drop policy if exists "Branch devices update snapshots" on public.branch_sync_snapshots;
 create policy "Branch devices update snapshots" on public.branch_sync_snapshots
-    for update using (true) with check (true);
+    for update using (
+        public.is_beboss_admin()
+        or shop_sync_key = public.current_shop_sync_key()
+    ) with check (
+        public.is_beboss_admin()
+        or shop_sync_key = public.current_shop_sync_key()
+    );
 drop policy if exists "Master admin delete snapshots" on public.branch_sync_snapshots;
 create policy "Master admin delete snapshots" on public.branch_sync_snapshots
     for delete using (public.is_beboss_admin());

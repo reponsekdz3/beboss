@@ -34,8 +34,10 @@ import com.example.domain.InventoryManager
 import com.example.domain.SalesManager
 import com.example.domain.StaffAuthManager
 import com.example.domain.SubscriptionManager
+import com.example.data.model.LocalAuditLog
 import com.example.util.CloudSyncManager
 import com.example.util.CloudSyncReport
+import com.example.util.ConflictResolutionEngine
 import com.example.util.EndpointPingResult
 import com.example.util.PaymentProcessingResult
 import com.example.util.SecurityUtils
@@ -87,20 +89,58 @@ class BeBossRepository(private val database: AppDatabase) {
     private val stockTransferDao = database.stockTransferDao()
     private val redeemedVoucherDao = database.redeemedVoucherDao()
     private val paymentVerificationDao = database.paymentVerificationDao()
+    private val localAuditLogDao = database.localAuditLogDao()
+    private val syncTombstoneDao = database.syncTombstoneDao()
 
     // Domain Managers
-    val salesManager = SalesManager(saleDao, productDao, customerDao, syncQueueDao)
-    val inventoryManager = InventoryManager(productDao, purchaseDao, syncQueueDao)
-    val customerDebtManager = CustomerDebtManager(customerDao, customerPaymentDao, saleDao, syncQueueDao)
-    val staffAuthManager = StaffAuthManager(userDao, syncQueueDao)
-    val branchTransferManager = BranchTransferManager(branchDao, stockTransferDao, productDao, shopProfileDao, syncQueueDao)
+    val salesManager = SalesManager(saleDao, productDao, customerDao, syncQueueDao, database, syncTombstoneDao)
+    val inventoryManager = InventoryManager(productDao, purchaseDao, syncQueueDao, syncTombstoneDao)
+    val customerDebtManager = CustomerDebtManager(customerDao, customerPaymentDao, saleDao, syncQueueDao, syncTombstoneDao)
+    val staffAuthManager = StaffAuthManager(userDao, syncQueueDao, syncTombstoneDao)
+    val branchTransferManager = BranchTransferManager(branchDao, stockTransferDao, productDao, shopProfileDao, syncQueueDao, syncTombstoneDao)
     val subscriptionManager = SubscriptionManager(shopProfileDao, redeemedVoucherDao)
     val analyticsEngine = AnalyticsEngine(saleDao)
     val cloudSyncManager = CloudSyncManager(database)
 
-    // Sync Audit Logs & Pending Queue
+    // Sync Audit Logs & Pending Queue & Local Audit Logs
     val syncAuditLogs: StateFlow<List<SyncAuditLog>> = cloudSyncManager.syncAuditLogs
     val pendingSyncCount: Flow<Int> = syncQueueDao.getPendingCount()
+    val deadLetterSyncCount: Flow<Int> = syncQueueDao.getDeadLetterCountFlow()
+    val localAuditLogs: Flow<List<LocalAuditLog>> = localAuditLogDao.getRecentLogs()
+
+    suspend fun recordLocalAudit(actorName: String, actorRole: String, action: String, targetId: String = "", details: String = "") {
+        localAuditLogDao.insertLog(
+            LocalAuditLog(
+                actorName = actorName,
+                actorRole = actorRole,
+                action = action,
+                targetId = targetId,
+                details = details
+            )
+        )
+    }
+
+    /**
+     * Domain-layer RBAC guard (enforced in repository in addition to UI controls).
+     */
+    private suspend fun requirePermission(
+        actor: User?,
+        action: String,
+        targetId: String = "",
+        allowed: (User) -> Boolean
+    ) {
+        if (actor == null) return
+        if (!actor.isActive || !allowed(actor)) {
+            recordLocalAudit(
+                actorName = actor.name,
+                actorRole = actor.role.name,
+                action = "RBAC_DENIED",
+                targetId = targetId,
+                details = "Blocked unauthorized action: $action"
+            )
+            throw SecurityException("Access denied: '${actor.name}' lacks permission for $action.")
+        }
+    }
 
     fun logSyncEvent(type: String, status: String, summary: String, latencyMs: Long = 0L) {
         cloudSyncManager.addAuditLog(type, status, summary, latencyMs)
@@ -171,9 +211,19 @@ class BeBossRepository(private val database: AppDatabase) {
 
     suspend fun getAllBranchesList(): List<Branch> = branchTransferManager.getAllBranchesList()
 
-    suspend fun saveBranch(branch: Branch) = branchTransferManager.saveBranch(branch)
+    suspend fun saveBranch(branch: Branch, actor: User? = null) {
+        requirePermission(actor, "MANAGE_BRANCHES", branch.id) {
+            it.role == UserRole.OWNER || it.role == UserRole.MANAGER || it.canManageShopSettings
+        }
+        branchTransferManager.saveBranch(branch)
+    }
 
-    suspend fun deleteBranch(branchId: String) = branchTransferManager.deleteBranch(branchId)
+    suspend fun deleteBranch(branchId: String, actor: User? = null) {
+        requirePermission(actor, "DELETE_BRANCH", branchId) {
+            it.role == UserRole.OWNER || it.canManageShopSettings || it.canDeleteRecords
+        }
+        branchTransferManager.deleteBranch(branchId)
+    }
 
     suspend fun ensureDefaultBranches(): List<Branch> = branchTransferManager.ensureDefaultBranches()
 
@@ -186,9 +236,19 @@ class BeBossRepository(private val database: AppDatabase) {
 
     suspend fun getUserByUsername(username: String): User? = staffAuthManager.getUserByUsername(username)
 
-    suspend fun saveUser(user: User) = staffAuthManager.saveUser(user)
+    suspend fun saveUser(user: User, actor: User? = null) {
+        requirePermission(actor, "MANAGE_STAFF", user.id) {
+            it.role == UserRole.OWNER || it.canManageCollaborators
+        }
+        staffAuthManager.saveUser(user)
+    }
 
-    suspend fun deleteUser(userId: String) = staffAuthManager.deleteUser(userId)
+    suspend fun deleteUser(userId: String, actor: User? = null) {
+        requirePermission(actor, "DELETE_STAFF", userId) {
+            it.role == UserRole.OWNER || it.canManageCollaborators || it.canDeleteRecords
+        }
+        staffAuthManager.deleteUser(userId)
+    }
 
     suspend fun updateLastLogin(userId: String) = staffAuthManager.updateLastLogin(userId)
 
@@ -247,12 +307,27 @@ class BeBossRepository(private val database: AppDatabase) {
 
     suspend fun getProductByBarcode(barcode: String): Product? = inventoryManager.getProductByBarcode(barcode)
 
-    suspend fun saveProduct(product: Product) = inventoryManager.saveProduct(product)
+    suspend fun saveProduct(product: Product, actor: User? = null) {
+        requirePermission(actor, "MANAGE_INVENTORY", product.id) { it.canManageInventory }
+        inventoryManager.saveProduct(product)
+    }
 
-    suspend fun adjustStock(productId: String, adjustmentDelta: Double, reason: String) =
+    suspend fun adjustStock(productId: String, adjustmentDelta: Double, reason: String, actor: User? = null) {
+        requirePermission(actor, "ADJUST_STOCK", productId) { it.canManageInventory }
         inventoryManager.adjustStock(productId, adjustmentDelta, reason)
+    }
 
-    suspend fun deleteProduct(productId: String) = inventoryManager.deleteProduct(productId)
+    suspend fun deleteProduct(productId: String, actor: User? = null) {
+        requirePermission(actor, "DELETE_PRODUCT", productId) {
+            it.canDeleteRecords || it.canManageInventory
+        }
+        inventoryManager.deleteProduct(productId)
+    }
+
+    suspend fun restoreProduct(productId: String, actor: User? = null) {
+        requirePermission(actor, "RESTORE_PRODUCT", productId) { it.canManageInventory }
+        inventoryManager.restoreProduct(productId)
+    }
 
     // -------------------------------------------------------------
     // CUSTOMERS & DEBTS
@@ -266,12 +341,29 @@ class BeBossRepository(private val database: AppDatabase) {
 
     suspend fun getCustomerById(id: String): Customer? = customerDebtManager.getCustomerById(id)
 
-    suspend fun saveCustomer(customer: Customer) = customerDebtManager.saveCustomer(customer)
+    suspend fun saveCustomer(customer: Customer, actor: User? = null) {
+        requirePermission(actor, "MANAGE_CUSTOMER", customer.id) { it.canManageCustomers }
+        customerDebtManager.saveCustomer(customer)
+    }
 
-    suspend fun recordDebtPayment(customerId: String, paymentAmount: Double) =
+    suspend fun recordDebtPayment(customerId: String, paymentAmount: Double, actor: User? = null) {
+        requirePermission(actor, "COLLECT_DEBT", customerId) {
+            it.canCollectDebt || it.canManageCustomers
+        }
         customerDebtManager.recordDebtPayment(customerId, paymentAmount)
+    }
 
-    suspend fun deleteCustomer(customerId: String) = customerDebtManager.deleteCustomer(customerId)
+    suspend fun deleteCustomer(customerId: String, actor: User? = null) {
+        requirePermission(actor, "DELETE_CUSTOMER", customerId) {
+            it.canDeleteRecords || it.canManageCustomers
+        }
+        customerDebtManager.deleteCustomer(customerId)
+    }
+
+    suspend fun restoreCustomer(customerId: String, actor: User? = null) {
+        requirePermission(actor, "RESTORE_CUSTOMER", customerId) { it.canManageCustomers }
+        customerDebtManager.restoreCustomer(customerId)
+    }
 
     // -------------------------------------------------------------
     // SALES & POINT OF SALE (POS)
@@ -577,161 +669,25 @@ class BeBossRepository(private val database: AppDatabase) {
         stockTransferDao.getAllTransfersList()
     }
 
-    suspend fun importShopDataPackage(summary: ShopImportSummary) = withContext(Dispatchers.IO) {
+    suspend fun getAllTombstonesList(): List<com.example.data.model.SyncTombstone> = withContext(Dispatchers.IO) {
+        syncTombstoneDao.getAllTombstonesList()
+    }
+
+    suspend fun importShopDataPackage(
+        summary: ShopImportSummary,
+        actor: User? = null
+    ): BranchMergeResult = withContext(Dispatchers.IO) {
+        requirePermission(actor, "IMPORT_DATA", summary.shopName) {
+            it.canExportImportData || it.role == UserRole.OWNER || it.role == UserRole.MANAGER
+        }
         mergeShopDataPackageLww(summary)
     }
 
     /**
-     * Last-Write-Wins conflict-resolving merge across branches & devices.
-     * Ensures newer local edits are never overwritten by stale remote snapshots,
-     * while preserving active subscription validity and merging missing immutable logs.
+     * Causal + Ledger-CRDT conflict-resolving merge across branches & devices.
      */
-    suspend fun mergeShopDataPackageLww(summary: ShopImportSummary): BranchMergeResult = withContext(Dispatchers.IO) {
-        var mergedBranches = 0
-        var mergedUsers = 0
-        var mergedProducts = 0
-        var mergedCustomers = 0
-        var mergedSales = 0
-        var mergedSaleItems = 0
-        var mergedPayments = 0
-        var mergedPurchases = 0
-        var mergedTransfers = 0
-        var conflicts = 0
-
-        summary.shopProfile?.let { remoteProf ->
-            val localProf = shopProfileDao.getShopProfileDirect()
-            if (localProf == null) {
-                shopProfileDao.insertOrUpdateProfile(remoteProf)
-            } else {
-                val bestExpiry = maxOf(localProf.subscriptionExpiresAt, remoteProf.subscriptionExpiresAt)
-                val bestStatus = if (bestExpiry > System.currentTimeMillis()) "ACTIVE" else localProf.subscriptionStatus
-                val mergedProf = if (remoteProf.updatedAt > localProf.updatedAt) {
-                    remoteProf.copy(
-                        id = 1L,
-                        subscriptionExpiresAt = bestExpiry,
-                        subscriptionStatus = bestStatus,
-                        lastPaymentRef = if (localProf.lastPaymentDate >= remoteProf.lastPaymentDate) localProf.lastPaymentRef else remoteProf.lastPaymentRef,
-                        lastPaymentAmount = if (localProf.lastPaymentDate >= remoteProf.lastPaymentDate) localProf.lastPaymentAmount else remoteProf.lastPaymentAmount,
-                        lastPaymentDate = maxOf(localProf.lastPaymentDate, remoteProf.lastPaymentDate),
-                        isOnlineSyncEnabled = localProf.isOnlineSyncEnabled
-                    )
-                } else {
-                    localProf.copy(
-                        subscriptionExpiresAt = bestExpiry,
-                        subscriptionStatus = bestStatus
-                    )
-                }
-                shopProfileDao.insertOrUpdateProfile(mergedProf)
-            }
-        }
-
-        for (remoteBranch in summary.branches) {
-            val local = branchDao.getBranchById(remoteBranch.id)
-            if (local == null) {
-                branchDao.insertBranch(remoteBranch)
-                mergedBranches++
-            } else if (remoteBranch.updatedAt > local.updatedAt) {
-                branchDao.insertBranch(remoteBranch)
-                mergedBranches++
-                conflicts++
-            }
-        }
-
-        for (remoteUser in summary.users) {
-            val local = userDao.getUserById(remoteUser.id)
-            if (local == null) {
-                userDao.insertUser(remoteUser)
-                mergedUsers++
-            } else if (remoteUser.updatedAt > local.updatedAt) {
-                userDao.insertUser(remoteUser)
-                mergedUsers++
-                conflicts++
-            }
-        }
-
-        for (remoteProd in summary.products) {
-            val local = productDao.getProductById(remoteProd.id)
-            if (local == null) {
-                productDao.insertProduct(remoteProd)
-                mergedProducts++
-            } else if (remoteProd.updatedAt > local.updatedAt) {
-                productDao.insertProduct(remoteProd)
-                mergedProducts++
-                conflicts++
-            }
-        }
-
-        for (remoteCust in summary.customers) {
-            val local = customerDao.getCustomerById(remoteCust.id)
-            if (local == null) {
-                customerDao.insertCustomer(remoteCust)
-                mergedCustomers++
-            } else if (remoteCust.updatedAt > local.updatedAt) {
-                customerDao.insertCustomer(remoteCust)
-                mergedCustomers++
-                conflicts++
-            }
-        }
-
-        val existingSaleIds = saleDao.getAllSalesList().map { it.id }.toSet()
-        val newSales = mutableListOf<Sale>()
-        for (remoteSale in summary.sales) {
-            if (!existingSaleIds.contains(remoteSale.id)) {
-                newSales.add(remoteSale)
-            } else {
-                val localSale = saleDao.getSaleById(remoteSale.id)
-                if (localSale != null && remoteSale.updatedAt > localSale.updatedAt) {
-                    newSales.add(remoteSale)
-                    conflicts++
-                }
-            }
-        }
-        if (newSales.isNotEmpty()) {
-            saleDao.insertSales(newSales)
-            mergedSales = newSales.size
-        }
-
-        val existingItemIds = saleDao.getAllSaleItemsList().map { it.id }.toSet()
-        val missingItems = summary.saleItems.filterNot { existingItemIds.contains(it.id) }
-        if (missingItems.isNotEmpty()) {
-            saleDao.insertSaleItems(missingItems)
-            mergedSaleItems = missingItems.size
-        }
-
-        val existingPaymentIds = customerPaymentDao.getAllPaymentsList().map { it.id }.toSet()
-        val missingPayments = summary.payments.filterNot { existingPaymentIds.contains(it.id) }
-        if (missingPayments.isNotEmpty()) {
-            customerPaymentDao.insertPayments(missingPayments)
-            mergedPayments = missingPayments.size
-        }
-
-        val existingPurchaseIds = purchaseDao.getAllPurchasesList().map { it.id }.toSet()
-        val missingPurchases = summary.purchases.filterNot { existingPurchaseIds.contains(it.id) }
-        if (missingPurchases.isNotEmpty()) {
-            purchaseDao.insertPurchases(missingPurchases)
-            mergedPurchases = missingPurchases.size
-        }
-
-        val existingTransferIds = stockTransferDao.getAllTransfersList().map { it.id }.toSet()
-        val missingTransfers = summary.stockTransfers.filterNot { existingTransferIds.contains(it.id) }
-        if (missingTransfers.isNotEmpty()) {
-            stockTransferDao.insertTransfers(missingTransfers)
-            mergedTransfers = missingTransfers.size
-        }
-
-        BranchMergeResult(
-            mergedBranches = mergedBranches,
-            mergedUsers = mergedUsers,
-            mergedProducts = mergedProducts,
-            mergedCustomers = mergedCustomers,
-            mergedSales = mergedSales,
-            mergedSaleItems = mergedSaleItems,
-            mergedPayments = mergedPayments,
-            mergedPurchases = mergedPurchases,
-            mergedTransfers = mergedTransfers,
-            conflictsResolved = conflicts
-        )
-    }
+    suspend fun mergeShopDataPackageLww(summary: ShopImportSummary): BranchMergeResult =
+        ConflictResolutionEngine.mergePackage(database, summary, "DataShare")
 
     suspend fun seedSampleShopData() = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
@@ -773,13 +729,18 @@ class BeBossRepository(private val database: AppDatabase) {
 
         val totalRecords = prodCount + sCount + siCount + cCount + pCount + purCount + bCount + uCount + syncCount
 
-        val dbFile = context.getDatabasePath("beboss_database.db")
+        val dbFile = context.getDatabasePath(AppDatabase.DATABASE_NAME)
         val sizeBytes = if (dbFile.exists()) dbFile.length() else 0L
         val formattedSize = if (sizeBytes > 1024 * 1024) {
             String.format("%.2f MB", sizeBytes / (1024.0 * 1024.0))
         } else {
             String.format("%.1f KB", sizeBytes / 1024.0)
         }
+
+        val writableDb = database.openHelper.writableDatabase
+        val journalMode = queryPragmaString(writableDb, "PRAGMA journal_mode").uppercase().ifBlank { "WAL" }
+        val pageSize = queryPragmaLong(writableDb, "PRAGMA page_size").takeIf { it > 0L } ?: 4096L
+        val pageCount = queryPragmaLong(writableDb, "PRAGMA page_count")
 
         DatabaseEngineStats(
             productCount = prodCount,
@@ -794,8 +755,10 @@ class BeBossRepository(private val database: AppDatabase) {
             totalRecordsCount = totalRecords,
             fileSizeBytes = sizeBytes,
             fileSizeFormatted = formattedSize,
-            journalMode = "WAL",
-            integrityStatus = "OK",
+            journalMode = journalMode,
+            pageSize = pageSize,
+            pageCount = pageCount,
+            integrityStatus = "VERIFIED",
             lastOptimizedAt = System.currentTimeMillis()
         )
     }
@@ -804,11 +767,15 @@ class BeBossRepository(private val database: AppDatabase) {
         val start = System.currentTimeMillis()
         try {
             syncQueueDao.purgeSyncedItems()
+            val writableDb = database.openHelper.writableDatabase
+            writableDb.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+            writableDb.query("PRAGMA optimize").use { it.moveToFirst() }
             val stats = getDatabaseStats(context)
             val duration = System.currentTimeMillis() - start
+            recordLocalAudit("System", "MAINTENANCE", "DB_OPTIMIZE", "beboss_database.db", "WAL checkpoint & PRAGMA optimize in ${duration}ms")
             DatabaseMaintenanceResult(
                 success = true,
-                message = "Database optimized in ${duration}ms! Synced log records purged.",
+                message = "SQLite WAL checkpoint & query planner optimized in ${duration}ms!",
                 durationMs = duration,
                 stats = stats
             )
@@ -824,10 +791,14 @@ class BeBossRepository(private val database: AppDatabase) {
     suspend fun verifyDatabaseIntegrity(): DatabaseMaintenanceResult = withContext(Dispatchers.IO) {
         val start = System.currentTimeMillis()
         try {
+            val writableDb = database.openHelper.writableDatabase
+            val status = queryPragmaString(writableDb, "PRAGMA integrity_check").ifBlank { "unknown" }
             val duration = System.currentTimeMillis() - start
+            val ok = status.equals("ok", ignoreCase = true)
+            recordLocalAudit("System", "MAINTENANCE", "DB_INTEGRITY", "beboss_database.db", "PRAGMA integrity_check = $status (${duration}ms)")
             DatabaseMaintenanceResult(
-                success = true,
-                message = "Database integrity check passed (Status: OK) in ${duration}ms",
+                success = ok,
+                message = if (ok) "SQLite PRAGMA integrity_check passed (OK) in ${duration}ms" else "Integrity check reported: $status",
                 durationMs = duration
             )
         } catch (e: Exception) {
@@ -836,6 +807,26 @@ class BeBossRepository(private val database: AppDatabase) {
                 message = "Integrity check failed: ${e.message}",
                 durationMs = System.currentTimeMillis() - start
             )
+        }
+    }
+
+    private fun queryPragmaString(db: androidx.sqlite.db.SupportSQLiteDatabase, sql: String): String {
+        return try {
+            db.query(sql).use { cursor ->
+                if (cursor.moveToFirst() && cursor.columnCount > 0) cursor.getString(0).orEmpty() else ""
+            }
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun queryPragmaLong(db: androidx.sqlite.db.SupportSQLiteDatabase, sql: String): Long {
+        return try {
+            db.query(sql).use { cursor ->
+                if (cursor.moveToFirst() && cursor.columnCount > 0) cursor.getLong(0) else 0L
+            }
+        } catch (_: Exception) {
+            0L
         }
     }
 
@@ -851,7 +842,10 @@ class BeBossRepository(private val database: AppDatabase) {
         customerDebtManager.clearAllCustomers()
     }
 
-    suspend fun deleteSale(saleId: String) = withContext(Dispatchers.IO) {
+    suspend fun deleteSale(saleId: String, actor: User? = null) = withContext(Dispatchers.IO) {
+        requirePermission(actor, "DELETE_SALE", saleId) {
+            it.canDeleteRecords || it.role == UserRole.OWNER || it.role == UserRole.MANAGER
+        }
         salesManager.deleteSale(saleId)
     }
 

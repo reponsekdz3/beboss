@@ -2,53 +2,48 @@ package com.example.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.googlefonts.Font
-import androidx.compose.ui.text.googlefonts.GoogleFont
 import androidx.compose.ui.unit.sp
 import com.example.R
 
-// Google Font Provider Setup for Gopher & modern geometric styling
-private val googleFontProvider = GoogleFont.Provider(
-    providerAuthority = "com.google.android.gms.fonts",
-    providerPackage = "com.google.android.gms",
-    certificates = R.array.com_google_android_gms_fonts_certs
+// Locally bundled geometric sans + reverse-contrast display fonts (no GMS downloadable font dependency)
+val GopherDisplayFontFamily = FontFamily(
+    Font(resId = R.font.syne, weight = FontWeight.Medium),
+    Font(resId = R.font.syne, weight = FontWeight.SemiBold),
+    Font(resId = R.font.syne, weight = FontWeight.Bold),
+    Font(resId = R.font.syne, weight = FontWeight.ExtraBold)
 )
-
-// Primary Gopher Geometric Font Family (Modern Geometric Sans with flared terminals)
-private val primaryFontName = GoogleFont("Outfit")
-private val secondaryFontName = GoogleFont("Plus Jakarta Sans")
 
 val GopherFontFamily = FontFamily(
-    Font(googleFont = primaryFontName, fontProvider = googleFontProvider, weight = FontWeight.Light),
-    Font(googleFont = primaryFontName, fontProvider = googleFontProvider, weight = FontWeight.Normal),
-    Font(googleFont = primaryFontName, fontProvider = googleFontProvider, weight = FontWeight.Medium),
-    Font(googleFont = primaryFontName, fontProvider = googleFontProvider, weight = FontWeight.SemiBold),
-    Font(googleFont = primaryFontName, fontProvider = googleFontProvider, weight = FontWeight.Bold),
-    Font(googleFont = primaryFontName, fontProvider = googleFontProvider, weight = FontWeight.ExtraBold),
-    Font(googleFont = secondaryFontName, fontProvider = googleFontProvider, weight = FontWeight.Normal),
-    Font(googleFont = secondaryFontName, fontProvider = googleFontProvider, weight = FontWeight.Bold)
+    Font(resId = R.font.outfit, weight = FontWeight.Light),
+    Font(resId = R.font.outfit, weight = FontWeight.Normal),
+    Font(resId = R.font.plus_jakarta_sans, weight = FontWeight.Medium),
+    Font(resId = R.font.outfit, weight = FontWeight.SemiBold),
+    Font(resId = R.font.outfit, weight = FontWeight.Bold),
+    Font(resId = R.font.syne, weight = FontWeight.ExtraBold),
+    Font(resId = R.font.syne, weight = FontWeight.Black)
 )
 
-// Complete Material 3 Typography using Gopher Font Family
+// Complete Material 3 Typography using locally bundled Gopher-styled FontFamily
 val Typography = Typography(
     displayLarge = TextStyle(
-        fontFamily = GopherFontFamily,
+        fontFamily = GopherDisplayFontFamily,
         fontWeight = FontWeight.Bold,
         fontSize = 57.sp,
         lineHeight = 64.sp,
         letterSpacing = (-0.25).sp
     ),
     displayMedium = TextStyle(
-        fontFamily = GopherFontFamily,
+        fontFamily = GopherDisplayFontFamily,
         fontWeight = FontWeight.Bold,
         fontSize = 45.sp,
         lineHeight = 52.sp,
         letterSpacing = 0.sp
     ),
     displaySmall = TextStyle(
-        fontFamily = GopherFontFamily,
+        fontFamily = GopherDisplayFontFamily,
         fontWeight = FontWeight.Bold,
         fontSize = 36.sp,
         lineHeight = 44.sp,

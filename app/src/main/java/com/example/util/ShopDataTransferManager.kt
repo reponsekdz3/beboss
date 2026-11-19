@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
+import com.example.BuildConfig
 import com.example.data.model.Branch
 import com.example.data.model.Customer
 import com.example.data.model.CustomerPayment
@@ -13,6 +14,7 @@ import com.example.data.model.Sale
 import com.example.data.model.SaleItem
 import com.example.data.model.ShopProfile
 import com.example.data.model.StockTransfer
+import com.example.data.model.SyncTombstone
 import com.example.data.model.User
 import com.example.data.model.UserRole
 import org.json.JSONArray
@@ -24,6 +26,8 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
+import java.util.Base64
+import java.util.Collections
 import java.util.Date
 import java.util.Locale
 import java.util.zip.GZIPInputStream
@@ -50,17 +54,36 @@ data class ShopImportSummary(
     val branches: List<Branch> = emptyList(),
     val stockTransfers: List<StockTransfer> = emptyList(),
     val purchases: List<PurchaseRecord> = emptyList(),
-    val branchScopeName: String? = null
+    val branchScopeName: String? = null,
+    val schemaVersion: Int = 3,
+    val packetNonce: String = "",
+    val tombstones: List<SyncTombstone> = emptyList()
 )
 
 object ShopDataTransferManager {
 
     private const val SHARE_TOKEN_PREFIX = "BBSHARE1:"
-    private const val SHARE_HMAC_KEY = "BeBoss_Branch_DataShare_Integrity_2026"
+    private const val CURRENT_SCHEMA_VERSION = 3
+    private const val DEFAULT_TOKEN_TTL_MS = 30L * 24L * 60L * 60L * 1000L
+
+    private val seenShareNonces = Collections.synchronizedMap(
+        object : LinkedHashMap<String, Long>(256, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>): Boolean {
+                return size > 500
+            }
+        }
+    )
+
+    private fun getShareHmacSecret(): String {
+        return CryptoKeyManager.requireConfiguredSecret(
+            rawSecret = BuildConfig.BEBOSS_DATASHARE_HMAC_SECRET,
+            secretName = "BEBOSS_DATASHARE_HMAC_SECRET"
+        )
+    }
 
     /**
-     * Creates full JSON Object for shop & multi-branch data.
-     * Supports optional branchIdFilter for exporting a single branch's operational snapshot.
+     * Creates full or delta JSON Object for shop & multi-branch data.
+     * Strips sensitive authentication secrets (pinHash, password) from exported staff records.
      */
     fun createExportJson(
         profile: ShopProfile,
@@ -74,30 +97,56 @@ object ShopDataTransferManager {
         branches: List<Branch> = emptyList(),
         stockTransfers: List<StockTransfer> = emptyList(),
         purchases: List<PurchaseRecord> = emptyList(),
-        branchIdFilter: String? = null
+        branchIdFilter: String? = null,
+        sinceUpdatedAt: Long = 0L,
+        tombstones: List<SyncTombstone> = emptyList()
     ): JSONObject {
         val activeFilter = branchIdFilter?.takeIf { it.isNotBlank() && it != "ALL" }
         val scopedBranch = if (activeFilter != null) branches.firstOrNull { it.id == activeFilter } else null
 
-        val filteredProducts = if (activeFilter == null) products else products.filter { it.branchId == activeFilter || it.branchId.isBlank() }
-        val filteredSales = if (activeFilter == null) sales else sales.filter { it.branchId == activeFilter }
+        val filteredProducts = products
+            .filter { activeFilter == null || it.branchId == activeFilter || it.branchId.isBlank() }
+            .filter { sinceUpdatedAt <= 0L || it.updatedAt >= sinceUpdatedAt }
+        val filteredSales = sales
+            .filter { activeFilter == null || it.branchId == activeFilter }
+            .filter { sinceUpdatedAt <= 0L || it.updatedAt >= sinceUpdatedAt }
         val filteredSaleIds = filteredSales.map { it.id }.toSet()
-        val filteredSaleItems = if (activeFilter == null) saleItems else saleItems.filter { filteredSaleIds.contains(it.saleId) }
-        val filteredPayments = if (activeFilter == null) payments else payments.filter { it.branchId == activeFilter }
-        val filteredPurchases = if (activeFilter == null) purchases else purchases.filter { it.branchId == activeFilter }
-        val filteredTransfers = if (activeFilter == null) stockTransfers else stockTransfers.filter {
-            it.fromBranchId == activeFilter || it.toBranchId == activeFilter
+        val filteredSaleItems = if (activeFilter == null && sinceUpdatedAt <= 0L) {
+            saleItems
+        } else {
+            saleItems.filter { filteredSaleIds.contains(it.saleId) }
         }
-        val filteredBranches = if (activeFilter == null) branches else branches.filter { it.id == activeFilter }
+        val filteredPayments = payments
+            .filter { activeFilter == null || it.branchId == activeFilter }
+            .filter { sinceUpdatedAt <= 0L || it.paymentDate >= sinceUpdatedAt }
+        val filteredPurchases = purchases
+            .filter { activeFilter == null || it.branchId == activeFilter }
+            .filter { sinceUpdatedAt <= 0L || it.createdAt >= sinceUpdatedAt }
+        val filteredTransfers = stockTransfers
+            .filter { activeFilter == null || it.fromBranchId == activeFilter || it.toBranchId == activeFilter }
+            .filter { sinceUpdatedAt <= 0L || it.createdAt >= sinceUpdatedAt }
+        val filteredBranches = branches
+            .filter { activeFilter == null || it.id == activeFilter }
+            .filter { sinceUpdatedAt <= 0L || it.updatedAt >= sinceUpdatedAt }
+        val filteredCustomers = customers.filter { sinceUpdatedAt <= 0L || it.updatedAt >= sinceUpdatedAt }
+        val filteredUsers = users.filter { sinceUpdatedAt <= 0L || it.updatedAt >= sinceUpdatedAt }
+        val filteredTombstones = tombstones.filter { sinceUpdatedAt <= 0L || it.deletedAt >= sinceUpdatedAt }
 
         val root = JSONObject()
+        val nowMs = ClockGuard.effectiveNowMs()
+        val packetNonce = SubscriptionSecurityManager.generateSecureTokenNonce(12)
 
         // 1. Metadata
         val meta = JSONObject().apply {
             put("app", "BeBoss")
-            put("version", "2.0")
-            put("format", "beboss_branch_datashare_v2")
-            put("timestamp", System.currentTimeMillis())
+            put("version", "3.0")
+            put("schemaVersion", CURRENT_SCHEMA_VERSION)
+            put("format", "beboss_branch_datashare_v3")
+            put("timestamp", nowMs)
+            put("issuedAt", nowMs)
+            put("expiresAt", nowMs + DEFAULT_TOKEN_TTL_MS)
+            put("nonce", packetNonce)
+            put("sinceUpdatedAt", sinceUpdatedAt)
             put("exportedBy", exportedByUser?.name ?: "Owner")
             put("exportedByRole", exportedByUser?.role?.name ?: "OWNER")
             if (scopedBranch != null) {
@@ -125,6 +174,9 @@ object ShopDataTransferManager {
             put("lastSyncedAt", profile.lastSyncedAt)
             put("createdAt", profile.createdAt)
             put("updatedAt", profile.updatedAt)
+            put("syncVersion", profile.syncVersion)
+            put("hlcTimestamp", profile.hlcTimestamp)
+            put("lastModifiedDeviceId", profile.lastModifiedDeviceId)
         }
         root.put("shopProfile", shopObj)
 
@@ -144,21 +196,24 @@ object ShopDataTransferManager {
                 put("colorHex", b.colorHex)
                 put("createdAt", b.createdAt)
                 put("updatedAt", b.updatedAt)
+                put("syncVersion", b.syncVersion)
+                put("hlcTimestamp", b.hlcTimestamp)
+                put("lastModifiedDeviceId", b.lastModifiedDeviceId)
             })
         }
         root.put("branches", branchesArr)
 
-        // 3. Collaborators / Users
+        // 3. Collaborators / Users (credentials redacted on wire/exports)
         val usersArr = JSONArray()
-        users.forEach { u ->
+        filteredUsers.forEach { u ->
             usersArr.put(JSONObject().apply {
                 put("id", u.id)
                 put("name", u.name)
                 put("username", u.username)
                 put("email", u.email)
                 put("phone", u.phone)
-                put("pinHash", u.pinHash)
-                put("password", u.password)
+                put("pinHash", "")
+                put("password", "")
                 put("role", u.role.name)
                 put("assignedBranchId", u.assignedBranchId)
                 put("assignedBranchName", u.assignedBranchName)
@@ -179,6 +234,9 @@ object ShopDataTransferManager {
                 put("lastLoginAt", u.lastLoginAt)
                 put("createdAt", u.createdAt)
                 put("updatedAt", u.updatedAt)
+                put("syncVersion", u.syncVersion)
+                put("hlcTimestamp", u.hlcTimestamp)
+                put("lastModifiedDeviceId", u.lastModifiedDeviceId)
             })
         }
         root.put("users", usersArr)
@@ -200,13 +258,16 @@ object ShopDataTransferManager {
                 put("isDeleted", p.isDeleted)
                 put("createdAt", p.createdAt)
                 put("updatedAt", p.updatedAt)
+                put("syncVersion", p.syncVersion)
+                put("hlcTimestamp", p.hlcTimestamp)
+                put("lastModifiedDeviceId", p.lastModifiedDeviceId)
             })
         }
         root.put("products", productsArr)
 
         // 5. Customers
         val customersArr = JSONArray()
-        customers.forEach { c ->
+        filteredCustomers.forEach { c ->
             customersArr.put(JSONObject().apply {
                 put("id", c.id)
                 put("name", c.name)
@@ -222,6 +283,9 @@ object ShopDataTransferManager {
                 put("isDeleted", c.isDeleted)
                 put("createdAt", c.createdAt)
                 put("updatedAt", c.updatedAt)
+                put("syncVersion", c.syncVersion)
+                put("hlcTimestamp", c.hlcTimestamp)
+                put("lastModifiedDeviceId", c.lastModifiedDeviceId)
             })
         }
         root.put("customers", customersArr)
@@ -249,6 +313,9 @@ object ShopDataTransferManager {
                 put("saleDate", s.saleDate)
                 put("synced", s.synced)
                 put("updatedAt", s.updatedAt)
+                put("syncVersion", s.syncVersion)
+                put("hlcTimestamp", s.hlcTimestamp)
+                put("lastModifiedDeviceId", s.lastModifiedDeviceId)
             })
         }
         root.put("sales", salesArr)
@@ -268,6 +335,7 @@ object ShopDataTransferManager {
                 put("unitPriceAtSale", i.unitPriceAtSale)
                 put("subtotal", i.subtotal)
                 put("profit", i.profit)
+                put("branchId", i.branchId)
             })
         }
         root.put("saleItems", itemsArr)
@@ -345,12 +413,98 @@ object ShopDataTransferManager {
         }
         root.put("stockTransfers", transfersArr)
 
+        // 11. Durable Deletion Tombstones
+        val tombstonesArr = JSONArray()
+        filteredTombstones.forEach { t ->
+            tombstonesArr.put(JSONObject().apply {
+                put("id", t.id.ifBlank { SyncTombstone.keyFor(t.tableName, t.recordId) })
+                put("tableName", t.tableName)
+                put("recordId", t.recordId)
+                put("deletedAt", t.deletedAt)
+                put("hlcTimestamp", t.hlcTimestamp)
+                put("deletedByDeviceId", t.deletedByDeviceId)
+            })
+        }
+        root.put("tombstones", tombstonesArr)
+
         return root
     }
 
     /**
-     * Generates a GZIP-compressed, HMAC-signed portable Branch Share Token (`BBSHARE1:...`)
-     * for instant sharing via WhatsApp, SMS, Clipboard, or Nearby Share.
+     * Generates chunked BBSHARE1 tokens capped at `maxRecordsPerChunk` per packet
+     * to avoid HTTP/Supabase payload size bottlenecks for large catalogs or sales logs.
+     */
+    fun exportChunkedTokens(
+        profile: ShopProfile,
+        users: List<User>,
+        products: List<Product>,
+        customers: List<Customer>,
+        sales: List<Sale>,
+        saleItems: List<SaleItem>,
+        payments: List<CustomerPayment>,
+        exportedByUser: User?,
+        branches: List<Branch> = emptyList(),
+        stockTransfers: List<StockTransfer> = emptyList(),
+        purchases: List<PurchaseRecord> = emptyList(),
+        sinceUpdatedAt: Long = 0L,
+        maxRecordsPerChunk: Int = 250,
+        tombstones: List<SyncTombstone> = emptyList()
+    ): List<String> {
+        val total = branches.size + users.size + products.size + customers.size + sales.size + payments.size
+        if (total <= maxRecordsPerChunk) {
+            return listOf(
+                createCompressedSyncToken(
+                    createExportJson(
+                        profile = profile,
+                        users = users,
+                        products = products,
+                        customers = customers,
+                        sales = sales,
+                        saleItems = saleItems,
+                        payments = payments,
+                        exportedByUser = exportedByUser,
+                        branches = branches,
+                        stockTransfers = stockTransfers,
+                        purchases = purchases,
+                        sinceUpdatedAt = sinceUpdatedAt,
+                        tombstones = tombstones
+                    )
+                )
+            )
+        }
+
+        val tokens = mutableListOf<String>()
+        // Chunk 0: master profile, branches, users, tombstones, products chunk 0
+        val prodChunks = products.chunked(maxRecordsPerChunk).ifEmpty { listOf(emptyList()) }
+        val custChunks = customers.chunked(maxRecordsPerChunk).ifEmpty { listOf(emptyList()) }
+        val saleChunks = sales.chunked(maxRecordsPerChunk).ifEmpty { listOf(emptyList()) }
+        val maxChunks = maxOf(prodChunks.size, custChunks.size, saleChunks.size)
+
+        for (idx in 0 until maxChunks) {
+            val sChunk = saleChunks.getOrElse(idx) { emptyList() }
+            val sIds = sChunk.map { it.id }.toSet()
+            val json = createExportJson(
+                profile = profile,
+                users = if (idx == 0) users else emptyList(),
+                products = prodChunks.getOrElse(idx) { emptyList() },
+                customers = custChunks.getOrElse(idx) { emptyList() },
+                sales = sChunk,
+                saleItems = saleItems.filter { sIds.contains(it.saleId) },
+                payments = if (idx == 0) payments else emptyList(),
+                exportedByUser = exportedByUser,
+                branches = if (idx == 0) branches else emptyList(),
+                stockTransfers = if (idx == 0) stockTransfers else emptyList(),
+                purchases = if (idx == 0) purchases else emptyList(),
+                sinceUpdatedAt = sinceUpdatedAt,
+                tombstones = if (idx == 0) tombstones else emptyList()
+            )
+            tokens.add(createCompressedSyncToken(json))
+        }
+        return tokens
+    }
+
+    /**
+     * Generates a GZIP-compressed, HMAC-signed portable Branch Share Token (`BBSHARE1:...`).
      */
     fun createCompressedSyncToken(json: JSONObject): String {
         val rawBytes = json.toString().toByteArray(StandardCharsets.UTF_8)
@@ -358,25 +512,46 @@ object ShopDataTransferManager {
         GZIPOutputStream(baos).use { gzip ->
             gzip.write(rawBytes)
         }
-        val b64Payload = base64Encode(baos.toByteArray())
-        val sig8 = computeShareHmac(b64Payload).take(8).uppercase(Locale.ROOT)
-        return "$SHARE_TOKEN_PREFIX$sig8:$b64Payload"
+        val b64Payload = Base64.getEncoder().encodeToString(baos.toByteArray())
+        val sig16 = computeShareHmac(b64Payload).take(16).uppercase(Locale.ROOT)
+        return "$SHARE_TOKEN_PREFIX$sig16:$b64Payload"
     }
 
     fun decodeCompressedSyncToken(token: String): String {
         val trimmed = token.trim()
+        require(trimmed.length <= SyncPayloadValidator.MAX_TOKEN_LENGTH) {
+            "BeBoss Share Token exceeds safe size limit."
+        }
         require(trimmed.startsWith(SHARE_TOKEN_PREFIX)) { "Invalid BeBoss Share Token prefix." }
         val remainder = trimmed.removePrefix(SHARE_TOKEN_PREFIX)
         val sepIndex = remainder.indexOf(':')
         require(sepIndex > 0) { "Malformed BeBoss Share Token structure." }
         val providedSig = remainder.substring(0, sepIndex).uppercase(Locale.ROOT)
         val b64Payload = remainder.substring(sepIndex + 1)
-        val expectedSig = computeShareHmac(b64Payload).take(8).uppercase(Locale.ROOT)
-        require(providedSig == expectedSig) { "Branch Share Token integrity check failed (truncated or tampered)." }
+        val fullHmac = computeShareHmac(b64Payload).uppercase(Locale.ROOT)
+        val expectedSig = fullHmac.take(providedSig.length.coerceIn(8, 16))
+        require(
+            providedSig.length in listOf(8, 16) &&
+                constantTimeEquals(providedSig, expectedSig)
+        ) {
+            "Branch Share Token integrity check failed (truncated or tampered)."
+        }
 
-        val compressed = base64Decode(b64Payload)
+        val compressed = Base64.getDecoder().decode(b64Payload)
         GZIPInputStream(ByteArrayInputStream(compressed)).bufferedReader(StandardCharsets.UTF_8).use { reader ->
-            return reader.readText()
+            val sb = StringBuilder()
+            val buf = CharArray(8192)
+            var total = 0
+            while (true) {
+                val read = reader.read(buf)
+                if (read < 0) break
+                total += read
+                require(total <= SyncPayloadValidator.MAX_RAW_PAYLOAD_BYTES) {
+                    "Decompressed share payload exceeds safe 5 MB limit."
+                }
+                sb.append(buf, 0, read)
+            }
+            return sb.toString()
         }
     }
 
@@ -396,7 +571,8 @@ object ShopDataTransferManager {
         branches: List<Branch> = emptyList(),
         stockTransfers: List<StockTransfer> = emptyList(),
         purchases: List<PurchaseRecord> = emptyList(),
-        branchIdFilter: String? = null
+        branchIdFilter: String? = null,
+        tombstones: List<SyncTombstone> = emptyList()
     ): File {
         val root = createExportJson(
             profile = profile,
@@ -410,7 +586,8 @@ object ShopDataTransferManager {
             branches = branches,
             stockTransfers = stockTransfers,
             purchases = purchases,
-            branchIdFilter = branchIdFilter
+            branchIdFilter = branchIdFilter,
+            tombstones = tombstones
         )
 
         val backupDir = File(context.getExternalFilesDir(null), "beboss_backups")
@@ -435,20 +612,42 @@ object ShopDataTransferManager {
     }
 
     /**
-     * Parses either raw JSON or a compressed `BBSHARE1:` token into a structured ShopImportSummary.
+     * Parses either raw JSON or a compressed `BBSHARE1:` token into a validated ShopImportSummary.
+     * Validates schema version bounds, expiry timestamps, and optional replay nonce cache.
      */
-    fun parseShopPackageString(input: String): ShopImportSummary {
+    fun parseShopPackageString(
+        input: String,
+        enforceReplayProtection: Boolean = false
+    ): ShopImportSummary {
         val trimmed = input.trim()
-        val jsonString = if (trimmed.startsWith(SHARE_TOKEN_PREFIX)) {
+        val isToken = trimmed.startsWith(SHARE_TOKEN_PREFIX)
+        val jsonString = if (isToken) {
             decodeCompressedSyncToken(trimmed)
         } else {
             trimmed
         }
 
-        val root = JSONObject(jsonString)
+        val root = SyncPayloadValidator.validateAndParseRoot(jsonString)
 
         val meta = root.optJSONObject("metadata")
-        val exportedAt = meta?.optLong("timestamp") ?: System.currentTimeMillis()
+        val schemaVersion = meta?.optInt("schemaVersion", 1) ?: 1
+        require(schemaVersion in 1..CURRENT_SCHEMA_VERSION) {
+            "Unsupported BeBoss sync schema version: $schemaVersion"
+        }
+        val packetNonce = meta?.optString("nonce", "").orEmpty()
+        val expiresAt = meta?.optLong("expiresAt", 0L) ?: 0L
+        if (isToken && expiresAt > 0L && ClockGuard.effectiveNowMs() > expiresAt) {
+            throw IllegalArgumentException("Branch Share Token has expired. Request a fresh token.")
+        }
+        if (enforceReplayProtection && isToken && packetNonce.isNotBlank()) {
+            synchronized(seenShareNonces) {
+                if (seenShareNonces.containsKey(packetNonce)) {
+                    throw IllegalArgumentException("Duplicate or replayed Branch Share Token rejected.")
+                }
+                seenShareNonces[packetNonce] = ClockGuard.effectiveNowMs()
+            }
+        }
+        val exportedAt = meta?.optLong("timestamp") ?: ClockGuard.effectiveNowMs()
         val exportedBy = meta?.optString("exportedBy") ?: "Owner"
         val branchScopeName = meta?.optString("branchScopeName")?.takeIf { it.isNotBlank() }
 
@@ -472,7 +671,10 @@ object ShopDataTransferManager {
                 backendServerUrl = sObj.optString("backendServerUrl", "https://api.beboss.app/v1"),
                 lastSyncedAt = sObj.optLong("lastSyncedAt", 0L),
                 createdAt = sObj.optLong("createdAt", System.currentTimeMillis()),
-                updatedAt = sObj.optLong("updatedAt", System.currentTimeMillis())
+                updatedAt = sObj.optLong("updatedAt", System.currentTimeMillis()),
+                syncVersion = sObj.optLong("syncVersion", 1L),
+                hlcTimestamp = sObj.optLong("hlcTimestamp", 0L),
+                lastModifiedDeviceId = sObj.optString("lastModifiedDeviceId", "")
             )
         }
 
@@ -495,7 +697,10 @@ object ShopDataTransferManager {
                         isActive = b.optBoolean("isActive", true),
                         colorHex = b.optString("colorHex", "#FF6B1A"),
                         createdAt = b.optLong("createdAt", System.currentTimeMillis()),
-                        updatedAt = b.optLong("updatedAt", System.currentTimeMillis())
+                        updatedAt = b.optLong("updatedAt", System.currentTimeMillis()),
+                        syncVersion = b.optLong("syncVersion", 1L),
+                        hlcTimestamp = b.optLong("hlcTimestamp", 0L),
+                        lastModifiedDeviceId = b.optString("lastModifiedDeviceId", "")
                     )
                 )
             }
@@ -516,8 +721,8 @@ object ShopDataTransferManager {
                         username = u.optString("username"),
                         email = u.optString("email", ""),
                         phone = u.optString("phone", ""),
-                        pinHash = u.optString("pinHash", ""),
-                        password = u.optString("password", ""),
+                        pinHash = "",
+                        password = "",
                         role = role,
                         assignedBranchId = u.optString("assignedBranchId", ""),
                         assignedBranchName = u.optString("assignedBranchName", "All Branches"),
@@ -537,7 +742,10 @@ object ShopDataTransferManager {
                         canExportImportData = u.optBoolean("canExportImportData", role == UserRole.OWNER),
                         lastLoginAt = u.optLong("lastLoginAt", System.currentTimeMillis()),
                         createdAt = u.optLong("createdAt", System.currentTimeMillis()),
-                        updatedAt = u.optLong("updatedAt", System.currentTimeMillis())
+                        updatedAt = u.optLong("updatedAt", System.currentTimeMillis()),
+                        syncVersion = u.optLong("syncVersion", 1L),
+                        hlcTimestamp = u.optLong("hlcTimestamp", 0L),
+                        lastModifiedDeviceId = u.optString("lastModifiedDeviceId", "")
                     )
                 )
             }
@@ -563,7 +771,10 @@ object ShopDataTransferManager {
                         branchId = p.optString("branchId", "main_branch"),
                         isDeleted = p.optBoolean("isDeleted", false),
                         createdAt = p.optLong("createdAt", System.currentTimeMillis()),
-                        updatedAt = p.optLong("updatedAt", System.currentTimeMillis())
+                        updatedAt = p.optLong("updatedAt", System.currentTimeMillis()),
+                        syncVersion = p.optLong("syncVersion", 1L),
+                        hlcTimestamp = p.optLong("hlcTimestamp", 0L),
+                        lastModifiedDeviceId = p.optString("lastModifiedDeviceId", "")
                     )
                 )
             }
@@ -590,7 +801,10 @@ object ShopDataTransferManager {
                         debtBalance = c.optDouble("debtBalance", 0.0),
                         isDeleted = c.optBoolean("isDeleted", false),
                         createdAt = c.optLong("createdAt", System.currentTimeMillis()),
-                        updatedAt = c.optLong("updatedAt", System.currentTimeMillis())
+                        updatedAt = c.optLong("updatedAt", System.currentTimeMillis()),
+                        syncVersion = c.optLong("syncVersion", 1L),
+                        hlcTimestamp = c.optLong("hlcTimestamp", 0L),
+                        lastModifiedDeviceId = c.optString("lastModifiedDeviceId", "")
                     )
                 )
             }
@@ -622,7 +836,10 @@ object ShopDataTransferManager {
                         cashierId = s.optString("cashierId", ""),
                         cashierName = s.optString("cashierName", "Shop Operator"),
                         synced = s.optBoolean("synced", false),
-                        updatedAt = s.optLong("updatedAt", System.currentTimeMillis())
+                        updatedAt = s.optLong("updatedAt", System.currentTimeMillis()),
+                        syncVersion = s.optLong("syncVersion", 1L),
+                        hlcTimestamp = s.optLong("hlcTimestamp", 0L),
+                        lastModifiedDeviceId = s.optString("lastModifiedDeviceId", "")
                     )
                 )
             }
@@ -646,7 +863,8 @@ object ShopDataTransferManager {
                         costPriceAtSale = item.optDouble("costPriceAtSale", item.optDouble("unitCostPrice", 0.0)),
                         unitPriceAtSale = item.optDouble("unitPriceAtSale", item.optDouble("unitSellingPrice", 0.0)),
                         subtotal = item.optDouble("subtotal", item.optDouble("totalPrice", 0.0)),
-                        profit = item.optDouble("profit", 0.0)
+                        profit = item.optDouble("profit", 0.0),
+                        branchId = item.optString("branchId", "main_branch")
                     )
                 )
             }
@@ -723,7 +941,7 @@ object ShopDataTransferManager {
                         transferNumber = tr.optString("transferNumber"),
                         productId = tr.optString("productId"),
                         productName = tr.optString("productName"),
-                        fromBranchId = tr.fromBranchIdOrOpt(tr),
+                        fromBranchId = tr.optString("fromBranchId"),
                         fromBranchName = tr.optString("fromBranchName"),
                         toBranchId = tr.optString("toBranchId"),
                         toBranchName = tr.optString("toBranchName"),
@@ -737,6 +955,29 @@ object ShopDataTransferManager {
                         createdAt = tr.optLong("createdAt", System.currentTimeMillis())
                     )
                 )
+            }
+        }
+
+        // Tombstones
+        val tombstones = mutableListOf<SyncTombstone>()
+        if (root.has("tombstones")) {
+            val tombArr = root.getJSONArray("tombstones")
+            for (i in 0 until tombArr.length()) {
+                val t = tombArr.getJSONObject(i)
+                val tableName = t.optString("tableName")
+                val recordId = t.optString("recordId")
+                if (tableName.isNotBlank() && recordId.isNotBlank()) {
+                    tombstones.add(
+                        SyncTombstone(
+                            id = t.optString("id").ifBlank { SyncTombstone.keyFor(tableName, recordId) },
+                            tableName = tableName,
+                            recordId = recordId,
+                            deletedAt = t.optLong("deletedAt", ClockGuard.effectiveNowMs()),
+                            hlcTimestamp = t.optLong("hlcTimestamp", 0L),
+                            deletedByDeviceId = t.optString("deletedByDeviceId", "")
+                        )
+                    )
+                }
             }
         }
 
@@ -759,11 +1000,12 @@ object ShopDataTransferManager {
             branches = branches,
             stockTransfers = transfers,
             purchases = purchases,
-            branchScopeName = branchScopeName
+            branchScopeName = branchScopeName,
+            schemaVersion = schemaVersion,
+            packetNonce = packetNonce,
+            tombstones = tombstones
         )
     }
-
-    private fun JSONObject.fromBranchIdOrOpt(tr: JSONObject): String = tr.optString("fromBranchId")
 
     fun listLocalBackups(context: Context): List<File> {
         val backupDir = File(context.getExternalFilesDir(null), "beboss_backups")
@@ -794,10 +1036,6 @@ object ShopDataTransferManager {
         shareBackupFile(context, file, "Shop")
     }
 
-    /**
-     * Shares the bundled BeBoss Web Admin Platform HTML (`admin_portal.html`) so an admin can
-     * open it in any desktop/mobile browser or deploy it statically.
-     */
     fun exportAndShareAdminWebPortal(context: Context) {
         val outDir = File(context.cacheDir, "admin_web")
         if (!outDir.exists()) outDir.mkdirs()
@@ -818,7 +1056,11 @@ object ShopDataTransferManager {
         context.startActivity(Intent.createChooser(intent, "Open / Share BeBoss Admin Web Platform"))
     }
 
-    fun buildCollaboratorInviteText(shopProfile: ShopProfile, worker: User): String {
+    fun buildCollaboratorInviteText(
+        shopProfile: ShopProfile,
+        worker: User,
+        temporaryPlainPin: String? = null
+    ): String {
         val perms = mutableListOf<String>()
         if (worker.canSellPOS) perms.add("POS Checkout")
         if (worker.canManageInventory) perms.add("Inventory & Stock")
@@ -826,66 +1068,36 @@ object ShopDataTransferManager {
         if (worker.canViewAnalytics) perms.add("Financial Reports")
         if (worker.canApplyDiscounts) perms.add("Custom Discounts")
 
+        val pinLine = if (!temporaryPlainPin.isNullOrBlank()) {
+            "• Initial PIN: *$temporaryPlainPin* (change after first sign-in)"
+        } else {
+            "• Terminal PIN: Request your personal PIN directly from your Store Owner"
+        }
+
         return """
             Hello ${worker.name},
             You have been granted access to *${shopProfile.shopName}* on BeBoss POS!
 
-            *Your Access Credentials:*
+            *Your Access Profile:*
             • Role: ${worker.role.displayName}
             • Username: ${worker.username}
-            • Fast Unlock PIN: *${worker.pinHash}*
+            $pinLine
             • Assigned Branch: ${worker.assignedBranchName}
             • Assigned Permissions: ${perms.joinToString(", ")}
 
-            Please keep your PIN safe. You can now log in directly on the store terminal.
+            Please keep your credentials private. You can now log in directly on the store terminal.
             — ${shopProfile.name.ifBlank { "Store Management" }}
         """.trimIndent()
     }
 
     private fun computeShareHmac(data: String): String {
         val mac = Mac.getInstance("HmacSHA256")
-        val keySpec = SecretKeySpec(SHARE_HMAC_KEY.toByteArray(StandardCharsets.UTF_8), "HmacSHA256")
+        val keySpec = SecretKeySpec(getShareHmacSecret().toByteArray(StandardCharsets.UTF_8), "HmacSHA256")
         mac.init(keySpec)
         return SecurityUtils.bytesToHex(mac.doFinal(data.toByteArray(StandardCharsets.UTF_8)))
     }
 
-    private val b64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-
-    private fun base64Encode(data: ByteArray): String {
-        val sb = StringBuilder(((data.size + 2) / 3) * 4)
-        var i = 0
-        while (i < data.size) {
-            val b0 = data[i++].toInt() and 0xFF
-            val hasB1 = i < data.size
-            val b1 = if (hasB1) data[i++].toInt() and 0xFF else 0
-            val hasB2 = i < data.size
-            val b2 = if (hasB2) data[i++].toInt() and 0xFF else 0
-
-            val triple = (b0 shl 16) or (b1 shl 8) or b2
-            sb.append(b64Chars[(triple ushr 18) and 0x3F])
-            sb.append(b64Chars[(triple ushr 12) and 0x3F])
-            sb.append(if (hasB1) b64Chars[(triple ushr 6) and 0x3F] else '=')
-            sb.append(if (hasB2) b64Chars[triple and 0x3F] else '=')
-        }
-        return sb.toString()
-    }
-
-    private fun base64Decode(input: String): ByteArray {
-        val clean = input.filter { !it.isWhitespace() }
-        val baos = ByteArrayOutputStream((clean.length * 3) / 4)
-        var i = 0
-        while (i + 3 < clean.length) {
-            val c0 = b64Chars.indexOf(clean[i++])
-            val c1 = b64Chars.indexOf(clean[i++])
-            val ch2 = clean[i++]
-            val ch3 = clean[i++]
-            val c2 = if (ch2 == '=') 0 else b64Chars.indexOf(ch2)
-            val c3 = if (ch3 == '=') 0 else b64Chars.indexOf(ch3)
-            val triple = (c0 shl 18) or (c1 shl 12) or (c2 shl 6) or c3
-            baos.write((triple ushr 16) and 0xFF)
-            if (ch2 != '=') baos.write((triple ushr 8) and 0xFF)
-            if (ch3 != '=') baos.write(triple and 0xFF)
-        }
-        return baos.toByteArray()
+    private fun constantTimeEquals(a: String, b: String): Boolean {
+        return SecurityUtils.constantTimeEquals(a, b)
     }
 }

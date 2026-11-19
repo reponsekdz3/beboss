@@ -54,9 +54,9 @@ object OfflineSubscriptionManager {
     var defaultAirtelPhoneNumber = "0738765432"
     var defaultSupportWhatsApp: String
         get() = try {
-            com.example.BuildConfig.BEBOSS_ADMIN_WHATSAPP.ifBlank { "+250788765432" }
+            com.example.BuildConfig.BEBOSS_ADMIN_WHATSAPP.trim()
         } catch (_: Throwable) {
-            "+250788765432"
+            ""
         }
         set(_) {}
 
@@ -363,6 +363,14 @@ object OfflineSubscriptionManager {
             telcoReference = telcoReference,
             requestId = requestId
         )
+        if (adminWhatsAppNumber.isBlank()) {
+            Toast.makeText(
+                context,
+                "Support WhatsApp number is not configured in Secrets.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
         PdfReportGenerator.sendWhatsAppDirect(context, adminWhatsAppNumber, msg)
     }
 
@@ -421,7 +429,16 @@ object OfflineSubscriptionManager {
         """.trimIndent()
 
         val textToSend = customMsg ?: defaultText
-        PdfReportGenerator.sendWhatsAppDirect(context, defaultSupportWhatsApp, textToSend)
+        val supportNumber = defaultSupportWhatsApp
+        if (supportNumber.isBlank()) {
+            Toast.makeText(
+                context,
+                "Support WhatsApp number is not configured in Secrets.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        PdfReportGenerator.sendWhatsAppDirect(context, supportNumber, textToSend)
     }
 
     /**

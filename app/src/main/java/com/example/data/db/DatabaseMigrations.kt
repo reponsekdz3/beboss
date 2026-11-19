@@ -167,6 +167,87 @@ object DatabaseMigrations {
         }
     }
 
+    val MIGRATION_9_10 = object : Migration(9, 10) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            val causalTables = listOf("products", "customers", "branches", "users", "sales", "shop_profile")
+            for (table in causalTables) {
+                db.execSQL("ALTER TABLE $table ADD COLUMN syncVersion INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE $table ADD COLUMN hlcTimestamp INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE $table ADD COLUMN lastModifiedDeviceId TEXT NOT NULL DEFAULT ''")
+            }
+
+            db.execSQL("ALTER TABLE sync_queue ADD COLUMN retryCount INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE sync_queue ADD COLUMN nextAttemptAt INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE sync_queue ADD COLUMN lastError TEXT NOT NULL DEFAULT ''")
+
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS local_audit_logs (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    actorName TEXT NOT NULL,
+                    actorRole TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    targetId TEXT NOT NULL,
+                    details TEXT NOT NULL,
+                    createdAt INTEGER NOT NULL
+                )
+                """.trimIndent()
+            )
+
+            // Performance & query indices matching Room @Index definitions
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_products_barcode ON products(barcode)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_products_branchId ON products(branchId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_products_updatedAt ON products(updatedAt)")
+
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_customers_phone ON customers(phone)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_customers_debtBalance ON customers(debtBalance)")
+
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_sales_customerId ON sales(customerId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_sales_branchId ON sales(branchId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_sales_saleDate ON sales(saleDate)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_sales_synced ON sales(synced)")
+
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_sale_items_saleId ON sale_items(saleId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_sale_items_productId ON sale_items(productId)")
+
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_customer_payments_customerId ON customer_payments(customerId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_customer_payments_branchId ON customer_payments(branchId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_customer_payments_paymentDate ON customer_payments(paymentDate)")
+
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_purchases_productId ON purchases(productId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_purchases_branchId ON purchases(branchId)")
+
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_stock_transfers_productId ON stock_transfers(productId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_stock_transfers_fromBranchId ON stock_transfers(fromBranchId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_stock_transfers_toBranchId ON stock_transfers(toBranchId)")
+
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_sync_queue_status_nextAttemptAt ON sync_queue(status, nextAttemptAt)")
+
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_local_audit_logs_createdAt ON local_audit_logs(createdAt)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_local_audit_logs_action ON local_audit_logs(action)")
+        }
+    }
+
+    val MIGRATION_10_11 = object : Migration(10, 11) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS sync_tombstones (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    tableName TEXT NOT NULL,
+                    recordId TEXT NOT NULL,
+                    deletedAt INTEGER NOT NULL,
+                    hlcTimestamp INTEGER NOT NULL,
+                    deletedByDeviceId TEXT NOT NULL
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_sync_tombstones_tableName_deletedAt ON sync_tombstones(tableName, deletedAt)"
+            )
+        }
+    }
+
     val ALL_MIGRATIONS = arrayOf(
         MIGRATION_1_2,
         MIGRATION_2_3,
@@ -175,6 +256,8 @@ object DatabaseMigrations {
         MIGRATION_5_6,
         MIGRATION_6_7,
         MIGRATION_7_8,
-        MIGRATION_8_9
+        MIGRATION_8_9,
+        MIGRATION_9_10,
+        MIGRATION_10_11
     )
 }

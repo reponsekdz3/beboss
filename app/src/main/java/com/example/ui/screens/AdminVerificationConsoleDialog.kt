@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Block
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Key
@@ -43,6 +45,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.VerifiedUser
@@ -84,6 +87,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.data.model.LocalAuditLog
 import com.example.data.model.ShopProfile
 import com.example.ui.theme.DarkNavy
 import com.example.ui.theme.LossRed
@@ -116,17 +120,20 @@ fun AdminVerificationConsoleDialog(
     branchSnapshots: List<SupabaseBranchSnapshotDto> = emptyList(),
     unlockCodes: List<SupabaseUnlockCodeDto>,
     auditLogs: List<SupabaseAuditLogDto>,
+    localAuditLogs: List<LocalAuditLog> = emptyList(),
     isLoading: Boolean,
     onSignInAdmin: (email: String, password: String) -> Unit,
     onSignUpAdmin: (email: String, password: String, fullName: String) -> Unit,
     onSignOutAdmin: () -> Unit,
     onRefresh: () -> Unit,
     onApprovePayment: (SupabasePaymentRequestDto, (Boolean, String) -> Unit) -> Unit,
+    onBatchApprovePending: ((Int, Int) -> Unit) -> Unit = { _ -> },
     onRejectPayment: (SupabasePaymentRequestDto, String) -> Unit,
     onIssueManualCode: (username: String, registeredPhone: String, tierCode: String, days: Int, amountRwf: Int, onDone: (Boolean, String) -> Unit) -> Unit,
     onRevokeCode: (SupabaseUnlockCodeDto) -> Unit,
     onExtendShopSubscription: (SupabaseShopAccountDto, Int) -> Unit = { _, _ -> },
     onSetShopStatus: (SupabaseShopAccountDto, String) -> Unit = { _, _ -> },
+    onUpdateShopLimits: (SupabaseShopAccountDto, Int, Int) -> Unit = { _, _, _ -> },
     onDeleteShopAccount: (SupabaseShopAccountDto) -> Unit = {},
     onUpdateShopUserRole: (SupabaseShopUserDto, String) -> Unit = { _, _ -> },
     onToggleShopUserActive: (SupabaseShopUserDto, Boolean) -> Unit = { _, _ -> },
@@ -150,9 +157,12 @@ fun AdminVerificationConsoleDialog(
     var adminFullName by remember { mutableStateOf("BeBoss Master Admin") }
     var showAdminPassword by remember { mutableStateOf(false) }
 
-    // Search filters for Users & Shops
+    // Queue, Users, Shops, Audit Filters
+    var queueStatusFilter by remember { mutableStateOf("ALL") }
+    var queueSearchQuery by remember { mutableStateOf("") }
     var userSearchQuery by remember { mutableStateOf("") }
     var shopSearchQuery by remember { mutableStateOf("") }
+    var showLocalSecurityAudit by remember { mutableStateOf(false) }
 
     // Reject Modal State
     var requestToReject by remember { mutableStateOf<SupabasePaymentRequestDto?>(null) }
@@ -174,7 +184,7 @@ fun AdminVerificationConsoleDialog(
         Card(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
-                .widthIn(max = 700.dp)
+                .widthIn(max = 840.dp)
                 .padding(vertical = 12.dp),
             shape = RoundedCornerShape(22.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -442,6 +452,46 @@ fun AdminVerificationConsoleDialog(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     val pendingCount = paymentRequests.count { it.status == "PENDING_VERIFICATION" }
+                    val pendingTotalRwf = paymentRequests
+                        .filter { it.status == "PENDING_VERIFICATION" }
+                        .sumOf { it.amountRwf }
+                    val activeShopsCount = shopAccounts.count {
+                        it.subscriptionStatus == "ACTIVE" && it.subscriptionExpiresAt > System.currentTimeMillis()
+                    }
+
+                    // Master Admin KPI Summary Strip
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        AdminKpiCard(
+                            label = "Pending",
+                            value = "$pendingCount",
+                            accent = if (pendingCount > 0) WarningAmber else ProfitGreen,
+                            modifier = Modifier.weight(1f)
+                        )
+                        AdminKpiCard(
+                            label = "Queue FRw",
+                            value = "${pendingTotalRwf / 1000}k",
+                            accent = OrangePrimary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        AdminKpiCard(
+                            label = "Active Shops",
+                            value = "$activeShopsCount/${shopAccounts.size}",
+                            accent = ProfitGreen,
+                            modifier = Modifier.weight(1f)
+                        )
+                        AdminKpiCard(
+                            label = "BB2 Issued",
+                            value = "${unlockCodes.size}",
+                            accent = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
                     ScrollableTabRow(
                         selectedTabIndex = selectedTab,
                         containerColor = Color.Transparent,
@@ -481,7 +531,7 @@ fun AdminVerificationConsoleDialog(
                         Tab(
                             selected = selectedTab == 6,
                             onClick = { selectedTab = 6 },
-                            text = { Text("Audit (${auditLogs.size})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
+                            text = { Text("Audit (${auditLogs.size + localAuditLogs.size})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
                         )
                     }
 
@@ -547,16 +597,97 @@ fun AdminVerificationConsoleDialog(
 
                     when (selectedTab) {
                         0 -> {
-                            // Payment Verification Queue
-                            if (paymentRequests.isEmpty()) {
+                            // Payment Verification Queue with Filters & Batch Approve
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = queueSearchQuery,
+                                    onValueChange = { queueSearchQuery = it },
+                                    label = { Text("Search queue by shop, @username, ref or phone") },
+                                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                    singleLine = true,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("admin_queue_search_input"),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    listOf(
+                                        "ALL" to "All",
+                                        "PENDING_VERIFICATION" to "Pending",
+                                        "APPROVED" to "Approved",
+                                        "REJECTED" to "Rejected"
+                                    ).forEach { (statusKey, label) ->
+                                        val selected = queueStatusFilter == statusKey
+                                        OutlinedButton(
+                                            onClick = { queueStatusFilter = statusKey },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .heightIn(min = 42.dp),
+                                            contentPadding = PaddingValues(horizontal = 4.dp),
+                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                containerColor = if (selected) OrangePrimary.copy(alpha = 0.16f) else Color.Transparent
+                                            )
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (selected) OrangePrimary else MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (pendingCount > 1) {
+                                    Button(
+                                        onClick = {
+                                            onBatchApprovePending { _, _ -> }
+                                        },
+                                        enabled = !isLoading,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(min = 48.dp)
+                                            .testTag("admin_batch_approve_btn"),
+                                        colors = ButtonDefaults.buttonColors(containerColor = ProfitGreen)
+                                    ) {
+                                        Icon(Icons.Default.DoneAll, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "Batch Approve All Pending ($pendingCount Claims)",
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            val filteredQueue = paymentRequests.filter { req ->
+                                val statusMatch = queueStatusFilter == "ALL" || req.status == queueStatusFilter
+                                val q = queueSearchQuery.trim().lowercase(Locale.ROOT)
+                                val searchMatch = q.isBlank() ||
+                                    req.shopName.lowercase(Locale.ROOT).contains(q) ||
+                                    req.ownerUsername.lowercase(Locale.ROOT).contains(q) ||
+                                    req.ownerPhone.contains(q) ||
+                                    req.payerPhone.contains(q) ||
+                                    req.telcoReference.lowercase(Locale.ROOT).contains(q)
+                                statusMatch && searchMatch
+                            }
+
+                            if (filteredQueue.isEmpty()) {
                                 Text(
-                                    text = "No Supabase payment requests found yet. Pull 'Sync All' or switch to 'Issue Code'.",
+                                    text = "No payment requests match the current filter. Pull 'Sync All' or switch to 'Issue Code'.",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(8.dp)
                                 )
                             } else {
-                                paymentRequests.forEach { req ->
+                                filteredQueue.forEach { req ->
                                     val isApproved = req.status == "APPROVED" && req.generatedUnlockCode.isNotBlank()
                                     val isRejected = req.status == "REJECTED"
                                     val expectedFee = OfflineSubscriptionManager.calculateSubscriptionPrice(
@@ -910,6 +1041,72 @@ fun AdminVerificationConsoleDialog(
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
 
+                                            var draftBranches by remember(acc.ownerUsername, acc.branchCount) { mutableIntStateOf(acc.branchCount.coerceAtLeast(1)) }
+                                            var draftWorkers by remember(acc.ownerUsername, acc.workerCount) { mutableIntStateOf(acc.workerCount.coerceAtLeast(1)) }
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = MaterialTheme.colorScheme.surface,
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        IconButton(
+                                                            onClick = { if (draftBranches > 1) draftBranches-- },
+                                                            modifier = Modifier.size(36.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Remove, contentDescription = "Decrease branch limit", modifier = Modifier.size(16.dp))
+                                                        }
+                                                        Text("Br: $draftBranches", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                        IconButton(
+                                                            onClick = { draftBranches++ },
+                                                            modifier = Modifier.size(36.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Add, contentDescription = "Increase branch limit", modifier = Modifier.size(16.dp))
+                                                        }
+                                                    }
+                                                }
+                                                Surface(
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = MaterialTheme.colorScheme.surface,
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        IconButton(
+                                                            onClick = { if (draftWorkers > 1) draftWorkers-- },
+                                                            modifier = Modifier.size(36.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Remove, contentDescription = "Decrease worker limit", modifier = Modifier.size(16.dp))
+                                                        }
+                                                        Text("Stf: $draftWorkers", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                        IconButton(
+                                                            onClick = { draftWorkers++ },
+                                                            modifier = Modifier.size(36.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Add, contentDescription = "Increase worker limit", modifier = Modifier.size(16.dp))
+                                                        }
+                                                    }
+                                                }
+                                                OutlinedButton(
+                                                    onClick = { onUpdateShopLimits(acc, draftBranches, draftWorkers) },
+                                                    modifier = Modifier.heightIn(min = 42.dp),
+                                                    contentPadding = PaddingValues(horizontal = 8.dp)
+                                                ) {
+                                                    Text("Save Quotas", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+
                                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                 Button(
                                                     onClick = { onExtendShopSubscription(acc, 30) },
@@ -1170,44 +1367,118 @@ fun AdminVerificationConsoleDialog(
                         }
 
                         else -> {
-                            // Admin Audit Trail
-                            if (auditLogs.isEmpty()) {
-                                Text(
-                                    text = "No audit events recorded yet.",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(8.dp)
-                                )
-                            } else {
-                                auditLogs.forEach { entry ->
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 3.dp)
-                                    ) {
-                                        Column(modifier = Modifier.padding(10.dp)) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween
-                                            ) {
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    Icon(Icons.Default.History, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(14.dp))
-                                                    Spacer(modifier = Modifier.width(4.dp))
-                                                    Text(entry.action, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = OrangePrimary)
+                            // Unified Cloud + Local Security Audit Trail
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = { showLocalSecurityAudit = false },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 44.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = if (!showLocalSecurityAudit) OrangePrimary.copy(alpha = 0.16f) else Color.Transparent
+                                    )
+                                ) {
+                                    Text("Cloud Logs (${auditLogs.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                                OutlinedButton(
+                                    onClick = { showLocalSecurityAudit = true },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 44.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = if (showLocalSecurityAudit) OrangePrimary.copy(alpha = 0.16f) else Color.Transparent
+                                    )
+                                ) {
+                                    Text("Local Security (${localAuditLogs.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            if (!showLocalSecurityAudit) {
+                                if (auditLogs.isEmpty()) {
+                                    Text(
+                                        text = "No cloud admin audit events recorded yet.",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(8.dp)
+                                    )
+                                } else {
+                                    auditLogs.forEach { entry ->
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 3.dp)
+                                        ) {
+                                            Column(modifier = Modifier.padding(10.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Icon(Icons.Default.History, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(14.dp))
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Text(entry.action, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = OrangePrimary)
+                                                    }
+                                                    Text(
+                                                        text = dateFormatter.format(Date(entry.createdAt)),
+                                                        fontSize = 10.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
                                                 }
                                                 Text(
-                                                    text = dateFormatter.format(Date(entry.createdAt)),
-                                                    fontSize = 10.sp,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    text = "${entry.adminEmail} • ${entry.details}",
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface
                                                 )
                                             }
-                                            Text(
-                                                text = "${entry.adminEmail} • ${entry.details}",
-                                                fontSize = 11.sp,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                if (localAuditLogs.isEmpty()) {
+                                    Text(
+                                        text = "No local security audit events recorded yet.",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(8.dp)
+                                    )
+                                } else {
+                                    localAuditLogs.forEach { entry ->
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 3.dp)
+                                        ) {
+                                            Column(modifier = Modifier.padding(10.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(14.dp))
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Text(entry.action, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = ProfitGreen)
+                                                    }
+                                                    Text(
+                                                        text = dateFormatter.format(Date(entry.createdAt)),
+                                                        fontSize = 10.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                                Text(
+                                                    text = "${entry.actorName} (${entry.actorRole}) • ${entry.details}",
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -1260,5 +1531,40 @@ fun AdminVerificationConsoleDialog(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun AdminKpiCard(
+    label: String,
+    value: String,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = accent.copy(alpha = 0.10f),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.32f))
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = value,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Black,
+                color = accent,
+                maxLines = 1
+            )
+            Text(
+                text = label,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+        }
     }
 }

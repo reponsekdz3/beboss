@@ -1,42 +1,66 @@
 package com.example
 
+import android.app.Activity
 import android.os.Build
 import android.os.Bundle
+import android.view.MotionEvent
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.SyncProblem
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
+import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
+import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.BeBossBottomNav
+import com.example.ui.components.BeBossNavigationRail
 import com.example.ui.components.BeBossTopBar
 import com.example.ui.components.PermissionRequestDialog
 import com.example.ui.components.QuickCustomSaleDialog
@@ -57,27 +81,72 @@ import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.AppScreen
 import com.example.ui.viewmodel.BeBossViewModel
 import com.example.util.AppLanguage
+import com.example.util.BeBossLogger
 import com.example.util.BeBossNotificationManager
 import com.example.util.BiometricAuthManager
-import com.example.util.PermissionManager
+import com.example.util.ClockGuard
+import com.example.util.ConnectivityStatus
 import kotlinx.coroutines.flow.collectLatest
 
 class MainActivity : ComponentActivity() {
 
+    @Volatile
+    private var activeViewModel: BeBossViewModel? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        installCrashTelemetryHook()
+        ClockGuard.init(this)
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            setRecentsScreenshotEnabled(false)
+        }
+        window.decorView.rootView.filterTouchesWhenObscured = true
         enableEdgeToEdge()
         hideSystemNavigationBars()
         BeBossNotificationManager.createNotificationChannels(this)
 
         setContent {
             val viewModel: BeBossViewModel = viewModel()
+            activeViewModel = viewModel
             val isDarkTheme by viewModel.isDarkTheme.collectAsState()
 
             MyApplicationTheme(darkTheme = isDarkTheme) {
                 BeBossApp(viewModel = viewModel)
             }
         }
+    }
+
+    private fun installCrashTelemetryHook() {
+        if (crashHookInstalled) return
+        synchronized(MainActivity::class.java) {
+            if (crashHookInstalled) return
+            val previous = Thread.getDefaultUncaughtExceptionHandler()
+            Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+                BeBossLogger.e(
+                    "BeBossUncaught",
+                    "Uncaught exception on thread=${thread.name}",
+                    throwable
+                )
+                previous?.uncaughtException(thread, throwable)
+            }
+            crashHookInstalled = true
+        }
+    }
+
+    companion object {
+        @Volatile
+        private var crashHookInstalled = false
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+        if (ev != null) {
+            activeViewModel?.onUserInteraction()
+        }
+        return super.dispatchTouchEvent(ev)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -103,9 +172,17 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
 @Composable
 fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     val context = LocalContext.current
+    val hostActivity = context as? Activity
+    val widthSizeClass = if (hostActivity != null) {
+        calculateWindowSizeClass(hostActivity).widthSizeClass
+    } else {
+        WindowWidthSizeClass.Compact
+    }
+    val useNavRail = widthSizeClass != WindowWidthSizeClass.Compact
     val currentScreen by viewModel.currentScreen.collectAsState()
     val shopProfile by viewModel.shopProfile.collectAsState()
     val allProducts by viewModel.allProducts.collectAsState()
@@ -126,6 +203,8 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     val categoryBreakdown by viewModel.categoryBreakdown.collectAsState()
     val selectedPeriod by viewModel.selectedAnalyticsPeriod.collectAsState()
     val pendingSyncCount by viewModel.pendingSyncCount.collectAsState()
+    val deadLetterSyncCount by viewModel.deadLetterSyncCount.collectAsState()
+    val startupIntegrityOk by viewModel.startupIntegrityOk.collectAsState()
     val isSyncing by viewModel.isSyncing.collectAsState()
     val activeReceipt by viewModel.activeReceiptSale.collectAsState()
 
@@ -163,6 +242,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     val adminBranchSnapshots by viewModel.adminBranchSnapshots.collectAsState()
     val adminUnlockCodes by viewModel.adminUnlockCodes.collectAsState()
     val adminAuditLogs by viewModel.adminAuditLogs.collectAsState()
+    val localAuditLogs by viewModel.localAuditLogs.collectAsState()
     val isAdminLoading by viewModel.isAdminLoading.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -193,7 +273,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
     if (showSplashScreen) {
         AppSplashScreen(
             isDarkTheme = isDarkTheme,
-            durationMs = 650L,
+            durationMs = 520L,
             onSplashFinished = { showSplashScreen = false }
         )
     } else if (isRegistrationNeeded) {
@@ -218,7 +298,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
             onToggleTheme = { viewModel.toggleDarkMode() }
         )
     } else if (isLocked) {
-        val activity = context as? android.app.Activity
+        val activity = context as? Activity
         AuthLockScreen(
             currentUser = currentUser,
             allUsers = allUsers,
@@ -235,15 +315,19 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                         title = if (currentLanguage == AppLanguage.KINYARWANDA) "Kugenzura Igikumwe" else "Fingerprint Verification",
                         subtitle = if (currentLanguage == AppLanguage.KINYARWANDA) "Koresha igikumwe gufungura BeBoss" else "Verify fingerprint to unlock BeBoss",
                         negativeButtonText = if (currentLanguage == AppLanguage.KINYARWANDA) "Koresha PIN" else "Use PIN Instead",
-                        onSuccess = { viewModel.unlockWithBiometric() },
-                        onError = { /* fallback */ },
-                        onFailed = { /* failed */ }
+                        onSuccess = { viewModel.unlockWithBiometric(verifiedByHardware = true) },
+                        onError = { msg -> viewModel.reportBiometricError(msg) },
+                        onFailed = { viewModel.reportBiometricCancelled() }
                     )
                 } else {
-                    viewModel.unlockWithBiometric()
+                    viewModel.reportBiometricError(
+                        if (currentLanguage == AppLanguage.KINYARWANDA)
+                            "Igikoresho ntigifite uburyo bw'igikumwe bwizewe. Koresha PIN cyangwa ijambobanga."
+                        else "Hardware biometric authentication is unavailable on this device. Use PIN or password."
+                    )
                 }
             },
-            onSelectUser = { user -> viewModel.switchUser(user) },
+            onSelectUser = { user -> viewModel.selectLockedOperator(user) },
             onClearError = { viewModel.clearAuthError() },
             onToggleLanguage = { viewModel.toggleLanguage() },
             onToggleTheme = { viewModel.toggleDarkMode() },
@@ -273,29 +357,64 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                 )
             },
             bottomBar = {
-                BeBossBottomNav(
-                    currentScreen = currentScreen,
-                    cartItemCount = cartState.items.size,
-                    lowStockCount = lowStockProducts.size,
-                    debtorCount = debtorsCount,
-                    language = currentLanguage,
-                    onNavigate = { screen -> viewModel.navigateTo(screen) },
-                    onOpenQuickActions = { showQuickSpeedDialSheet = true }
-                )
+                if (!useNavRail) {
+                    BeBossBottomNav(
+                        currentScreen = currentScreen,
+                        cartItemCount = cartState.items.size,
+                        lowStockCount = lowStockProducts.size,
+                        debtorCount = debtorsCount,
+                        language = currentLanguage,
+                        onNavigate = { screen -> viewModel.navigateTo(screen) },
+                        onOpenQuickActions = { showQuickSpeedDialSheet = true }
+                    )
+                }
             }
         ) { innerPadding ->
-            Box(
+            Row(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                AnimatedContent(
-                    targetState = currentScreen,
-                    transitionSpec = {
-                        fadeIn(animationSpec = tween(140)) togetherWith fadeOut(animationSpec = tween(90))
-                    },
-                    label = "ScreenTransition"
-                ) { targetScreen ->
+                if (useNavRail) {
+                    BeBossNavigationRail(
+                        currentScreen = currentScreen,
+                        cartItemCount = cartState.items.size,
+                        lowStockCount = lowStockProducts.size,
+                        debtorCount = debtorsCount,
+                        language = currentLanguage,
+                        onNavigate = { screen -> viewModel.navigateTo(screen) },
+                        onOpenQuickActions = { showQuickSpeedDialSheet = true }
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxSize(),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .widthIn(max = 1140.dp)
+                    ) {
+                        BeBossRuntimeStatusBanner(
+                            connectivityStatus = connectivityStatus,
+                            pendingSyncCount = pendingSyncCount,
+                            deadLetterSyncCount = deadLetterSyncCount,
+                            startupIntegrityOk = startupIntegrityOk,
+                            clockRollbackDetected = ClockGuard.isClockRollbackDetected(),
+                            language = currentLanguage,
+                            onRetrySync = { viewModel.performSync() },
+                            onOpenSettings = { viewModel.navigateTo(AppScreen.SETTINGS) }
+                        )
+                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            AnimatedContent(
+                                targetState = currentScreen,
+                                transitionSpec = {
+                                    fadeIn(animationSpec = tween(140)) togetherWith fadeOut(animationSpec = tween(90))
+                                },
+                                label = "ScreenTransition"
+                            ) { targetScreen ->
                     when (targetScreen) {
                         AppScreen.DASHBOARD -> {
                             DashboardScreen(
@@ -467,7 +586,6 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onProcessDirectPayment = { provider, phone, durationMonths, onSuccess ->
                                     viewModel.processDirectSubscriptionPayment(provider, phone, durationMonths, onResult = onSuccess)
                                 },
-                                onGrantEmergencyGrace = { viewModel.grantEmergencyGracePeriod() },
                                 paymentVerificationRequests = paymentVerificationRequests,
                                 discoveredHubs = discoveredHubs,
                                 isDiscoveringHubs = isDiscoveringHubs,
@@ -503,6 +621,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 adminBranchSnapshots = adminBranchSnapshots,
                                 adminUnlockCodes = adminUnlockCodes,
                                 adminAuditLogs = adminAuditLogs,
+                                localAuditLogs = localAuditLogs,
                                 isAdminLoading = isAdminLoading,
                                 onAdminSignIn = { email, password -> viewModel.signInSupabaseAdmin(email, password) },
                                 onAdminSignUp = { email, password, fullName -> viewModel.signUpSupabaseAdmin(email, password, fullName) },
@@ -510,6 +629,9 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 onRefreshAdminDashboard = { viewModel.refreshAdminDashboardData() },
                                 onAdminApprovePayment = { req, onDone ->
                                     viewModel.adminApproveAndGenerateCode(req, onDone)
+                                },
+                                onAdminApproveBatch = { onDone ->
+                                    viewModel.adminApproveBatchPendingPayments(onDone)
                                 },
                                 onAdminRejectPayment = { req, reason ->
                                     viewModel.adminRejectPayment(req, reason)
@@ -525,6 +647,9 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                                 },
                                 onAdminSetShopStatus = { shop, status ->
                                     viewModel.adminSetShopStatus(shop, status)
+                                },
+                                onAdminUpdateShopLimits = { shop, branchLimit, workerLimit ->
+                                    viewModel.adminUpdateShopLimits(shop, branchLimit, workerLimit)
                                 },
                                 onAdminDeleteShopAccount = { shop ->
                                     viewModel.adminDeleteShopAccount(shop)
@@ -548,7 +673,11 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                             )
                         }
                     }
+                        }
+                    }
                 }
+                }
+            }
             }
         }
     }
@@ -638,8 +767,7 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
                     onSubmitted = onDone
                 )
             },
-            onCheckCloudApproval = { viewModel.checkCloudUnlockApprovals() },
-            onGrantEmergencyGrace = { viewModel.grantEmergencyGracePeriod() }
+            onCheckCloudApproval = { viewModel.checkCloudUnlockApprovals() }
         )
     }
 
@@ -650,5 +778,91 @@ fun BeBossApp(viewModel: BeBossViewModel = viewModel()) {
             shopProfile = shopProfile,
             onDismiss = { viewModel.closeReceipt() }
         )
+    }
+}
+
+@Composable
+private fun BeBossRuntimeStatusBanner(
+    connectivityStatus: ConnectivityStatus,
+    pendingSyncCount: Int,
+    deadLetterSyncCount: Int,
+    startupIntegrityOk: Boolean?,
+    clockRollbackDetected: Boolean,
+    language: AppLanguage,
+    onRetrySync: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
+    val isOfflineWithQueue = connectivityStatus != ConnectivityStatus.AVAILABLE && pendingSyncCount > 0
+    val showBanner = startupIntegrityOk == false || clockRollbackDetected || deadLetterSyncCount > 0 || isOfflineWithQueue
+    AnimatedVisibility(visible = showBanner) {
+        val isCritical = startupIntegrityOk == false || clockRollbackDetected || deadLetterSyncCount > 0
+        val containerColor = if (isCritical) {
+            MaterialTheme.colorScheme.errorContainer
+        } else {
+            MaterialTheme.colorScheme.secondaryContainer
+        }
+        val contentColor = if (isCritical) {
+            MaterialTheme.colorScheme.onErrorContainer
+        } else {
+            MaterialTheme.colorScheme.onSecondaryContainer
+        }
+        val icon = when {
+            startupIntegrityOk == false || clockRollbackDetected -> Icons.Default.Warning
+            deadLetterSyncCount > 0 -> Icons.Default.SyncProblem
+            else -> Icons.Default.CloudOff
+        }
+        val message = when {
+            startupIntegrityOk == false -> if (language == AppLanguage.KINYARWANDA)
+                "Igenzura ry'ububiko ryabonye ikibazo. Fungura Igenamiterere."
+            else "Database integrity warning detected."
+            clockRollbackDetected -> if (language == AppLanguage.KINYARWANDA)
+                "Isaha ya telefoni yasubiye inyuma. Kosora isaha kugira ngo sync ikore."
+            else "Device clock rollback detected; sync protection active."
+            deadLetterSyncCount > 0 -> if (language == AppLanguage.KINYARWANDA)
+                "Hari amakuru $deadLetterSyncCount yananiwe koherezwa kuri cloud."
+            else "$deadLetterSyncCount sync item(s) paused after retries."
+            else -> if (language == AppLanguage.KINYARWANDA)
+                "Nta internet — amakuru $pendingSyncCount abitswe neza, azoherezwa nimubona umuyoboro."
+            else "Offline mode — $pendingSyncCount change(s) queued safely."
+        }
+        val actionLabel = when {
+            deadLetterSyncCount > 0 -> if (language == AppLanguage.KINYARWANDA) "Ongera" else "Retry"
+            isCritical -> if (language == AppLanguage.KINYARWANDA) "Reba" else "Inspect"
+            else -> null
+        }
+
+        Surface(
+            color = containerColor,
+            contentColor = contentColor,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .testTag("runtime_status_banner")
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text(
+                    text = message,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f)
+                )
+                if (actionLabel != null) {
+                    TextButton(
+                        onClick = { if (deadLetterSyncCount > 0) onRetrySync() else onOpenSettings() },
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) {
+                        Text(actionLabel, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
     }
 }

@@ -581,7 +581,7 @@ fun DashboardScreen(
                 }
             }
         } else {
-            items(recentSales.take(5)) { sale ->
+            items(recentSales.take(5), key = { it.id }) { sale ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()

@@ -13,12 +13,17 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
+import okhttp3.ConnectionSpec
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.TlsVersion
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import javax.crypto.Mac
+import kotlin.math.min
 import kotlin.random.Random
 
 enum class CloudSyncState {
@@ -53,16 +58,40 @@ data class EndpointPingResult(
 data class SyncAuditLog(
     val id: String = UUID.randomUUID().toString(),
     val timestamp: Long = System.currentTimeMillis(),
-    val type: String, // "BRANCH_AUTO_SYNC", "CLOUD_PUSH", "P2P_WIFI", "IMPORT_MERGE", "CONFLICT"
-    val status: String, // "SUCCESS", "FAILED", "OFFLINE", "RESOLVED"
+    val type: String,
+    val status: String,
     val summary: String,
     val latencyMs: Long = 0L,
     val payloadSizeKb: Double = 0.0
 )
 
+/**
+ * Multi-branch Cloud Sync & Durable Outbox Worker Engine:
+ * - Processes SyncQueueDao due items with exponential backoff + jitter + DEAD_LETTER ceiling.
+ * - Uses chunked delta exports (`ShopDataTransferManager.exportChunkedTokens`) to avoid HTTP size bloat.
+ * - Resolves cross-branch merges via `ConflictResolutionEngine`.
+ */
 class CloudSyncManager(private val database: AppDatabase) {
 
     private val TAG = "CloudSyncManager"
+    private val MAX_QUEUE_RETRIES = 6
+
+    private val pingClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectionSpecs(
+                listOf(
+                    ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
+                        .tlsVersions(TlsVersion.TLS_1_3, TlsVersion.TLS_1_2)
+                        .build(),
+                    ConnectionSpec.CLEARTEXT
+                )
+            )
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .build()
+    }
 
     private val _syncAuditLogs = MutableStateFlow<List<SyncAuditLog>>(emptyList())
     val syncAuditLogs: StateFlow<List<SyncAuditLog>> = _syncAuditLogs.asStateFlow()
@@ -78,28 +107,34 @@ class CloudSyncManager(private val database: AppDatabase) {
         _syncAuditLogs.value = listOf(newLog) + _syncAuditLogs.value.take(49)
     }
 
+    private fun isSafeEndpointUrl(endpoint: String): Boolean {
+        val clean = endpoint.trim()
+        if (clean.startsWith("https://", ignoreCase = true)) return true
+        if (!clean.startsWith("http://", ignoreCase = true)) return false
+        val host = clean.removePrefix("http://").substringBefore("/").substringBefore(":").lowercase()
+        return host == "localhost" ||
+            host == "127.0.0.1" ||
+            host.startsWith("192.168.") ||
+            host.startsWith("10.") ||
+            Regex("^172\\.(1[6-9]|2[0-9]|3[0-1])\\.").containsMatchIn(host)
+    }
+
     suspend fun testEndpointConnection(endpoint: String): EndpointPingResult = withContext(Dispatchers.IO) {
         val cleanUrl = endpoint.trim()
-        if (cleanUrl.isBlank() || (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://"))) {
+        if (!isSafeEndpointUrl(cleanUrl)) {
             return@withContext EndpointPingResult(
                 reachable = false,
                 latencyMs = 0L,
                 statusCode = 0,
-                message = "Invalid URL protocol (must start with https:// or http://)"
+                message = "HTTPS required for remote servers (http:// allowed only on private LAN)."
             )
         }
 
         val startTime = System.currentTimeMillis()
         try {
             val pingUrl = if (cleanUrl.endsWith("/")) "${cleanUrl}health" else "$cleanUrl/health"
-            val url = URL(pingUrl)
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 5000
-                readTimeout = 5000
-                instanceFollowRedirects = true
-            }
-            val code = conn.responseCode
+            val req = Request.Builder().url(pingUrl).get().build()
+            val code = pingClient.newCall(req).execute().use { it.code }
             val latency = System.currentTimeMillis() - startTime
             EndpointPingResult(
                 reachable = true,
@@ -109,6 +144,7 @@ class CloudSyncManager(private val database: AppDatabase) {
             )
         } catch (e: Exception) {
             val latency = System.currentTimeMillis() - startTime
+            BeBossLogger.w(TAG, "Endpoint health ping failed", e)
             EndpointPingResult(
                 reachable = false,
                 latencyMs = latency,
@@ -118,14 +154,6 @@ class CloudSyncManager(private val database: AppDatabase) {
         }
     }
 
-    /**
-     * Synchronous 2-Way Multi-Branch Cloud Sync Engine:
-     * 1. Encodes all offline-first Room data (branches, products, customers, payments, sales, purchases, stock transfers, staff)
-     *    into a compressed HMAC-signed `BBSHARE1:` snapshot and pushes + pulls peer branch snapshots via Supabase `branch_sync_snapshots`.
-     * 2. Updates `shop_accounts` licensing metadata in Supabase.
-     * 3. Optionally syncs to any custom `serverEndpoint` configured by the business.
-     * 4. Resolves cross-branch edits cleanly via Last-Write-Wins (`mergeRemoteSummary`).
-     */
     suspend fun syncAllDataToCloud(
         serverEndpoint: String? = null,
         activeBranchId: String = "main_branch",
@@ -165,7 +193,12 @@ class CloudSyncManager(private val database: AppDatabase) {
                 ?: branches.firstOrNull { it.isMainBranch }
                 ?: branches.firstOrNull()
 
-            val exportJson = ShopDataTransferManager.createExportJson(
+            val tombstones = database.syncTombstoneDao().getAllTombstonesList()
+
+            // Process due outbox items
+            val dueQueueItems = syncQueueDao.getDueQueueItems(nowMs = now, limit = 250)
+
+            val chunkedTokens = ShopDataTransferManager.exportChunkedTokens(
                 profile = profile,
                 users = users,
                 products = products,
@@ -177,10 +210,11 @@ class CloudSyncManager(private val database: AppDatabase) {
                 branches = branches,
                 stockTransfers = transfers,
                 purchases = purchases,
-                branchIdFilter = null
+                sinceUpdatedAt = 0L, // Full authoritative state per snapshot slot so any branch joining cold catches up safely, while chunked <=250 rows/token
+                maxRecordsPerChunk = 250,
+                tombstones = tombstones
             )
-            val shareToken = ShopDataTransferManager.createCompressedSyncToken(exportJson)
-            val payloadKb = shareToken.toByteArray(Charsets.UTF_8).size / 1024.0
+            val payloadKb = chunkedTokens.sumOf { it.toByteArray(Charsets.UTF_8).size } / 1024.0
             val totalPushedCount = branches.size + products.size + customers.size + payments.size +
                 sales.size + purchases.size + transfers.size
 
@@ -189,27 +223,28 @@ class CloudSyncManager(private val database: AppDatabase) {
             var supabaseSyncOk = false
             var customServerSyncOk = false
 
-            // 1. Primary Cross-Branch Internet Sync via Supabase `branch_sync_snapshots` & Admin Controls
+            // 1. Primary Cross-Branch Internet Sync via Supabase
             if (SupabaseAdminClient.isConfigured()) {
                 val ownerUsername = ownerUser?.username ?: "owner"
                 val ownerPhone = ownerUser?.phone?.ifBlank { profile.phone } ?: profile.phone
                 val shopSyncKey = SupabaseAdminClient.computeShopSyncKey(ownerUsername, ownerPhone)
-                val recordsSummary = "${branches.size} branches • ${products.size} items • ${sales.size} sales • ${customers.size} clients"
+                val recordsSummary = "${branches.size} branches • ${products.size} items • ${sales.size} sales • ${customers.size} clients (${chunkedTokens.size} chunk(s))"
 
-                // Pull admin-side overrides for shop license (e.g. Master Admin extended expiry or suspended shop)
                 val remoteShop = SupabaseAdminClient.fetchShopAccountById(shopSyncKey)
-                if (remoteShop != null && remoteShop.updatedAt > profile.updatedAt) {
-                    val updatedProf = profile.copy(
-                        subscriptionStatus = remoteShop.subscriptionStatus,
-                        subscriptionExpiresAt = remoteShop.subscriptionExpiresAt,
-                        updatedAt = remoteShop.updatedAt
-                    )
-                    shopProfileDao.insertOrUpdateProfile(updatedProf)
-                    profile = updatedProf
-                    itemsPulledCount++
+                if (remoteShop != null) {
+                    ClockGuard.observeTrustedEpoch(remoteShop.updatedAt)
+                    if (remoteShop.updatedAt > profile.updatedAt) {
+                        val updatedProf = profile.copy(
+                            subscriptionStatus = remoteShop.subscriptionStatus,
+                            subscriptionExpiresAt = remoteShop.subscriptionExpiresAt,
+                            updatedAt = remoteShop.updatedAt
+                        )
+                        shopProfileDao.insertOrUpdateProfile(updatedProf)
+                        profile = updatedProf
+                        itemsPulledCount++
+                    }
                 }
 
-                // Pull admin-side updates to users (role change or suspension)
                 val remoteUsers = SupabaseAdminClient.fetchShopUsersForShop(shopSyncKey)
                 for (ru in remoteUsers) {
                     val localUser = userDao.getUserById(ru.userId) ?: continue
@@ -248,16 +283,23 @@ class CloudSyncManager(private val database: AppDatabase) {
                 }
 
                 val latestUsers = userDao.getAllUsersDirect()
-                val pushedSnapshot = SupabaseAdminClient.upsertBranchSyncSnapshot(
-                    shopSyncKey = shopSyncKey,
-                    deviceId = deviceId,
-                    branchId = activeBranch?.id ?: activeBranchId,
-                    branchName = activeBranch?.name ?: "Main Store",
-                    shopName = profile.shopName,
-                    ownerUsername = ownerUsername,
-                    payloadToken = shareToken,
-                    recordsSummary = recordsSummary
-                )
+                var allChunksUploaded = chunkedTokens.isNotEmpty()
+                chunkedTokens.forEachIndexed { chunkIdx, token ->
+                    val chunkDeviceId = if (chunkIdx == 0) deviceId else "${deviceId}#c$chunkIdx"
+                    val ok = retryWithBackoff(maxAttempts = 3) {
+                        SupabaseAdminClient.upsertBranchSyncSnapshot(
+                            shopSyncKey = shopSyncKey,
+                            deviceId = chunkDeviceId,
+                            branchId = activeBranch?.id ?: activeBranchId,
+                            branchName = activeBranch?.name ?: "Main Store",
+                            shopName = profile.shopName,
+                            ownerUsername = ownerUsername,
+                            payloadToken = token,
+                            recordsSummary = recordsSummary
+                        )
+                    }
+                    if (!ok) allChunksUploaded = false
+                }
 
                 SupabaseAdminClient.upsertShopAccount(
                     shopProfile = profile,
@@ -277,34 +319,48 @@ class CloudSyncManager(private val database: AppDatabase) {
                 )
 
                 for (snap in peerSnapshots) {
+                    if (snap.deviceId.startsWith("${deviceId}#c")) continue
                     try {
                         val decoded = ShopDataTransferManager.parseShopPackageString(snap.payloadToken)
-                        if (mergeRemoteSummary != null) {
-                            val mergeRes = mergeRemoteSummary(decoded)
-                            itemsPulledCount += mergeRes.totalMergedCount
-                            conflictsResolvedCount += mergeRes.conflictsResolved
-                        }
+                        val mergeRes = mergeRemoteSummary?.invoke(decoded)
+                            ?: ConflictResolutionEngine.mergePackage(database, decoded, "CLOUD:${snap.deviceId}")
+                        itemsPulledCount += mergeRes.totalMergedCount
+                        conflictsResolvedCount += mergeRes.conflictsResolved
                     } catch (e: Exception) {
                         Log.w(TAG, "Skipped corrupt branch snapshot ${snap.id}: ${e.message}")
                     }
                 }
-                supabaseSyncOk = pushedSnapshot
+                supabaseSyncOk = allChunksUploaded
             }
 
-            // 2. Optional Custom Business Relay Server (if explicitly set beyond default)
+            // 2. Optional Custom Business Relay Server
             val endpoint = serverEndpoint ?: profile.backendServerUrl
             val hasCustomEndpoint = !endpoint.isNullOrBlank() &&
                 endpoint != "https://api.beboss.app/v1" &&
-                (endpoint.startsWith("http://") || endpoint.startsWith("https://"))
+                isSafeEndpointUrl(endpoint)
 
             if (hasCustomEndpoint) {
                 val cleanEp = endpoint!!.trim().removeSuffix("/")
+                val exportJson = ShopDataTransferManager.createExportJson(
+                    profile = profile,
+                    users = users,
+                    products = products,
+                    customers = customers,
+                    sales = sales,
+                    saleItems = saleItems,
+                    payments = payments,
+                    exportedByUser = ownerUser,
+                    branches = branches,
+                    stockTransfers = transfers,
+                    purchases = purchases,
+                    tombstones = tombstones
+                )
                 val payloadBytes = exportJson.toString().toByteArray(Charsets.UTF_8)
                 val hmacKey = SubscriptionSecurityManager.getOrCreateIsolatedHmacKey(profile)
                 val mac = Mac.getInstance("HmacSHA256").apply { init(hmacKey) }
                 val hmacSignature = SecurityUtils.bytesToHex(mac.doFinal(payloadBytes))
 
-                for (attempt in 1..2) {
+                for (attempt in 1..3) {
                     try {
                         val url = URL("$cleanEp/sync/cloud-push")
                         val conn = (url.openConnection() as HttpURLConnection).apply {
@@ -337,9 +393,9 @@ class CloudSyncManager(private val database: AppDatabase) {
                                                     id = pId,
                                                     name = rp.optString("name", "Product"),
                                                     category = rp.optString("category", "General"),
-                                                    costPrice = rp.optDouble("costPrice", 0.0),
-                                                    sellingPrice = rp.optDouble("sellingPrice", 0.0),
-                                                    quantityInStock = rp.optDouble("quantityInStock", 0.0),
+                                                    costPrice = rp.optDouble("costPrice", 0.0).coerceAtLeast(0.0),
+                                                    sellingPrice = rp.optDouble("sellingPrice", 0.0).coerceAtLeast(0.0),
+                                                    quantityInStock = rp.optDouble("quantityInStock", 0.0).coerceAtLeast(0.0),
                                                     unit = rp.optString("unit", "pcs"),
                                                     barcode = rp.optString("barcode", ""),
                                                     branchId = rp.optString("branchId", "main_branch").ifBlank { "main_branch" },
@@ -354,23 +410,25 @@ class CloudSyncManager(private val database: AppDatabase) {
                             }
                             break
                         } else if (respCode in 500..599) {
-                            delay(400L * attempt + Random.nextLong(50, 200))
+                            delay(400L * (1 shl (attempt - 1)) + Random.nextLong(50, 250))
                         } else {
                             break
                         }
                     } catch (e: Exception) {
                         Log.w(TAG, "Custom server sync attempt $attempt failed: ${e.message}")
+                        if (attempt < 3) {
+                            delay(400L * (1 shl (attempt - 1)) + Random.nextLong(50, 250))
+                        }
                     }
                 }
             }
 
-            val anyCloudSuccess = supabaseSyncOk || customServerSyncOk
             if (!SupabaseAdminClient.isConfigured() && !hasCustomEndpoint) {
                 val latency = System.currentTimeMillis() - startTime
                 addAuditLog(
                     type = "BRANCH_AUTO_SYNC",
                     status = "OFFLINE",
-                    summary = "Offline mode: Supabase secrets not configured; data persisted safely in local SQLite.",
+                    summary = "Offline mode: Supabase secrets not configured; data persisted in encrypted SQLite.",
                     latencyMs = latency,
                     payloadSizeKb = payloadKb
                 )
@@ -379,7 +437,7 @@ class CloudSyncManager(private val database: AppDatabase) {
                     itemsPushed = totalPushedCount,
                     itemsPulled = 0,
                     lastSyncTimestamp = now,
-                    message = "Local SQLite Snapshot Ready (${branches.size} branch(es), $totalPushedCount records). Configure SUPABASE_URL in Secrets for multi-device auto-sync.",
+                    message = "Local Snapshot Ready (${branches.size} branch(es), $totalPushedCount records). Configure SUPABASE_URL in Secrets for multi-device auto-sync.",
                     branchesCount = branches.size,
                     productsCount = products.size,
                     salesCount = sales.size,
@@ -388,12 +446,27 @@ class CloudSyncManager(private val database: AppDatabase) {
                 )
             }
 
+            val anyCloudSuccess = supabaseSyncOk || customServerSyncOk
             if (!anyCloudSuccess) {
+                // Record exponential backoff on queued outbox items
+                for (qItem in dueQueueItems) {
+                    val nextRetry = qItem.retryCount + 1
+                    val isDead = nextRetry >= MAX_QUEUE_RETRIES
+                    val backoffMs = min(3_600_000L, 5_000L * (1L shl nextRetry.coerceAtMost(8))) + Random.nextLong(200, 1000)
+                    syncQueueDao.recordAttemptFailure(
+                        id = qItem.id,
+                        retryCount = nextRetry,
+                        nextAttemptAt = now + backoffMs,
+                        lastError = "Cloud unreachable on attempt #$nextRetry",
+                        status = if (isDead) "DEAD_LETTER" else "PENDING"
+                    )
+                }
+
                 val latency = System.currentTimeMillis() - startTime
                 addAuditLog(
                     type = "BRANCH_AUTO_SYNC",
                     status = "FAILED",
-                    summary = "Cloud branch sync queued — waiting for reachable connection.",
+                    summary = "Outbox retry scheduled with backoff (${dueQueueItems.size} item(s)).",
                     latencyMs = latency
                 )
                 return@withContext CloudSyncReport(
@@ -401,7 +474,7 @@ class CloudSyncManager(private val database: AppDatabase) {
                     itemsPushed = 0,
                     itemsPulled = 0,
                     lastSyncTimestamp = profile.lastSyncedAt,
-                    message = "Branch auto-sync retry queued (network/Supabase unreachable).",
+                    message = "Branch sync retry scheduled with exponential backoff.",
                     branchesCount = branches.size,
                     productsCount = products.size,
                     salesCount = sales.size,
@@ -410,9 +483,8 @@ class CloudSyncManager(private val database: AppDatabase) {
                 )
             }
 
-            val pendingQueue = syncQueueDao.getPendingQueueDirect()
-            if (pendingQueue.isNotEmpty()) {
-                syncQueueDao.markAllSynced(pendingQueue.map { it.id }, now)
+            if (dueQueueItems.isNotEmpty()) {
+                syncQueueDao.markAllSynced(dueQueueItems.map { it.id }, now)
             }
             val unsyncedSales = saleDao.getUnsyncedSales()
             for (s in unsyncedSales) {
@@ -422,7 +494,7 @@ class CloudSyncManager(private val database: AppDatabase) {
             shopProfileDao.updateLastSyncedAt(now)
             val latency = System.currentTimeMillis() - startTime
 
-            val summaryText = "Branch Auto-Sync: pushed $totalPushedCount records (${"%.1f".format(payloadKb)} KB), merged $itemsPulledCount updates, resolved $conflictsResolvedCount conflicts"
+            val summaryText = "Branch Sync: pushed $totalPushedCount records (${"%.1f".format(payloadKb)} KB in ${chunkedTokens.size} chunk(s)), merged $itemsPulledCount updates, resolved $conflictsResolvedCount conflicts"
             addAuditLog(
                 type = "BRANCH_AUTO_SYNC",
                 status = "SUCCESS",
@@ -459,5 +531,19 @@ class CloudSyncManager(private val database: AppDatabase) {
                 latencyMs = latency
             )
         }
+    }
+
+    private suspend fun retryWithBackoff(
+        maxAttempts: Int = 3,
+        block: suspend () -> Boolean
+    ): Boolean {
+        for (attempt in 1..maxAttempts) {
+            if (block()) return true
+            if (attempt < maxAttempts) {
+                val jitter = Random.nextLong(80L, 250L)
+                delay(350L * (1 shl (attempt - 1)) + jitter)
+            }
+        }
+        return false
     }
 }

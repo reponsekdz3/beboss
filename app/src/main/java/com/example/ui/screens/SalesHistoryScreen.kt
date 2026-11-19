@@ -117,7 +117,7 @@ fun SalesHistoryScreen(
 
                 val methods = listOf("All", "CASH", "MOMO", "CARD", "CREDIT_DEBT")
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(methods) { method ->
+                    items(methods, key = { it }) { method ->
                         val isSelected = selectedPaymentMethod == method
                         FilterChip(
                             selected = isSelected,
@@ -156,7 +156,7 @@ fun SalesHistoryScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(filtered) { sale ->
+                items(filtered, key = { it.id }) { sale ->
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()

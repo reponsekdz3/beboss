@@ -3,6 +3,7 @@ package com.example.ui.components
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
@@ -10,10 +11,13 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,12 +26,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.ripple
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -345,102 +353,295 @@ fun BeBossBottomNav(
         )
     )
 
+    val selectedIndex = navItems.indexOfFirst { it.screen == currentScreen }.coerceAtLeast(0)
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.navigationBars)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-        shadowElevation = 16.dp,
-        tonalElevation = 6.dp
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(26.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        border = BorderStroke(
+            width = 1.dp,
+            brush = Brush.linearGradient(
+                listOf(
+                    OrangePrimary.copy(alpha = 0.28f),
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                    Color(0xFFFFB74D).copy(alpha = 0.24f)
+                )
+            )
+        ),
+        shadowElevation = 18.dp,
+        tonalElevation = 8.dp
     ) {
-        Row(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceAround,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = 6.dp, vertical = 6.dp)
         ) {
-            navItems.forEach { item ->
-                val isSelected = currentScreen == item.screen
-                val scale by animateFloatAsState(
-                    targetValue = if (isSelected) 1.06f else 1.0f,
-                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-                    label = "nav_scale"
-                )
-                val pillBgColor by animateColorAsState(
-                    targetValue = if (isSelected) OrangePrimary.copy(alpha = 0.16f) else Color.Transparent,
-                    label = "nav_pill_color"
-                )
+            val slotWidth = maxWidth / navItems.size
+            val indicatorOffset by animateDpAsState(
+                targetValue = slotWidth * selectedIndex,
+                animationSpec = spring(
+                    dampingRatio = 0.72f,
+                    stiffness = 360f
+                ),
+                label = "bottom_nav_sliding_pill"
+            )
 
-                Box(
-                    modifier = Modifier
-                        .scale(scale)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(pillBgColor)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onNavigate(item.screen)
-                        }
-                        .padding(horizontal = 6.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+            // Smooth sliding gradient active pill underneath the tabs
+            Box(
+                modifier = Modifier
+                    .offset(x = indicatorOffset)
+                    .width(slotWidth)
+                    .height(54.dp)
+                    .padding(horizontal = 2.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                OrangePrimary.copy(alpha = 0.22f),
+                                Color(0xFFFFB74D).copy(alpha = 0.14f)
+                            )
+                        )
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = OrangePrimary.copy(alpha = 0.32f),
+                        shape = RoundedCornerShape(18.dp)
+                    )
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                navItems.forEach { item ->
+                    val isSelected = currentScreen == item.screen
+                    val interactionSource = remember { MutableInteractionSource() }
+                    val isPressed by interactionSource.collectIsPressedAsState()
+
+                    val scale by animateFloatAsState(
+                        targetValue = when {
+                            isPressed -> 0.90f
+                            isSelected -> 1.06f
+                            else -> 1.0f
+                        },
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        ),
+                        label = "nav_scale"
+                    )
+                    val contentTint by animateColorAsState(
+                        targetValue = if (isSelected) OrangePrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        label = "nav_content_tint"
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .width(slotWidth)
+                            .height(54.dp)
+                            .minimumInteractiveComponentSize()
+                            .scale(scale)
+                            .clip(RoundedCornerShape(18.dp))
+                            .testTag("bottom_nav_${item.screen.stringKey}")
+                            .clickable(
+                                interactionSource = interactionSource,
+                                indication = ripple(bounded = true, color = OrangePrimary)
+                            ) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onNavigate(item.screen)
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
-                        // Icon with Live Badge
-                        BadgedBox(
-                            badge = {
-                                if (item.badgeCount > 0) {
-                                    Badge(
-                                        containerColor = when {
-                                            item.isBadgeError -> LossRed
-                                            item.isBadgePrimary -> OrangePrimary
-                                            else -> Color(0xFFD97706)
-                                        },
-                                        contentColor = Color.White,
-                                        modifier = Modifier.size(if (item.badgeCount > 9) 18.dp else 16.dp)
-                                    ) {
-                                        Text(
-                                            text = if (item.badgeCount > 99) "99+" else "${item.badgeCount}",
-                                            fontFamily = GopherFontFamily,
-                                            fontWeight = FontWeight.Black,
-                                            fontSize = 9.sp
-                                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(horizontal = 2.dp)
+                        ) {
+                            BadgedBox(
+                                badge = {
+                                    if (item.badgeCount > 0) {
+                                        Badge(
+                                            containerColor = when {
+                                                item.isBadgeError -> LossRed
+                                                item.isBadgePrimary -> OrangePrimary
+                                                else -> Color(0xFFD97706)
+                                            },
+                                            contentColor = Color.White,
+                                            modifier = Modifier.size(if (item.badgeCount > 9) 18.dp else 16.dp)
+                                        ) {
+                                            Text(
+                                                text = if (item.badgeCount > 99) "99+" else "${item.badgeCount}",
+                                                fontFamily = GopherFontFamily,
+                                                fontWeight = FontWeight.Black,
+                                                fontSize = 8.5.sp
+                                            )
+                                        }
                                     }
                                 }
+                            ) {
+                                Icon(
+                                    imageVector = item.icon,
+                                    contentDescription = item.label,
+                                    tint = contentTint,
+                                    modifier = Modifier.size(if (isSelected) 22.dp else 20.dp)
+                                )
                             }
-                        ) {
-                            Icon(
-                                imageVector = item.icon,
-                                contentDescription = item.label,
-                                tint = if (isSelected) OrangePrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(if (isSelected) 23.dp else 21.dp)
+
+                            Spacer(modifier = Modifier.height(2.dp))
+
+                            Text(
+                                text = item.label,
+                                fontFamily = GopherFontFamily,
+                                fontSize = 9.sp,
+                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                                color = contentTint,
+                                maxLines = 1,
+                                textAlign = TextAlign.Center,
+                                overflow = TextOverflow.Ellipsis
+                            )
+
+                            Spacer(modifier = Modifier.height(2.dp))
+
+                            Box(
+                                modifier = Modifier
+                                    .width(if (isSelected) 16.dp else 0.dp)
+                                    .height(2.5.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isSelected) OrangePrimary else Color.Transparent)
                             )
                         }
-
-                        Spacer(modifier = Modifier.height(3.dp))
-
-                        // Label
-                        Text(
-                            text = item.label,
-                            fontFamily = GopherFontFamily,
-                            fontSize = 9.5.sp,
-                            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
-                            color = if (isSelected) OrangePrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            textAlign = TextAlign.Center,
-                            overflow = TextOverflow.Ellipsis
-                        )
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Adaptive Navigation Rail for Medium/Expanded tablets and foldables.
+ */
+@Composable
+fun BeBossNavigationRail(
+    currentScreen: AppScreen,
+    cartItemCount: Int,
+    lowStockCount: Int,
+    debtorCount: Int = 0,
+    language: AppLanguage,
+    onNavigate: (AppScreen) -> Unit,
+    onOpenQuickActions: () -> Unit = {}
+) {
+    val haptic = LocalHapticFeedback.current
+    val navItems = listOf(
+        NavItem(
+            screen = AppScreen.DASHBOARD,
+            label = Localization.get("dashboard", language),
+            icon = Icons.Default.Dashboard,
+            badgeCount = 0
+        ),
+        NavItem(
+            screen = AppScreen.SALES_POS,
+            label = Localization.get("sales_pos", language),
+            icon = Icons.Default.AddShoppingCart,
+            badgeCount = cartItemCount,
+            isBadgePrimary = true
+        ),
+        NavItem(
+            screen = AppScreen.INVENTORY,
+            label = Localization.get("inventory", language),
+            icon = Icons.Default.Inventory2,
+            badgeCount = lowStockCount,
+            isBadgeError = true
+        ),
+        NavItem(
+            screen = AppScreen.ANALYTICS,
+            label = Localization.get("analytics", language),
+            icon = Icons.Default.BarChart,
+            badgeCount = 0
+        ),
+        NavItem(
+            screen = AppScreen.CUSTOMERS,
+            label = Localization.get("customers", language),
+            icon = Icons.Default.People,
+            badgeCount = debtorCount
+        ),
+        NavItem(
+            screen = AppScreen.SETTINGS,
+            label = Localization.get("settings", language),
+            icon = Icons.Default.Settings,
+            badgeCount = 0
+        )
+    )
+
+    androidx.compose.material3.NavigationRail(
+        containerColor = MaterialTheme.colorScheme.surface,
+        header = {
+            androidx.compose.material3.FloatingActionButton(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onOpenQuickActions()
+                },
+                containerColor = OrangePrimary,
+                contentColor = Color.White,
+                modifier = Modifier
+                    .padding(top = 8.dp, bottom = 10.dp)
+                    .size(48.dp)
+            ) {
+                Icon(Icons.Default.Bolt, contentDescription = "Quick POS Actions")
+            }
+        }
+    ) {
+        navItems.forEach { item ->
+            val isSelected = currentScreen == item.screen
+            androidx.compose.material3.NavigationRailItem(
+                selected = isSelected,
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onNavigate(item.screen)
+                },
+                icon = {
+                    BadgedBox(
+                        badge = {
+                            if (item.badgeCount > 0) {
+                                Badge(
+                                    containerColor = when {
+                                        item.isBadgeError -> LossRed
+                                        item.isBadgePrimary -> OrangePrimary
+                                        else -> Color(0xFFD97706)
+                                    },
+                                    contentColor = Color.White
+                                ) {
+                                    Text(
+                                        text = if (item.badgeCount > 99) "99+" else "${item.badgeCount}",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = item.icon,
+                            contentDescription = item.label,
+                            tint = if (isSelected) OrangePrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                label = {
+                    Text(
+                        text = item.label,
+                        fontFamily = GopherFontFamily,
+                        fontSize = 10.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+                alwaysShowLabel = true
+            )
         }
     }
 }

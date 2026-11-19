@@ -252,6 +252,17 @@ fun ReceiptDialog(
                             )
                         }
 
+                        if (shopProfile.showTaxOnReceipt && shopProfile.taxRate > 0.0) {
+                            val vatAmount = ReceiptGenerator.computeTaxIncludedAmount(sale.totalAmount, shopProfile.taxRate)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Incl. Tax (${shopProfile.taxRate}%):", fontSize = 12.sp, color = InkMedium)
+                                Text(ReceiptGenerator.formatMoney(vatAmount, shopProfile), fontSize = 12.sp, color = InkDark)
+                            }
+                        }
+
                         if (sale.discountAmount > 0) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -285,6 +296,14 @@ fun ReceiptDialog(
                         Text(
                             text = shopProfile.receiptFooter,
                             fontSize = 11.sp,
+                            color = InkMedium,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Seal: ${ReceiptGenerator.computeOfflineReceiptSeal(sale, shopProfile)}",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
                             color = InkMedium,
                             textAlign = TextAlign.Center
                         )

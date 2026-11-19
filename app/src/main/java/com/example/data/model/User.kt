@@ -39,7 +39,10 @@ data class User(
     val canExportImportData: Boolean = false,
     val lastLoginAt: Long = System.currentTimeMillis(),
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val syncVersion: Long = 1L,
+    val hlcTimestamp: Long = 0L,
+    val lastModifiedDeviceId: String = ""
 ) {
     companion object {
         fun defaultForRole(

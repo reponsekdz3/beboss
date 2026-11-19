@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.db.AppDatabase
 import com.example.data.model.Branch
+import com.example.data.model.CartItem
 import com.example.data.model.Customer
 import com.example.data.model.CustomerPayment
 import com.example.data.model.Product
@@ -16,8 +17,11 @@ import com.example.data.model.StockTransfer
 import com.example.data.model.User
 import com.example.data.model.UserRole
 import com.example.data.repository.BeBossRepository
+import com.example.util.HlcClock
+import com.example.util.MoneyUtils
 import com.example.util.ShopDataTransferManager
 import com.example.util.ShopImportSummary
+import com.example.util.SyncPayloadValidator
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -119,6 +123,8 @@ class BranchDataShareTest {
         assertEquals(1, parsed.stockTransfers.size)
         assertEquals(1, parsed.purchases.size)
         assertEquals("br_kimironko", parsed.users.first().assignedBranchId)
+        assertEquals("", parsed.users.first().pinHash)
+        assertEquals("", parsed.users.first().password)
     }
 
     @Test
@@ -276,6 +282,230 @@ class BranchDataShareTest {
             assertEquals(2, result.mergedProducts)
             assertEquals(1, result.mergedSales)
             assertEquals(1, result.conflictsResolved)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun `SyncPayloadValidator rejects negative numeric fields and malformed payloads`() {
+        val maliciousJson = """
+            {
+              "metadata": {"version": "3.0"},
+              "products": [
+                {"id": "p_bad", "name": "Fraud Item", "costPrice": -500, "sellingPrice": 1000, "quantityInStock": 5}
+              ]
+            }
+        """.trimIndent()
+
+        try {
+            SyncPayloadValidator.validateAndParseRoot(maliciousJson)
+            fail("Expected negative costPrice to fail validation")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message?.contains("costPrice", ignoreCase = true) == true)
+        }
+
+        try {
+            SyncPayloadValidator.validateAndParseRoot("{\"unknownSection\": {}}")
+            fail("Expected unrecognized schema to fail validation")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message?.contains("Unrecognized", ignoreCase = true) == true)
+        }
+    }
+
+    @Test
+    fun `HlcClock orders causal updates even when wall clocks skew`() {
+        val earlierRemoteHlc = HlcClock.pack(physicalMs = 1_760_000_100_000L, logical = 1)
+        val skewedLocalOldClock = HlcClock.tick(nowMs = 1_760_000_000_000L)
+        // Simulate receiving earlierRemoteHlc on a device whose wall clock is behind
+        val observedHlc = HlcClock.observe(earlierRemoteHlc, nowMs = 1_760_000_000_000L)
+        assertTrue(HlcClock.physicalOf(observedHlc) >= HlcClock.physicalOf(earlierRemoteHlc))
+
+        val cmp = HlcClock.compareVersions(
+            localHlc = skewedLocalOldClock,
+            localVersion = 2L,
+            localUpdatedAt = 1_760_000_999_000L,
+            localDeviceId = "dev_A",
+            remoteHlc = observedHlc,
+            remoteVersion = 3L,
+            remoteUpdatedAt = 1_760_000_000_000L,
+            remoteDeviceId = "dev_B"
+        )
+        // Remote observed HLC wins causally even if its raw wall clock is older
+        assertTrue(cmp > 0)
+
+        // Tie-breaker determinism when HLC, version, and timestamps match identically
+        val tieBreakForward = HlcClock.compareVersions(
+            localHlc = observedHlc,
+            localVersion = 3L,
+            localUpdatedAt = 1000L,
+            localDeviceId = "dev_A",
+            remoteHlc = observedHlc,
+            remoteVersion = 3L,
+            remoteUpdatedAt = 1000L,
+            remoteDeviceId = "dev_B"
+        )
+        val tieBreakReverse = HlcClock.compareVersions(
+            localHlc = observedHlc,
+            localVersion = 3L,
+            localUpdatedAt = 1000L,
+            localDeviceId = "dev_B",
+            remoteHlc = observedHlc,
+            remoteVersion = 3L,
+            remoteUpdatedAt = 1000L,
+            remoteDeviceId = "dev_A"
+        )
+        assertTrue(tieBreakForward > 0)
+        assertTrue(tieBreakReverse < 0)
+    }
+
+    @Test
+    fun `tombstone prevents stale branch merge from resurrecting deleted product`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+
+        try {
+            val repo = BeBossRepository(db)
+            val olderHlc = HlcClock.tick(System.currentTimeMillis() - 10_000L)
+            val product = Product(
+                id = "p_del",
+                name = "Obsolete Item",
+                costPrice = 400.0,
+                sellingPrice = 700.0,
+                quantityInStock = 10.0,
+                updatedAt = System.currentTimeMillis() - 10_000L,
+                hlcTimestamp = olderHlc
+            )
+            db.productDao().insertProduct(product)
+
+            // Owner deletes product -> creates durable tombstone
+            val owner = User(id = "u_owner", name = "Owner", username = "owner", role = UserRole.OWNER, isActive = true)
+            repo.deleteProduct("p_del", actor = owner)
+
+            val tombstones = repo.getAllTombstonesList()
+            assertEquals(1, tombstones.size)
+            assertEquals("p_del", tombstones.first().recordId)
+
+            // Stale remote branch packet still contains "p_del" with isDeleted = false
+            val staleSummary = ShopImportSummary(
+                shopName = "BeBoss Test",
+                exportedAt = System.currentTimeMillis(),
+                exportedBy = "PeerBranch",
+                userCount = 0,
+                productCount = 1,
+                customerCount = 0,
+                saleCount = 0,
+                paymentCount = 0,
+                users = emptyList(),
+                products = listOf(product.copy(isDeleted = false)),
+                customers = emptyList(),
+                sales = emptyList(),
+                saleItems = emptyList(),
+                payments = emptyList(),
+                shopProfile = null
+            )
+
+            repo.mergeShopDataPackageLww(staleSummary)
+
+            val reloaded = db.productDao().getProductById("p_del")
+            assertEquals(true, reloaded?.isDeleted ?: true)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun `atomic sale checkout and sale deletion preserve exact cents inventory and debt`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+
+        try {
+            val repo = BeBossRepository(db)
+            val prod = Product(
+                id = "p_coffee",
+                name = "Espresso Beans",
+                costPrice = 12.34,
+                sellingPrice = 19.99,
+                quantityInStock = 10.0
+            )
+            val cust = Customer(
+                id = "c_alice",
+                name = "Alice",
+                phone = "0788123456",
+                debtBalance = 5.0
+            )
+            db.productDao().insertProduct(prod)
+            db.customerDao().insertCustomer(cust)
+
+            // 3 * 19.99 = 59.97; discount 0.97 -> 59.00; paid 20.00 -> unpaid debt +39.00 (total 44.00)
+            assertEquals(5997L, MoneyUtils.multiplyPriceQuantityCents(19.99, 3.0))
+
+            val sale = repo.processSale(
+                items = listOf(CartItem(product = prod, quantity = 3.0)),
+                customerId = "c_alice",
+                customerName = "Alice",
+                discountAmount = 0.97,
+                paymentMethod = "PARTIAL",
+                amountPaid = 20.00,
+                notes = "Test atomic checkout"
+            )
+
+            assertEquals(59.00, sale.totalAmount, 0.001)
+            assertEquals(37.02, sale.totalCost, 0.001)
+            assertEquals(21.98, sale.totalProfit, 0.001)
+            assertEquals("PARTIAL", sale.paymentStatus)
+
+            assertEquals(7.0, db.productDao().getProductById("p_coffee")!!.quantityInStock, 0.001)
+            assertEquals(44.0, db.customerDao().getCustomerById("c_alice")!!.debtBalance, 0.001)
+
+            // Deleting the sale as owner must restock (+3.0 -> 10.0), reduce debt (-39.0 -> 5.0), and emit tombstone
+            val owner = User(id = "u_owner", name = "Owner", username = "owner", role = UserRole.OWNER, isActive = true)
+            repo.deleteSale(sale.id, actor = owner)
+
+            assertEquals(10.0, db.productDao().getProductById("p_coffee")!!.quantityInStock, 0.001)
+            assertEquals(5.0, db.customerDao().getCustomerById("c_alice")!!.debtBalance, 0.001)
+            assertTrue(repo.getAllTombstonesList().any { it.tableName == "sales" && it.recordId == sale.id })
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun `domain RBAC blocks cashier without delete permission and logs security audit`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+
+        try {
+            val repo = BeBossRepository(db)
+            val cashier = User(
+                id = "u_cashier",
+                name = "Eric Cashier",
+                username = "eric",
+                role = UserRole.CASHIER,
+                isActive = true,
+                canDeleteRecords = false
+            )
+            db.saleDao().insertSale(
+                Sale(id = "s_protected", receiptNumber = "RC-99", totalAmount = 1500.0)
+            )
+
+            try {
+                repo.deleteSale("s_protected", actor = cashier)
+                fail("Expected SecurityException for cashier without delete permission")
+            } catch (expected: SecurityException) {
+                assertTrue(expected.message?.contains("Access denied") == true)
+            }
+
+            // Sale must remain intact and RBAC_DENIED must be logged
+            assertEquals("RC-99", db.saleDao().getSaleById("s_protected")?.receiptNumber)
+            val logs = db.localAuditLogDao().getRecentLogsDirect(10)
+            assertTrue(logs.any { it.action == "RBAC_DENIED" && it.targetId == "s_protected" })
         } finally {
             db.close()
         }

@@ -485,7 +485,7 @@ fun InventoryScreen(
                         // Category horizontal chip row
                         val allCats = listOf("All") + categories
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(allCats) { cat ->
+                            items(allCats, key = { it }) { cat ->
                                 val isSelected = selectedCategory == cat
                                 FilterChip(
                                     selected = isSelected,

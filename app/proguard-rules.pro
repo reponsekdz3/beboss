@@ -20,8 +20,14 @@
 # Android Keystore and Cryptographic Providers
 -keep class javax.crypto.** { *; }
 -keep class java.security.** { *; }
+-keep class net.zetetic.** { *; }
+-dontwarn net.zetetic.**
+-keep class androidx.sqlite.** { *; }
+-keep class androidx.biometric.** { *; }
 -keep class com.example.util.SubscriptionSecurityManager { *; }
 -keep class com.example.util.SecurityUtils { *; }
+-keep class com.example.util.CryptoKeyManager { *; }
+-keep class com.example.util.AuthRateLimiter { *; }
 -keep class com.example.util.BiometricAuthManager { *; }
 
 # Jetpack Compose and Lifecycle

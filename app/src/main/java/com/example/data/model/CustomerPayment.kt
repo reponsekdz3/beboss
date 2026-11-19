@@ -1,10 +1,18 @@
 package com.example.data.model
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
 
-@Entity(tableName = "customer_payments")
+@Entity(
+    tableName = "customer_payments",
+    indices = [
+        Index(value = ["customerId"]),
+        Index(value = ["branchId"]),
+        Index(value = ["paymentDate"])
+    ]
+)
 data class CustomerPayment(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val customerId: String,

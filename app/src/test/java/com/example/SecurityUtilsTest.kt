@@ -51,6 +51,17 @@ class SecurityUtilsTest {
     }
 
     @Test
+    fun testLegacyAndPlaintextHashesStrictlyRejected() {
+        val legacySha256Pin1234 = "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"
+
+        assertFalse(SecurityUtils.verifyPin("4829", "4829"))
+        assertFalse(SecurityUtils.verifyPin("1234", legacySha256Pin1234))
+        assertFalse(SecurityUtils.verifyPassword("SecretPass9", "SecretPass9"))
+        assertFalse(SecurityUtils.verifyPassword("SecretPass9", legacySha256Pin1234))
+        assertFalse(SecurityUtils.verifyPin("4829", ""))
+    }
+
+    @Test
     fun testPinComplexityValidation() {
         // Trivial repeated digits
         assertFalse(SecurityUtils.validatePinStrength("0000").isValid)

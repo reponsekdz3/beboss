@@ -1,10 +1,19 @@
 package com.example.data.model
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
 
-@Entity(tableName = "sales")
+@Entity(
+    tableName = "sales",
+    indices = [
+        Index(value = ["customerId"]),
+        Index(value = ["branchId"]),
+        Index(value = ["saleDate"]),
+        Index(value = ["synced"])
+    ]
+)
 data class Sale(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val customerId: String? = null,
@@ -24,10 +33,19 @@ data class Sale(
     val cashierId: String = "",
     val cashierName: String = "Shop Operator",
     val synced: Boolean = false,
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val syncVersion: Long = 1L,
+    val hlcTimestamp: Long = 0L,
+    val lastModifiedDeviceId: String = ""
 )
 
-@Entity(tableName = "sale_items")
+@Entity(
+    tableName = "sale_items",
+    indices = [
+        Index(value = ["saleId"]),
+        Index(value = ["productId"])
+    ]
+)
 data class SaleItem(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val saleId: String,

@@ -1,10 +1,18 @@
 package com.example.data.model
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
 
-@Entity(tableName = "stock_transfers")
+@Entity(
+    tableName = "stock_transfers",
+    indices = [
+        Index(value = ["productId"]),
+        Index(value = ["fromBranchId"]),
+        Index(value = ["toBranchId"])
+    ]
+)
 data class StockTransfer(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val transferNumber: String = "TRF-${System.currentTimeMillis() % 100000}",

@@ -157,4 +157,38 @@ class SubscriptionSecurityTest {
         )
         assertFalse(tamperedResult.isValid)
     }
+
+    @Test
+    fun testLegacyWildcardCodesAndUnverifiedMomoRefsRejected() {
+        val all000 = com.example.util.OfflineSubscriptionManager.validateVoucherCode(
+            inputCode = "ALL000",
+            shopProfile = sampleShop,
+            branchCount = 1,
+            workerCount = 1,
+            ownerUsername = "jeanpaul",
+            ownerPhoneOverride = "0788123456"
+        )
+        assertFalse(all000.isValid)
+
+        val all00 = SubscriptionSecurityManager.verifyVoucherToken(
+            voucherInput = "ALL00",
+            shopProfile = sampleShop,
+            branchCount = 1,
+            workerCount = 1,
+            ownerUsername = "jeanpaul"
+        )
+        assertFalse(all00.isValid)
+
+        val unverifiedOfflineMomo = com.example.util.OfflineSubscriptionManager.processDirectMoMoPayment(
+            shopProfile = sampleShop,
+            payerPhone = "0788123456",
+            provider = "MTN MoMo",
+            branchCount = 1,
+            workerCount = 1,
+            durationMonths = 1,
+            smsTransactionReference = "1829304756"
+        )
+        assertFalse(unverifiedOfflineMomo.isSuccess)
+        assertTrue(unverifiedOfflineMomo.isPending)
+    }
 }

@@ -1,10 +1,18 @@
 package com.example.data.model
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
 
-@Entity(tableName = "products")
+@Entity(
+    tableName = "products",
+    indices = [
+        Index(value = ["barcode"]),
+        Index(value = ["branchId"]),
+        Index(value = ["updatedAt"])
+    ]
+)
 data class Product(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val name: String,
@@ -18,7 +26,10 @@ data class Product(
     val branchId: String = "main_branch",
     val isDeleted: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val syncVersion: Long = 1L,
+    val hlcTimestamp: Long = 0L,
+    val lastModifiedDeviceId: String = ""
 ) {
     val isLowStock: Boolean
         get() = quantityInStock <= lowStockThreshold

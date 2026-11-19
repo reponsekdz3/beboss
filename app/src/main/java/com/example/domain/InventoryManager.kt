@@ -3,11 +3,17 @@ package com.example.domain
 import com.example.data.dao.ProductDao
 import com.example.data.dao.PurchaseDao
 import com.example.data.dao.SyncQueueDao
+import com.example.data.dao.SyncTombstoneDao
 import com.example.data.model.InventoryValuation
 import com.example.data.model.Product
 import com.example.data.model.PurchaseRecord
 import com.example.data.model.PurchaseSummary
 import com.example.data.model.SyncQueueItem
+import com.example.data.model.SyncTombstone
+import com.example.util.ClockGuard
+import com.example.util.DbWriteMutex
+import com.example.util.HlcClock
+import com.example.util.MoneyUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -23,7 +29,8 @@ import java.util.UUID
 class InventoryManager(
     private val productDao: ProductDao,
     private val purchaseDao: PurchaseDao,
-    private val syncQueueDao: SyncQueueDao
+    private val syncQueueDao: SyncQueueDao,
+    private val syncTombstoneDao: SyncTombstoneDao? = null
 ) {
     val allProducts: Flow<List<Product>> = productDao.getAllProducts()
     val lowStockProducts: Flow<List<Product>> = productDao.getLowStockProducts()
@@ -45,43 +52,84 @@ class InventoryManager(
     }
 
     suspend fun saveProduct(product: Product) = withContext(Dispatchers.IO) {
-        val isNew = productDao.getProductById(product.id) == null
-        val toSave = product.copy(updatedAt = System.currentTimeMillis())
-        productDao.insertProduct(toSave)
-        syncQueueDao.enqueue(
-            SyncQueueItem(
-                tableName = "products",
-                recordId = toSave.id,
-                operation = if (isNew) "CREATE" else "UPDATE",
-                payloadJson = """{"name":"${toSave.name}","sellingPrice":${toSave.sellingPrice},"qty":${toSave.quantityInStock}}"""
+        DbWriteMutex.withLock {
+            val existing = productDao.getProductById(product.id)
+            val isNew = existing == null
+            val now = ClockGuard.effectiveNowMs()
+            val toSave = product.copy(
+                isDeleted = false,
+                updatedAt = now,
+                syncVersion = (existing?.syncVersion ?: 0L) + 1L,
+                hlcTimestamp = HlcClock.tick(now)
             )
-        )
+            productDao.insertProduct(toSave)
+            syncTombstoneDao?.deleteTombstone(SyncTombstone.keyFor("products", toSave.id))
+            syncQueueDao.enqueue(
+                SyncQueueItem(
+                    tableName = "products",
+                    recordId = toSave.id,
+                    operation = if (isNew) "CREATE" else "UPDATE",
+                    payloadJson = """{"name":"${toSave.name}","sellingPrice":${toSave.sellingPrice},"qty":${toSave.quantityInStock}}"""
+                )
+            )
+        }
     }
 
     suspend fun adjustStock(productId: String, adjustmentDelta: Double, reason: String) = withContext(Dispatchers.IO) {
-        val product = productDao.getProductById(productId) ?: return@withContext
-        val newStock = (product.quantityInStock + adjustmentDelta).coerceAtLeast(0.0)
-        productDao.setStock(productId, newStock)
-        syncQueueDao.enqueue(
-            SyncQueueItem(
-                tableName = "products",
-                recordId = productId,
-                operation = "UPDATE",
-                payloadJson = """{"stockAdjustment":$adjustmentDelta,"newStock":$newStock,"reason":"$reason"}"""
+        DbWriteMutex.withLock {
+            val product = productDao.getProductById(productId) ?: return@withLock
+            val now = ClockGuard.effectiveNowMs()
+            val newStock = (product.quantityInStock + adjustmentDelta).coerceAtLeast(0.0)
+            productDao.setStock(productId, newStock, now)
+            syncQueueDao.enqueue(
+                SyncQueueItem(
+                    tableName = "products",
+                    recordId = productId,
+                    operation = "UPDATE",
+                    payloadJson = """{"stockAdjustment":$adjustmentDelta,"newStock":$newStock,"reason":"$reason"}"""
+                )
             )
-        )
+        }
     }
 
     suspend fun deleteProduct(productId: String) = withContext(Dispatchers.IO) {
-        productDao.deleteProductPermanently(productId)
-        syncQueueDao.enqueue(
-            SyncQueueItem(
-                tableName = "products",
-                recordId = productId,
-                operation = "DELETE",
-                payloadJson = """{"id":"$productId"}"""
+        DbWriteMutex.withLock {
+            val now = ClockGuard.effectiveNowMs()
+            productDao.softDeleteProduct(productId, now)
+            syncTombstoneDao?.insertTombstone(
+                SyncTombstone(
+                    id = SyncTombstone.keyFor("products", productId),
+                    tableName = "products",
+                    recordId = productId,
+                    deletedAt = now,
+                    hlcTimestamp = HlcClock.tick(now)
+                )
             )
-        )
+            syncQueueDao.enqueue(
+                SyncQueueItem(
+                    tableName = "products",
+                    recordId = productId,
+                    operation = "DELETE",
+                    payloadJson = """{"id":"$productId"}"""
+                )
+            )
+        }
+    }
+
+    suspend fun restoreProduct(productId: String) = withContext(Dispatchers.IO) {
+        DbWriteMutex.withLock {
+            val now = ClockGuard.effectiveNowMs()
+            productDao.restoreProduct(productId, now)
+            syncTombstoneDao?.deleteTombstone(SyncTombstone.keyFor("products", productId))
+            syncQueueDao.enqueue(
+                SyncQueueItem(
+                    tableName = "products",
+                    recordId = productId,
+                    operation = "UPDATE",
+                    payloadJson = """{"restored":true}"""
+                )
+            )
+        }
     }
 
     suspend fun clearAllProducts() = withContext(Dispatchers.IO) {
@@ -111,60 +159,67 @@ class InventoryManager(
         buyerId: String = "",
         buyerName: String = "Store Manager"
     ): PurchaseRecord = withContext(Dispatchers.IO) {
-        val now = System.currentTimeMillis()
-        val product = productDao.getProductById(productId)
-        val prodName = product?.name ?: "Stock Inflow Item"
-        val category = product?.category ?: "General"
-        val activeSellingPrice = newSellingPrice ?: product?.sellingPrice ?: 0.0
-
-        val invNum = invoiceNumber.trim().ifBlank {
-            "INV-BUY-" + SimpleDateFormat("yyMMdd-HHmmss", Locale.getDefault()).format(Date(now))
-        }
-
-        val purchase = PurchaseRecord(
-            id = UUID.randomUUID().toString(),
-            productId = productId,
-            productName = prodName,
-            category = category,
-            supplierName = supplierName.trim().ifBlank { "Direct Supplier" },
-            supplierPhone = supplierPhone.trim(),
-            quantityPurchased = quantity.coerceAtLeast(0.0),
-            unitCostPrice = unitCostPrice.coerceAtLeast(0.0),
-            totalPurchaseCost = quantity * unitCostPrice,
-            sellingPriceAtPurchase = activeSellingPrice,
-            paymentStatus = paymentStatus,
-            invoiceNumber = invNum,
-            branchId = branchId,
-            branchName = branchName,
-            purchasedByUserId = buyerId,
-            purchasedByName = buyerName,
-            notes = notes.trim(),
-            purchaseDate = now,
-            createdAt = now
-        )
-
-        purchaseDao.insertPurchase(purchase)
-
-        if (product != null) {
-            val updatedProduct = product.copy(
-                quantityInStock = (product.quantityInStock + quantity).coerceAtLeast(0.0),
-                costPrice = if (unitCostPrice > 0) unitCostPrice else product.costPrice,
-                sellingPrice = if (newSellingPrice != null && newSellingPrice > 0) newSellingPrice else product.sellingPrice,
-                updatedAt = now
+        DbWriteMutex.withLock {
+            val now = ClockGuard.effectiveNowMs()
+            val product = productDao.getProductById(productId)
+            val prodName = product?.name ?: "Stock Inflow Item"
+            val category = product?.category ?: "General"
+            val activeSellingPrice = newSellingPrice ?: product?.sellingPrice ?: 0.0
+            val totalCost = MoneyUtils.centsToDouble(
+                MoneyUtils.multiplyPriceQuantityCents(unitCostPrice.coerceAtLeast(0.0), quantity.coerceAtLeast(0.0))
             )
-            productDao.insertProduct(updatedProduct)
-        }
 
-        syncQueueDao.enqueue(
-            SyncQueueItem(
-                tableName = "purchases",
-                recordId = purchase.id,
-                operation = "CREATE",
-                payloadJson = """{"productId":"$productId","qty":$quantity,"unitCost":$unitCostPrice,"total":${purchase.totalPurchaseCost},"supplier":"$supplierName"}"""
+            val invNum = invoiceNumber.trim().ifBlank {
+                "INV-BUY-" + SimpleDateFormat("yyMMdd-HHmmss", Locale.getDefault()).format(Date(now))
+            }
+
+            val purchase = PurchaseRecord(
+                id = UUID.randomUUID().toString(),
+                productId = productId,
+                productName = prodName,
+                category = category,
+                supplierName = supplierName.trim().ifBlank { "Direct Supplier" },
+                supplierPhone = supplierPhone.trim(),
+                quantityPurchased = quantity.coerceAtLeast(0.0),
+                unitCostPrice = MoneyUtils.roundMoney(unitCostPrice.coerceAtLeast(0.0)),
+                totalPurchaseCost = totalCost,
+                sellingPriceAtPurchase = MoneyUtils.roundMoney(activeSellingPrice),
+                paymentStatus = paymentStatus,
+                invoiceNumber = invNum,
+                branchId = branchId,
+                branchName = branchName,
+                purchasedByUserId = buyerId,
+                purchasedByName = buyerName,
+                notes = notes.trim(),
+                purchaseDate = now,
+                createdAt = now
             )
-        )
 
-        purchase
+            purchaseDao.insertPurchase(purchase)
+
+            if (product != null) {
+                val updatedProduct = product.copy(
+                    quantityInStock = (product.quantityInStock + quantity).coerceAtLeast(0.0),
+                    costPrice = if (unitCostPrice > 0) unitCostPrice else product.costPrice,
+                    sellingPrice = if (newSellingPrice != null && newSellingPrice > 0) newSellingPrice else product.sellingPrice,
+                    updatedAt = now,
+                    syncVersion = product.syncVersion + 1L,
+                    hlcTimestamp = HlcClock.tick(now)
+                )
+                productDao.insertProduct(updatedProduct)
+            }
+
+            syncQueueDao.enqueue(
+                SyncQueueItem(
+                    tableName = "purchases",
+                    recordId = purchase.id,
+                    operation = "CREATE",
+                    payloadJson = """{"productId":"$productId","qty":$quantity,"unitCost":$unitCostPrice,"total":${purchase.totalPurchaseCost},"supplier":"$supplierName"}"""
+                )
+            )
+
+            purchase
+        }
     }
 
     suspend fun deletePurchaseRecord(purchaseId: String) = withContext(Dispatchers.IO) {

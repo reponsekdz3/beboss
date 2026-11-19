@@ -40,20 +40,23 @@ data class ShopProfile(
     val lastPaymentAmount: Int = 5000,
     val lastPaymentDate: Long = System.currentTimeMillis(),
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val syncVersion: Long = 1L,
+    val hlcTimestamp: Long = 0L,
+    val lastModifiedDeviceId: String = ""
 ) {
     val ownerName: String
         get() = name
 
     val isSubscriptionActive: Boolean
-        get() = subscriptionStatus != "EXPIRED" && System.currentTimeMillis() <= subscriptionExpiresAt
+        get() = subscriptionStatus != "EXPIRED" && com.example.util.ClockGuard.effectiveNowMs() <= subscriptionExpiresAt
 
     val daysRemaining: Int
         get() {
-            val diff = subscriptionExpiresAt - System.currentTimeMillis()
+            val diff = subscriptionExpiresAt - com.example.util.ClockGuard.effectiveNowMs()
             return if (diff > 0) ((diff / (24 * 60 * 60 * 1000)).toInt() + 1) else 0
         }
 
     val isGracePeriod: Boolean
-        get() = !isSubscriptionActive && (System.currentTimeMillis() - subscriptionExpiresAt < (3L * 24 * 60 * 60 * 1000))
+        get() = !isSubscriptionActive && (com.example.util.ClockGuard.effectiveNowMs() - subscriptionExpiresAt < (3L * 24 * 60 * 60 * 1000))
 }

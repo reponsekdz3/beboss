@@ -185,15 +185,15 @@ object MoMoPaymentGateway {
         }
 
         return GatewayTransactionResult(
-            isSuccess = true,
-            isPending = false,
-            status = "SUCCESSFUL",
+            isSuccess = false,
+            isPending = true,
+            status = "PENDING_VERIFICATION",
             transactionReference = cleanRef,
             financialId = cleanRef,
             amount = amount,
             provider = provider,
             payerPhone = "",
-            message = "$provider payment of $amount FRw verified with reference $cleanRef."
+            message = "$provider reference $cleanRef queued for server-side verification. Submit your payment proof to receive your Admin Unlock Code."
         )
     }
 

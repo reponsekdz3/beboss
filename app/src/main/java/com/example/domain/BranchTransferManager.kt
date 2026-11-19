@@ -5,9 +5,13 @@ import com.example.data.dao.ProductDao
 import com.example.data.dao.ShopProfileDao
 import com.example.data.dao.StockTransferDao
 import com.example.data.dao.SyncQueueDao
+import com.example.data.dao.SyncTombstoneDao
 import com.example.data.model.Branch
 import com.example.data.model.StockTransfer
 import com.example.data.model.SyncQueueItem
+import com.example.data.model.SyncTombstone
+import com.example.util.ClockGuard
+import com.example.util.HlcClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -24,7 +28,8 @@ class BranchTransferManager(
     private val stockTransferDao: StockTransferDao,
     private val productDao: ProductDao,
     private val shopProfileDao: ShopProfileDao,
-    private val syncQueueDao: SyncQueueDao
+    private val syncQueueDao: SyncQueueDao,
+    private val syncTombstoneDao: SyncTombstoneDao? = null
 ) {
     val allBranches: Flow<List<Branch>> = branchDao.getAllActiveBranches()
     val allStockTransfers: Flow<List<StockTransfer>> = stockTransferDao.getAllTransfers()
@@ -34,16 +39,27 @@ class BranchTransferManager(
     }
 
     suspend fun saveBranch(branch: Branch) = withContext(Dispatchers.IO) {
-        val toSave = branch.copy(updatedAt = System.currentTimeMillis())
+        val now = ClockGuard.effectiveNowMs()
+        val toSave = branch.copy(
+            updatedAt = now,
+            hlcTimestamp = HlcClock.tick(now)
+        )
         if (toSave.isMainBranch) {
             val allOtherBranches = branchDao.getAllActiveBranchesList()
             for (b in allOtherBranches) {
                 if (b.id != toSave.id && b.isMainBranch) {
-                    branchDao.insertBranch(b.copy(isMainBranch = false, updatedAt = System.currentTimeMillis()))
+                    branchDao.insertBranch(
+                        b.copy(
+                            isMainBranch = false,
+                            updatedAt = now,
+                            hlcTimestamp = HlcClock.tick(now)
+                        )
+                    )
                 }
             }
         }
         branchDao.insertBranch(toSave)
+        syncTombstoneDao?.deleteTombstone(SyncTombstone.keyFor("branches", toSave.id))
         syncQueueDao.enqueue(
             SyncQueueItem(
                 tableName = "branches",
@@ -55,7 +71,17 @@ class BranchTransferManager(
     }
 
     suspend fun deleteBranch(branchId: String) = withContext(Dispatchers.IO) {
-        branchDao.softDeleteBranch(branchId)
+        val now = ClockGuard.effectiveNowMs()
+        branchDao.softDeleteBranch(branchId, now)
+        syncTombstoneDao?.insertTombstone(
+            SyncTombstone(
+                id = SyncTombstone.keyFor("branches", branchId),
+                tableName = "branches",
+                recordId = branchId,
+                deletedAt = now,
+                hlcTimestamp = HlcClock.tick(now)
+            )
+        )
         syncQueueDao.enqueue(
             SyncQueueItem(
                 tableName = "branches",
@@ -149,7 +175,17 @@ class BranchTransferManager(
     }
 
     suspend fun deleteStockTransfer(transferId: String) = withContext(Dispatchers.IO) {
+        val now = ClockGuard.effectiveNowMs()
         stockTransferDao.deleteTransfer(transferId)
+        syncTombstoneDao?.insertTombstone(
+            SyncTombstone(
+                id = SyncTombstone.keyFor("stock_transfers", transferId),
+                tableName = "stock_transfers",
+                recordId = transferId,
+                deletedAt = now,
+                hlcTimestamp = HlcClock.tick(now)
+            )
+        )
         syncQueueDao.enqueue(
             SyncQueueItem(
                 tableName = "stock_transfers",

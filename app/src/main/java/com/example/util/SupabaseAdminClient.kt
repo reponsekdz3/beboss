@@ -8,16 +8,21 @@ import com.example.data.model.ShopProfile
 import com.example.data.model.User
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.CertificatePinner
+import okhttp3.ConnectionSpec
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.TlsVersion
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.HttpsURLConnection
 
 data class SupabaseAdminSession(
     val accessToken: String,
@@ -123,6 +128,12 @@ data class SupabaseSyncResult(
     val approvedCodesFound: List<SupabasePaymentRequestDto> = emptyList()
 )
 
+data class BatchApprovalResult(
+    val approvedCount: Int,
+    val failedCount: Int,
+    val issuedCodes: List<Pair<String, String>> = emptyList()
+)
+
 /**
  * Supabase PostgREST + GoTrue Auth Client for:
  * 1. Authenticated Admin Licensing Operations (`shop_accounts`, `payment_requests`, `unlock_codes`, `admin_profiles`, `admin_audit_logs`)
@@ -139,8 +150,37 @@ object SupabaseAdminClient {
     @Volatile
     private var activeAdminSession: SupabaseAdminSession? = null
 
+    private val modernTlsSpec = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
+        .tlsVersions(TlsVersion.TLS_1_3, TlsVersion.TLS_1_2)
+        .build()
+
+    fun buildCertificatePinner(
+        supabaseUrl: String = getSupabaseUrl(),
+        pinsCsv: String = System.getProperty("beboss.supabase.certPins").orEmpty()
+    ): CertificatePinner? {
+        val rawPins = pinsCsv.split(',').map { it.trim() }.filter { it.startsWith("sha256/") }
+        if (rawPins.isEmpty()) return null
+        val host = try {
+            URL(supabaseUrl).host.takeIf { it.isNotBlank() } ?: return null
+        } catch (_: Throwable) {
+            return null
+        }
+        val builder = CertificatePinner.Builder()
+        rawPins.forEach { pin -> builder.add(host, pin) }
+        return builder.build()
+    }
+
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            .connectionSpecs(listOf(modernTlsSpec))
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .apply {
+                buildCertificatePinner()?.let { certificatePinner(it) }
+            }
+            .hostnameVerifier { hostname, session ->
+                HttpsURLConnection.getDefaultHostnameVerifier().verify(hostname, session)
+            }
             .connectTimeout(12, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)
@@ -185,7 +225,55 @@ object SupabaseAdminClient {
             !key.contains("your_supabase_anon_key")
     }
 
-    fun getCurrentAdminSession(): SupabaseAdminSession? = activeAdminSession
+    fun getCurrentAdminSession(): SupabaseAdminSession? {
+        val current = activeAdminSession ?: return null
+        if (System.currentTimeMillis() >= current.expiresAt && current.refreshToken.isBlank()) {
+            activeAdminSession = null
+            return null
+        }
+        return current
+    }
+
+    @Synchronized
+    fun ensureValidAdminSession(): SupabaseAdminSession? {
+        val session = activeAdminSession ?: return null
+        val now = System.currentTimeMillis()
+        if (now < session.expiresAt - 60_000L) {
+            return session
+        }
+        if (session.refreshToken.isBlank() || !isConfigured()) {
+            activeAdminSession = null
+            return null
+        }
+        return try {
+            val payload = JSONObject().apply { put("refresh_token", session.refreshToken) }
+            val req = Request.Builder()
+                .url("${getSupabaseUrl()}/auth/v1/token?grant_type=refresh_token")
+                .addHeader("apikey", getSupabaseAnonKey())
+                .addHeader("Content-Type", "application/json")
+                .post(payload.toString().toRequestBody(jsonMediaType))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    activeAdminSession = null
+                    return null
+                }
+                val raw = resp.body?.string().orEmpty()
+                val refreshed = parseAuthSession(JSONObject(raw), session.email, session.fullName)
+                if (refreshed != null && isAllowedMasterAdminEmail(refreshed.email)) {
+                    activeAdminSession = refreshed
+                    refreshed
+                } else {
+                    activeAdminSession = null
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Admin JWT refresh failed: ${e.message}")
+            activeAdminSession = null
+            null
+        }
+    }
 
     fun computeShopSyncKey(ownerUsername: String, phone: String): String {
         val user = ownerUsername.trim().lowercase(Locale.ROOT).ifBlank { "owner" }
@@ -202,19 +290,24 @@ object SupabaseAdminClient {
         return created
     }
 
-    private fun buildRestRequest(path: String, useAdminJwtIfAvailable: Boolean = false): Request.Builder {
+    private fun buildRestRequest(
+        path: String,
+        useAdminJwtIfAvailable: Boolean = false,
+        tenantSyncKey: String? = null
+    ): Request.Builder {
         val url = "${getSupabaseUrl()}/rest/v1/$path"
         val key = getSupabaseAnonKey()
-        val bearer = if (useAdminJwtIfAvailable && activeAdminSession != null) {
-            activeAdminSession!!.accessToken
-        } else {
-            key
-        }
-        return Request.Builder()
+        val adminToken = if (useAdminJwtIfAvailable) ensureValidAdminSession()?.accessToken else null
+        val bearer = adminToken ?: key
+        val builder = Request.Builder()
             .url(url)
             .addHeader("apikey", key)
             .addHeader("Authorization", "Bearer $bearer")
             .addHeader("Content-Type", "application/json")
+        if (!tenantSyncKey.isNullOrBlank()) {
+            builder.addHeader("X-Shop-Sync-Key", tenantSyncKey.trim())
+        }
+        return builder
     }
 
     // -------------------------------------------------------------------------
@@ -420,7 +513,7 @@ object SupabaseAdminClient {
                 put("records_summary", recordsSummary)
                 put("updated_at", now)
             }
-            val req = buildRestRequest("branch_sync_snapshots?on_conflict=id")
+            val req = buildRestRequest("branch_sync_snapshots?on_conflict=id", tenantSyncKey = shopSyncKey)
                 .addHeader("Prefer", "resolution=merge-duplicates,return=minimal")
                 .post(body.toString().toRequestBody(jsonMediaType))
                 .build()
@@ -443,7 +536,10 @@ object SupabaseAdminClient {
         if (!isConfigured() || shopSyncKey.isBlank()) return@withContext emptyList()
         try {
             val encKey = URLEncoder.encode(shopSyncKey, "UTF-8")
-            val req = buildRestRequest("branch_sync_snapshots?shop_sync_key=eq.$encKey&order=updated_at.asc&limit=30")
+            val req = buildRestRequest(
+                "branch_sync_snapshots?shop_sync_key=eq.$encKey&order=updated_at.asc&limit=30",
+                tenantSyncKey = shopSyncKey
+            )
                 .get()
                 .build()
             client.newCall(req).execute().use { resp ->
@@ -509,7 +605,7 @@ object SupabaseAdminClient {
                 put("updated_at", System.currentTimeMillis())
             }
 
-            val req = buildRestRequest("shop_accounts?on_conflict=id")
+            val req = buildRestRequest("shop_accounts?on_conflict=id", tenantSyncKey = accountId)
                 .addHeader("Prefer", "resolution=merge-duplicates,return=minimal")
                 .post(payload.toString().toRequestBody(jsonMediaType))
                 .build()
@@ -530,7 +626,7 @@ object SupabaseAdminClient {
         if (!isConfigured() || accountId.isBlank()) return@withContext null
         try {
             val enc = URLEncoder.encode(accountId, "UTF-8")
-            val req = buildRestRequest("shop_accounts?id=eq.$enc&limit=1").get().build()
+            val req = buildRestRequest("shop_accounts?id=eq.$enc&limit=1", tenantSyncKey = accountId).get().build()
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext null
                 val arr = JSONArray(resp.body?.string().orEmpty().ifBlank { "[]" })
@@ -572,7 +668,7 @@ object SupabaseAdminClient {
                     }
                 )
             }
-            val req = buildRestRequest("shop_users?on_conflict=id")
+            val req = buildRestRequest("shop_users?on_conflict=id", tenantSyncKey = shopSyncKey)
                 .addHeader("Prefer", "resolution=merge-duplicates,return=minimal")
                 .post(arr.toString().toRequestBody(jsonMediaType))
                 .build()
@@ -592,7 +688,7 @@ object SupabaseAdminClient {
         if (!isConfigured() || shopSyncKey.isBlank()) return@withContext emptyList()
         try {
             val enc = URLEncoder.encode(shopSyncKey, "UTF-8")
-            val req = buildRestRequest("shop_users?shop_sync_key=eq.$enc&limit=200").get().build()
+            val req = buildRestRequest("shop_users?shop_sync_key=eq.$enc&limit=200", tenantSyncKey = shopSyncKey).get().build()
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext emptyList()
                 val arr = JSONArray(resp.body?.string().orEmpty().ifBlank { "[]" })
@@ -627,7 +723,8 @@ object SupabaseAdminClient {
                 put("updated_at", request.updatedAt)
             }
 
-            val req = buildRestRequest("payment_requests?on_conflict=id")
+            val shopSyncKey = computeShopSyncKey(request.ownerUsername, request.ownerPhone)
+            val req = buildRestRequest("payment_requests?on_conflict=id", tenantSyncKey = shopSyncKey)
                 .addHeader("Prefer", "resolution=merge-duplicates,return=minimal")
                 .post(payload.toString().toRequestBody(jsonMediaType))
                 .build()
@@ -648,9 +745,10 @@ object SupabaseAdminClient {
         withContext(Dispatchers.IO) {
             if (!isConfigured()) return@withContext emptyList()
             try {
+                val shopSyncKey = computeShopSyncKey(username, phone)
                 val cleanUser = URLEncoder.encode(username.trim().lowercase(Locale.ROOT), "UTF-8")
                 val path = "payment_requests?owner_username=eq.$cleanUser&status=eq.APPROVED&order=updated_at.desc&limit=10"
-                val req = buildRestRequest(path).get().build()
+                val req = buildRestRequest(path, tenantSyncKey = shopSyncKey).get().build()
 
                 client.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) return@withContext emptyList()
@@ -679,8 +777,9 @@ object SupabaseAdminClient {
     ): SupabaseUnlockCodeDto? = withContext(Dispatchers.IO) {
         if (!isConfigured()) return@withContext null
         try {
+            val shopSyncKey = computeShopSyncKey(username, phone)
             val cleanCode = URLEncoder.encode(unlockCode.trim().uppercase(Locale.ROOT), "UTF-8")
-            val req = buildRestRequest("unlock_codes?unlock_code=eq.$cleanCode&limit=1").get().build()
+            val req = buildRestRequest("unlock_codes?unlock_code=eq.$cleanCode&limit=1", tenantSyncKey = shopSyncKey).get().build()
             var matched: SupabaseUnlockCodeDto? = null
             client.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) {
@@ -697,7 +796,10 @@ object SupabaseAdminClient {
                     put("status", "REDEEMED")
                     put("redeemed_at", now)
                 }
-                val patchReq = buildRestRequest("unlock_codes?id=eq.${URLEncoder.encode(matched!!.id, "UTF-8")}")
+                val patchReq = buildRestRequest(
+                    "unlock_codes?id=eq.${URLEncoder.encode(matched!!.id, "UTF-8")}",
+                    tenantSyncKey = shopSyncKey
+                )
                     .patch(patchBody.toString().toRequestBody(jsonMediaType))
                     .build()
                 client.newCall(patchReq).execute().close()
@@ -707,7 +809,10 @@ object SupabaseAdminClient {
                     put("status", "REDEEMED")
                     put("updated_at", now)
                 }
-                val prReq = buildRestRequest("payment_requests?generated_unlock_code=eq.$cleanCode&owner_username=eq.$cleanUser")
+                val prReq = buildRestRequest(
+                    "payment_requests?generated_unlock_code=eq.$cleanCode&owner_username=eq.$cleanUser",
+                    tenantSyncKey = shopSyncKey
+                )
                     .patch(prPatch.toString().toRequestBody(jsonMediaType))
                     .build()
                 client.newCall(prReq).execute().close()
@@ -852,6 +957,10 @@ object SupabaseAdminClient {
         request: SupabasePaymentRequestDto,
         adminName: String
     ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val session = ensureValidAdminSession()
+        if (!isConfigured() || session == null) {
+            return@withContext Pair(false, "Admin authentication expired or unavailable.")
+        }
         val tierCode = when {
             request.durationMonths >= 12 -> "ANNUAL"
             request.branchCount >= 3 -> "MULTI"
@@ -859,15 +968,15 @@ object SupabaseAdminClient {
             else -> "SINGLE"
         }
         val days = (request.durationMonths.coerceAtLeast(1)) * 30
-        val generatedCode = SubscriptionSecurityManager.generateAccountBoundUnlockCode(
-            username = request.ownerUsername,
-            registeredPhone = request.ownerPhone,
-            tierCode = tierCode,
-            days = days
-        )
-
-        if (!isConfigured() || activeAdminSession == null) {
-            return@withContext Pair(false, generatedCode)
+        val generatedCode = try {
+            SubscriptionSecurityManager.generateAccountBoundUnlockCode(
+                username = request.ownerUsername,
+                registeredPhone = request.ownerPhone,
+                tierCode = tierCode,
+                days = days
+            )
+        } catch (e: Exception) {
+            return@withContext Pair(false, e.message ?: "Unable to bind unlock code.")
         }
 
         try {
@@ -1069,6 +1178,71 @@ object SupabaseAdminClient {
             ok
         } catch (e: Exception) {
             Log.e(TAG, "adminSetShopStatus error: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun approvePaymentBatch(
+        requests: List<SupabasePaymentRequestDto>,
+        adminName: String
+    ): BatchApprovalResult = withContext(Dispatchers.IO) {
+        if (!isConfigured() || ensureValidAdminSession() == null) {
+            return@withContext BatchApprovalResult(approvedCount = 0, failedCount = requests.size)
+        }
+        var approved = 0
+        var failed = 0
+        val issued = mutableListOf<Pair<String, String>>()
+        for (req in requests.filter { it.status == "PENDING_VERIFICATION" }) {
+            val (ok, code) = approvePaymentAndIssueCode(req, adminName)
+            if (ok) {
+                approved++
+                issued.add(req.ownerUsername to code)
+            } else {
+                failed++
+            }
+        }
+        if (approved > 0) {
+            logAdminAudit(
+                action = "BATCH_APPROVE_PAYMENTS",
+                targetId = "count:$approved",
+                details = "Batch approved $approved pending payment request(s), failed: $failed"
+            )
+        }
+        BatchApprovalResult(approvedCount = approved, failedCount = failed, issuedCodes = issued)
+    }
+
+    suspend fun adminUpdateShopLimits(
+        shop: SupabaseShopAccountDto,
+        branchCount: Int,
+        workerCount: Int
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (!isConfigured() || ensureValidAdminSession() == null) return@withContext false
+        try {
+            val safeBranches = branchCount.coerceAtLeast(1)
+            val safeWorkers = workerCount.coerceAtLeast(1)
+            val pricing = OfflineSubscriptionManager.calculateSubscriptionPrice(safeBranches, safeWorkers, 1)
+            val now = System.currentTimeMillis()
+            val patch = JSONObject().apply {
+                put("branch_count", safeBranches)
+                put("worker_count", safeWorkers)
+                put("monthly_fee_rwf", pricing.monthlySubtotal)
+                put("updated_at", now)
+            }
+            val req = buildRestRequest(
+                "shop_accounts?id=eq.${URLEncoder.encode(shop.id, "UTF-8")}",
+                useAdminJwtIfAvailable = true
+            ).patch(patch.toString().toRequestBody(jsonMediaType)).build()
+            val ok = client.newCall(req).execute().use { it.isSuccessful }
+            if (ok) {
+                logAdminAudit(
+                    "UPDATE_SHOP_LIMITS",
+                    "@${shop.ownerUsername}",
+                    "${shop.shopName}: branches=$safeBranches, workers=$safeWorkers, fee=${pricing.monthlySubtotal} FRw/mo"
+                )
+            }
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "adminUpdateShopLimits error: ${e.message}")
             false
         }
     }

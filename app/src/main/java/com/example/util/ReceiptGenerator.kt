@@ -24,6 +24,38 @@ object ReceiptGenerator {
         return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(timestamp))
     }
 
+    fun computeTaxIncludedAmount(totalAmount: Double, taxRatePercent: Double): Double {
+        if (taxRatePercent <= 0.0 || totalAmount <= 0.0) return 0.0
+        val tax = totalAmount * (taxRatePercent / (100.0 + taxRatePercent))
+        return MoneyUtils.fromCents(MoneyUtils.toCents(tax))
+    }
+
+    /**
+     * Generates a deterministic 10-character tamper-evident verification seal
+     * bound to the sale's canonical ID, receipt number, total cents, date, branch, cashier, and shop TIN.
+     */
+    fun computeOfflineReceiptSeal(sale: Sale, profile: ShopProfile): String {
+        val payload = listOf(
+            sale.id,
+            sale.receiptNumber,
+            MoneyUtils.toCents(sale.totalAmount).toString(),
+            MoneyUtils.toCents(sale.amountPaid).toString(),
+            sale.saleDate.toString(),
+            sale.branchId,
+            sale.cashierId,
+            profile.tinNumber.trim()
+        ).joinToString("|")
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(payload.toByteArray(java.nio.charset.StandardCharsets.UTF_8))
+        val hex = digest.take(5).joinToString("") { "%02X".format(it) }
+        return "BB-$hex"
+    }
+
+    fun verifyOfflineReceiptSeal(sale: Sale, profile: ShopProfile, seal: String): Boolean {
+        val expected = computeOfflineReceiptSeal(sale, profile)
+        return SecurityUtils.constantTimeEquals(expected, seal.trim().uppercase(Locale.US))
+    }
+
     /**
      * Builds clean, formatted plain text receipt ideal for WhatsApp, SMS, or thermal Bluetooth receipt printers
      */
@@ -43,6 +75,9 @@ object ReceiptGenerator {
         }
         if (profile.phone.isNotBlank()) {
             sb.append("   Tel: ").append(profile.phone).append("\n")
+        }
+        if (profile.tinNumber.isNotBlank()) {
+            sb.append("   TIN: ").append(profile.tinNumber).append("\n")
         }
         sb.append(doubleLine).append("\n")
 
@@ -64,6 +99,10 @@ object ReceiptGenerator {
 
         sb.append(line).append("\n")
         sb.append(String.format("%-18s: %12s\n", "TOTAL", formatMoney(sale.totalAmount, profile)))
+        if (profile.showTaxOnReceipt && profile.taxRate > 0.0) {
+            val vat = computeTaxIncludedAmount(sale.totalAmount, profile.taxRate)
+            sb.append(String.format("%-18s: %12s\n", "Incl. Tax (${profile.taxRate}%)", formatMoney(vat, profile)))
+        }
         if (sale.discountAmount > 0) {
             sb.append(String.format("%-18s: %12s\n", "Discount", formatMoney(sale.discountAmount, profile)))
         }
@@ -73,8 +112,10 @@ object ReceiptGenerator {
             sb.append(String.format("%-18s: %12s\n", "BALANCE DUE", formatMoney(balanceDue, profile)))
         }
 
+        val seal = computeOfflineReceiptSeal(sale, profile)
         sb.append(doubleLine).append("\n")
         sb.append("   ").append(profile.receiptFooter).append("\n")
+        sb.append("   Verify Seal: ").append(seal).append("\n")
         sb.append("   Powered by BeBoss\n")
         sb.append(doubleLine)
 
@@ -100,6 +141,10 @@ object ReceiptGenerator {
                 </tr>
             """.trimIndent())
         }
+        val vatAmount = if (profile.showTaxOnReceipt && profile.taxRate > 0.0) {
+            computeTaxIncludedAmount(sale.totalAmount, profile.taxRate)
+        } else 0.0
+        val seal = computeOfflineReceiptSeal(sale, profile)
 
         return """
             <!DOCTYPE html>
@@ -123,6 +168,7 @@ object ReceiptGenerator {
                     <div class="shop-title">${profile.shopName}</div>
                     <div>${profile.address}</div>
                     <div>Tel: ${profile.phone} | ${profile.email}</div>
+                    ${if (profile.tinNumber.isNotBlank()) "<div><strong>TIN:</strong> ${profile.tinNumber}</div>" else ""}
                 </div>
 
                 <table class="meta-table">
@@ -148,6 +194,12 @@ object ReceiptGenerator {
                         <span>TOTAL:</span>
                         <span>${formatMoney(sale.totalAmount, profile)}</span>
                     </div>
+                    ${if (vatAmount > 0.0) """
+                    <div class="total-row" style="font-size: 12px; color: #4B5563;">
+                        <span>Incl. Tax (${profile.taxRate}%):</span>
+                        <span>${formatMoney(vatAmount, profile)}</span>
+                    </div>
+                    """ else ""}
                     <div class="total-row">
                         <span>Paid (${sale.paymentMethod}):</span>
                         <span>${formatMoney(sale.amountPaid, profile)}</span>
@@ -162,6 +214,7 @@ object ReceiptGenerator {
 
                 <div class="footer">
                     <div>${profile.receiptFooter}</div>
+                    <div style="margin-top: 4px; font-family: monospace;">Seal: $seal</div>
                     <div style="margin-top: 4px;">Created with BeBoss — Offline Business Manager</div>
                 </div>
             </body>

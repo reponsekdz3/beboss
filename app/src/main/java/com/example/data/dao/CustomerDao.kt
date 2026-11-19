@@ -16,6 +16,12 @@ interface CustomerDao {
     @Query("SELECT * FROM customers WHERE isDeleted = 0 ORDER BY name ASC")
     suspend fun getAllCustomersList(): List<Customer>
 
+    @Query("SELECT * FROM customers WHERE isDeleted = 0 ORDER BY name ASC LIMIT :limit OFFSET :offset")
+    suspend fun getCustomersPaged(limit: Int, offset: Int): List<Customer>
+
+    @Query("UPDATE customers SET isDeleted = 0, updatedAt = :updatedAt WHERE id = :customerId")
+    suspend fun restoreCustomer(customerId: String, updatedAt: Long = System.currentTimeMillis())
+
     @Query("SELECT * FROM customers WHERE isDeleted = 0 AND (name LIKE '%' || :query || '%' OR phone LIKE '%' || :query || '%') ORDER BY name ASC")
     fun searchCustomers(query: String): Flow<List<Customer>>
 

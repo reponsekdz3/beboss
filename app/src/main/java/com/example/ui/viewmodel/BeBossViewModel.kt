@@ -2,36 +2,61 @@ package com.example.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
-import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.db.AppDatabase
 import com.example.data.model.AnalyticsPeriod
+import com.example.data.model.Branch
+import com.example.data.model.CartItem
 import com.example.data.model.CategorySalesShare
 import com.example.data.model.Customer
 import com.example.data.model.CustomerPayment
 import com.example.data.model.DailyAnalyticsPoint
+import com.example.data.model.DatabaseEngineStats
+import com.example.data.model.DatabaseMaintenanceResult
 import com.example.data.model.InventoryValuation
+import com.example.data.model.LocalAuditLog
+import com.example.data.model.PaymentVerificationRequest
 import com.example.data.model.Product
 import com.example.data.model.ProfitLossSummary
 import com.example.data.model.PurchaseRecord
 import com.example.data.model.PurchaseSummary
 import com.example.data.model.Sale
-import com.example.data.model.SaleItem
 import com.example.data.model.SaleWithItems
 import com.example.data.model.ShopProfile
 import com.example.data.model.StockTransfer
-import com.example.data.model.SyncQueueItem
 import com.example.data.model.TopProductReport
 import com.example.data.model.User
-import com.example.data.model.UserRole
-import com.example.data.model.CartItem
 import com.example.data.repository.BeBossRepository
-import com.example.util.SyncAuditLog
+import com.example.ui.viewmodel.coordinators.AdminConsoleCoordinator
+import com.example.ui.viewmodel.coordinators.AuthSessionCoordinator
+import com.example.ui.viewmodel.coordinators.DatabaseMaintenanceCoordinator
+import com.example.ui.viewmodel.coordinators.PosCartCoordinator
+import com.example.ui.viewmodel.coordinators.SyncCoordinator
 import com.example.util.AppLanguage
 import com.example.util.BeBossNotificationManager
-import com.example.util.Localization
+import com.example.util.CloudSyncReport
+import com.example.util.ConnectivityStatus
+import com.example.util.DeviceIntegrityStatus
+import com.example.util.DeviceSecurityManager
+import com.example.util.EndpointPingResult
+import com.example.util.NetworkConnectivityObserver
+import com.example.util.OfflineSubscriptionManager
+import com.example.util.PaymentProcessingResult
 import com.example.util.ShopImportSummary
+import com.example.util.SubscriptionPriceBreakdown
+import com.example.util.SupabaseAdminClient
+import com.example.util.SupabaseAdminSession
+import com.example.util.SupabaseAuditLogDto
+import com.example.util.SupabaseBranchSnapshotDto
+import com.example.util.SupabasePaymentRequestDto
+import com.example.util.SupabaseShopAccountDto
+import com.example.util.SupabaseShopUserDto
+import com.example.util.SupabaseUnlockCodeDto
+import com.example.util.SyncAuditLog
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -39,11 +64,11 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.UUID
 
 enum class AppScreen(val stringKey: String, val title: String) {
@@ -91,282 +116,23 @@ data class CartState(
         get() = items.sumOf { it.quantity }
 }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class BeBossViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs = application.getSharedPreferences("beboss_prefs", Context.MODE_PRIVATE)
     private val db = AppDatabase.getDatabase(application)
     val repository = BeBossRepository(db)
-    private val connectivityObserver = com.example.util.NetworkConnectivityObserver(application)
-    private val deviceId: String = com.example.util.SupabaseAdminClient.getOrCreateDeviceId(application)
-    private var autoBranchSyncJob: kotlinx.coroutines.Job? = null
+    private val connectivityObserver = NetworkConnectivityObserver(application)
+    private val deviceId: String = SupabaseAdminClient.getOrCreateDeviceId(application)
 
-    // Network Connectivity & Cloud Sync State
-    val connectivityStatus: StateFlow<com.example.util.ConnectivityStatus> = connectivityObserver.networkStatus
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.example.util.ConnectivityStatus.AVAILABLE)
+    private val _deviceIntegrityStatus = MutableStateFlow(DeviceSecurityManager.inspectDeviceIntegrity())
+    val deviceIntegrityStatus: StateFlow<DeviceIntegrityStatus> = _deviceIntegrityStatus.asStateFlow()
 
-    private val _cloudSyncReport = MutableStateFlow<com.example.util.CloudSyncReport?>(null)
-    val cloudSyncReport: StateFlow<com.example.util.CloudSyncReport?> = _cloudSyncReport.asStateFlow()
+    private var idleLockJob: Job? = null
+    private val idleLockTimeoutMs: Long = 5 * 60_000L
 
-    fun scheduleAutoBranchSync(delayMs: Long = 1600L) {
-        if (connectivityStatus.value != com.example.util.ConnectivityStatus.AVAILABLE) return
-        autoBranchSyncJob?.cancel()
-        autoBranchSyncJob = viewModelScope.launch {
-            kotlinx.coroutines.delay(delayMs)
-            if (connectivityStatus.value == com.example.util.ConnectivityStatus.AVAILABLE && !_isSyncing.value) {
-                val report = repository.performSync(
-                    activeBranchId = _selectedBranchId.value,
-                    deviceId = deviceId
-                )
-                _cloudSyncReport.value = report
-            }
-        }
-    }
-
-    // Multi-Branch Management & Logistics
-    val branches: StateFlow<List<com.example.data.model.Branch>> = repository.allBranches.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
-    )
-
-    val allStockTransfers: StateFlow<List<StockTransfer>> = repository.allStockTransfers.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
-    )
-
-    fun createStockTransfer(
-        productId: String,
-        fromBranchId: String,
-        fromBranchName: String,
-        toBranchId: String,
-        toBranchName: String,
-        quantity: Double,
-        notes: String = ""
-    ) {
-        viewModelScope.launch {
-            try {
-                val user = _currentUser.value
-                val transfer = repository.createStockTransfer(
-                    productId = productId,
-                    fromBranchId = fromBranchId,
-                    fromBranchName = fromBranchName,
-                    toBranchId = toBranchId,
-                    toBranchName = toBranchName,
-                    quantity = quantity,
-                    notes = notes,
-                    transferredBy = user?.name ?: "Store Manager"
-                )
-                // Real system notification trigger
-                BeBossNotificationManager.sendStockTransferNotification(getApplication(), transfer)
-                scheduleAutoBranchSync()
-
-                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                    "Kwohereza ibicuruzwa (${quantity.toInt()} ${transfer.productName}) muri $toBranchName byakozwe neza!"
-                    else "Stock transfer of ${quantity.toInt()} ${transfer.productName} to $toBranchName recorded!"
-                _snackbarMessage.emit(msg)
-            } catch (e: Exception) {
-                _snackbarMessage.emit("Transfer error: ${e.message}")
-            }
-        }
-    }
-
-    fun deleteStockTransfer(id: String) {
-        viewModelScope.launch {
-            repository.deleteStockTransfer(id)
-            scheduleAutoBranchSync()
-            _snackbarMessage.emit("Stock transfer log removed.")
-        }
-    }
-
-    // Local P2P WiFi / Hotspot Sync Hub + LAN Auto-Discovery
-    val localNetworkSyncServer = com.example.util.LocalNetworkSyncServer(application, db)
-    val localServerStatus = localNetworkSyncServer.serverStatus
-    val localServerIp = localNetworkSyncServer.serverIpAddress
-    val localConnectedClients = localNetworkSyncServer.connectedClientsCount
-    val localLastReceivedPacket = localNetworkSyncServer.lastReceivedPacketSummary
-    val discoveredHubs = localNetworkSyncServer.discoveredHubs
-    val isDiscoveringHubs = localNetworkSyncServer.isDiscoveringHubs
-    val peerSyncEvents = localNetworkSyncServer.peerSyncEvents
-    val syncAuditLogs = repository.syncAuditLogs
-
-    private val _isP2pSyncing = MutableStateFlow(false)
-    val isP2pSyncing: StateFlow<Boolean> = _isP2pSyncing.asStateFlow()
-
-    fun toggleLocalSyncServer(enable: Boolean) {
-        if (enable) {
-            val started = localNetworkSyncServer.startServer()
-            if (started) {
-                repository.logSyncEvent("P2P_SERVER", "SUCCESS", "Local Hub Server started on port ${localNetworkSyncServer.port}")
-            }
-        } else {
-            localNetworkSyncServer.stopServer()
-            repository.logSyncEvent("P2P_SERVER", "SUCCESS", "Local Hub Server stopped")
-        }
-    }
-
-    fun startLanDiscovery() {
-        localNetworkSyncServer.startDiscovery()
-    }
-
-    fun stopLanDiscovery() {
-        localNetworkSyncServer.stopDiscovery()
-    }
-
-    fun syncWithLocalMasterHub(hubIp: String) {
-        viewModelScope.launch {
-            _isP2pSyncing.value = true
-            val res = localNetworkSyncServer.syncWithMasterHub(hubIp, _currentUser.value)
-            _isP2pSyncing.value = false
-            repository.logSyncEvent(
-                type = "P2P_CLIENT",
-                status = if (res.success) "SUCCESS" else "FAILED",
-                summary = res.message,
-                latencyMs = res.latencyMs
-            )
-            _snackbarMessage.emit(res.message)
-        }
-    }
-
-    fun createBranchShareToken(branchIdFilter: String? = null, onReady: (String) -> Unit) {
-        viewModelScope.launch {
-            try {
-                val json = com.example.util.ShopDataTransferManager.createExportJson(
-                    profile = shopProfile.value,
-                    users = allUsers.value,
-                    products = allProducts.value,
-                    customers = customers.value,
-                    sales = allSales.value,
-                    saleItems = repository.getAllSaleItemsList(),
-                    payments = allCustomerPayments.value,
-                    exportedByUser = _currentUser.value,
-                    branches = branches.value,
-                    stockTransfers = allStockTransfers.value,
-                    purchases = repository.getAllPurchasesList(),
-                    branchIdFilter = branchIdFilter
-                )
-                val token = com.example.util.ShopDataTransferManager.createCompressedSyncToken(json)
-                repository.logSyncEvent("BRANCH_TOKEN", "SUCCESS", "Generated signed BBSHARE1 token (${token.length} chars)")
-                onReady(token)
-            } catch (e: Exception) {
-                _snackbarMessage.emit("Failed to build branch share token: ${e.message}")
-            }
-        }
-    }
-
-    fun exportFullBranchPackage(context: Context, branchIdFilter: String? = null, onReady: (java.io.File) -> Unit) {
-        viewModelScope.launch {
-            try {
-                val file = com.example.util.ShopDataTransferManager.exportShopPackage(
-                    context = context,
-                    profile = shopProfile.value,
-                    users = allUsers.value,
-                    products = allProducts.value,
-                    customers = customers.value,
-                    sales = allSales.value,
-                    saleItems = repository.getAllSaleItemsList(),
-                    payments = allCustomerPayments.value,
-                    exportedByUser = _currentUser.value,
-                    branches = branches.value,
-                    stockTransfers = allStockTransfers.value,
-                    purchases = repository.getAllPurchasesList(),
-                    branchIdFilter = branchIdFilter
-                )
-                repository.logSyncEvent("FILE_EXPORT", "SUCCESS", "Exported ${file.name} with full branch ledger")
-                onReady(file)
-            } catch (e: Exception) {
-                _snackbarMessage.emit("Export error: ${e.message}")
-            }
-        }
-    }
-
-    fun importBranchShareToken(tokenOrJson: String, onDone: (Boolean, String) -> Unit = { _, _ -> }) {
-        viewModelScope.launch {
-            try {
-                val summary = com.example.util.ShopDataTransferManager.parseShopPackageString(tokenOrJson)
-                repository.importShopDataPackage(summary)
-                val msg = "Merged ${summary.branches.size} branches, ${summary.productCount} products, ${summary.saleCount} sales & ${summary.stockTransfers.size} transfers!"
-                repository.logSyncEvent("BRANCH_IMPORT", "SUCCESS", msg)
-                _snackbarMessage.emit(msg)
-                onDone(true, msg)
-            } catch (e: Exception) {
-                val err = "Branch DataShare import failed: ${e.message}"
-                _snackbarMessage.emit(err)
-                onDone(false, err)
-            }
-        }
-    }
-
-    fun testEndpointPing(endpoint: String, onResult: (com.example.util.EndpointPingResult) -> Unit) {
-        viewModelScope.launch {
-            val res = repository.testServerPing(endpoint)
-            onResult(res)
-        }
-    }
-
-    fun syncToCloudWithEndpoint(endpoint: String? = null) {
-        viewModelScope.launch {
-            _isSyncing.value = true
-            val report = repository.cloudSyncManager.syncAllDataToCloud(
-                serverEndpoint = endpoint,
-                activeBranchId = _selectedBranchId.value,
-                deviceId = deviceId,
-                mergeRemoteSummary = { summary -> repository.mergeShopDataPackageLww(summary) }
-            )
-            _cloudSyncReport.value = report
-            _isSyncing.value = false
-            _snackbarMessage.emit(report.message)
-        }
-    }
-
-    private val _selectedBranchId = MutableStateFlow("ALL")
-    val selectedBranchId: StateFlow<String> = _selectedBranchId.asStateFlow()
-
-    fun selectBranch(branchId: String) {
-        _selectedBranchId.value = branchId
-    }
-
-    fun saveBranch(branch: com.example.data.model.Branch) {
-        viewModelScope.launch {
-            repository.saveBranch(branch)
-            val allBranches = db.branchDao().getAllActiveBranchesList()
-            val allStaff = db.userDao().getAllActiveUsersList()
-            val newPricing = com.example.util.OfflineSubscriptionManager.calculateSubscriptionPrice(
-                branchCount = allBranches.size.coerceAtLeast(1),
-                workerCount = allStaff.size.coerceAtLeast(1)
-            )
-            repository.updateShopProfile(
-                shopProfile.value.copy(
-                    monthlyFeeRwf = newPricing.monthlySubtotal,
-                    updatedAt = System.currentTimeMillis()
-                )
-            )
-            scheduleAutoBranchSync()
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                "Ishami '${branch.name}' ryabitswe neza (${newPricing.monthlySubtotal} FRw/mo)."
-                else "Branch '${branch.name}' saved (${newPricing.monthlySubtotal} FRw/mo)."
-            _snackbarMessage.emit(msg)
-        }
-    }
-
-    fun deleteBranch(branchId: String) {
-        viewModelScope.launch {
-            repository.deleteBranch(branchId)
-            val allBranches = db.branchDao().getAllActiveBranchesList()
-            val allStaff = db.userDao().getAllActiveUsersList()
-            val newPricing = com.example.util.OfflineSubscriptionManager.calculateSubscriptionPrice(
-                branchCount = allBranches.size.coerceAtLeast(1),
-                workerCount = allStaff.size.coerceAtLeast(1)
-            )
-            repository.updateShopProfile(
-                shopProfile.value.copy(
-                    monthlyFeeRwf = newPricing.monthlySubtotal,
-                    updatedAt = System.currentTimeMillis()
-                )
-            )
-            scheduleAutoBranchSync()
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                "Ishami ryasibwe."
-                else "Branch removed."
-            _snackbarMessage.emit(msg)
-        }
-    }
+    private val _snackbarMessage = MutableSharedFlow<String>()
+    val snackbarMessage: SharedFlow<String> = _snackbarMessage.asSharedFlow()
 
     // Language & Theme State
     private val _currentLanguage = MutableStateFlow(
@@ -377,32 +143,30 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
     private val _isDarkTheme = MutableStateFlow(prefs.getBoolean("dark_theme", false))
     val isDarkTheme: StateFlow<Boolean> = _isDarkTheme.asStateFlow()
 
-    // Authentication & Security State
-    val allUsers: StateFlow<List<User>> = repository.allActiveUsers.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
-    )
-    private val _currentUser = MutableStateFlow<User?>(null)
-    val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
+    // Branch & Navigation State
+    private val _selectedBranchId = MutableStateFlow("ALL")
+    val selectedBranchId: StateFlow<String> = _selectedBranchId.asStateFlow()
 
-    // Screen is locked by default until credentials entered
-    private val _isLocked = MutableStateFlow(true)
-    val isLocked: StateFlow<Boolean> = _isLocked.asStateFlow()
-
-    private val _isRegistrationNeeded = MutableStateFlow(false)
-    val isRegistrationNeeded: StateFlow<Boolean> = _isRegistrationNeeded.asStateFlow()
-
-    private val _authError = MutableStateFlow<String?>(null)
-    val authError: StateFlow<String?> = _authError.asStateFlow()
-
-    // Current Navigation Screen
     private val _currentScreen = MutableStateFlow(AppScreen.DASHBOARD)
     val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
 
-    // Shop Profile
+    // Core Reactive Room Flows
     val shopProfile: StateFlow<ShopProfile> = repository.shopProfile.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = ShopProfile()
+    )
+
+    val allUsers: StateFlow<List<User>> = repository.allActiveUsers.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
+
+    val branches: StateFlow<List<Branch>> = repository.allBranches.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
+
+    val allStockTransfers: StateFlow<List<StockTransfer>> = repository.allStockTransfers.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
     )
 
     // Products / Stock
@@ -452,16 +216,11 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
     )
 
-    // Sales POS Cart
-    private val _cartState = MutableStateFlow(CartState())
-    val cartState: StateFlow<CartState> = _cartState.asStateFlow()
-
-    // Sales History
+    // Sales & Purchases
     val allSales: StateFlow<List<Sale>> = repository.allSales.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
     )
 
-    // Purchases & Stock Inflow History (Excel Ledger)
     val allPurchases: StateFlow<List<PurchaseRecord>> = repository.allPurchases.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
     )
@@ -503,107 +262,184 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         .flatMapLatest { period -> repository.getCategorySalesBreakdown(period) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Today KPI for Dashboard
     val todaySummary: StateFlow<ProfitLossSummary> = repository.getProfitLossForPeriod(AnalyticsPeriod.TODAY)
         .stateIn(
             viewModelScope, SharingStarted.WhileSubscribed(5000),
             ProfitLossSummary(0.0, 0.0, 0.0, 0, 0.0, 0.0, 0.0, true, "Today")
         )
 
-    // Sync
+    // Sync Queue, Audit & Licensing Flows
     val pendingSyncCount: StateFlow<Int> = repository.pendingSyncCount.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), 0
     )
 
-    private val _isSyncing = MutableStateFlow(false)
-    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+    val deadLetterSyncCount: StateFlow<Int> = repository.deadLetterSyncCount.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), 0
+    )
 
-    // Dialogs / Sheets State
-    private val _activeReceiptSale = MutableStateFlow<SaleWithItems?>(null)
-    val activeReceiptSale: StateFlow<SaleWithItems?> = _activeReceiptSale.asStateFlow()
+    val paymentVerificationRequests: StateFlow<List<PaymentVerificationRequest>> =
+        repository.allPaymentRequests.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    private val _snackbarMessage = MutableSharedFlow<String>()
-    val snackbarMessage: SharedFlow<String> = _snackbarMessage.asSharedFlow()
+    val localAuditLogs: StateFlow<List<LocalAuditLog>> = repository.localAuditLogs.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
 
-    init {
-        checkAuthenticationAndInit()
-        setupAutoCloudSyncOnInternet()
-    }
-
-    private fun setupAutoCloudSyncOnInternet() {
-        viewModelScope.launch {
-            repository.ensureDefaultBranches()
-            connectivityStatus.collect { status ->
-                if (status == com.example.util.ConnectivityStatus.AVAILABLE) {
-                    _isSyncing.value = true
-                    try {
-                        syncAdminDataToSupabase(silent = true)
-                        val report = repository.performSync(
-                            activeBranchId = _selectedBranchId.value,
-                            deviceId = deviceId
-                        )
-                        _cloudSyncReport.value = report
-                    } finally {
-                        _isSyncing.value = false
-                    }
-                }
-            }
-        }
-    }
-
-    fun syncToCloudNow() {
-        viewModelScope.launch {
-            _isSyncing.value = true
-            try {
-                syncAdminDataToSupabase(silent = true)
-                val report = repository.performSync(
-                    activeBranchId = _selectedBranchId.value,
-                    deviceId = deviceId
-                )
-                _cloudSyncReport.value = report
-                _snackbarMessage.emit(report.message)
-            } finally {
-                _isSyncing.value = false
-            }
-        }
-    }
-
-    private fun checkAuthenticationAndInit() {
-        viewModelScope.launch {
-            val savedUserId = prefs.getString("active_user_id", null)
-            if (!savedUserId.isNullOrBlank()) {
-                val savedUser = db.userDao().getUserById(savedUserId)
-                if (savedUser != null && savedUser.isActive) {
-                    _currentUser.value = savedUser
-                    _isLocked.value = false
-                    _isRegistrationNeeded.value = false
-                    return@launch
-                }
-            }
-
-            // If no saved user, check total users
-            val count = db.userDao().getUserCount()
-            if (count == 0) {
-                _isRegistrationNeeded.value = true
-                _isLocked.value = true
-            } else {
-                val firstUser = db.userDao().getAllActiveUsers().stateIn(viewModelScope).value.firstOrNull()
-                if (firstUser != null) {
-                    _currentUser.value = firstUser
-                    // Auto keep logged in for best seamless experience
-                    prefs.edit().putString("active_user_id", firstUser.id).apply()
-                    _isLocked.value = false
-                    _isRegistrationNeeded.value = false
-                } else {
-                    _isRegistrationNeeded.value = false
-                    _isLocked.value = true
-                }
-            }
-        }
-    }
+    val syncAuditLogs: StateFlow<List<SyncAuditLog>> = repository.syncAuditLogs
 
     // ------------------------------------------------------------------------
-    // LANGUAGE & THEME TOGGLES
+    // FEATURE COORDINATORS
+    // ------------------------------------------------------------------------
+    private val authCoordinator = AuthSessionCoordinator(
+        application = application,
+        prefs = prefs,
+        db = db,
+        repository = repository,
+        scope = viewModelScope,
+        language = currentLanguage,
+        emitSnackbar = { msg -> _snackbarMessage.emit(msg) }
+    )
+
+    private lateinit var adminCoordinator: AdminConsoleCoordinator
+    private lateinit var syncCoordinator: SyncCoordinator
+    private lateinit var posCoordinator: PosCartCoordinator
+    private lateinit var dbCoordinator: DatabaseMaintenanceCoordinator
+
+    init {
+        syncCoordinator = SyncCoordinator(
+            application = application,
+            db = db,
+            repository = repository,
+            connectivityObserver = connectivityObserver,
+            deviceId = deviceId,
+            scope = viewModelScope,
+            currentUser = authCoordinator.currentUser,
+            selectedBranchId = selectedBranchId,
+            shopProfile = shopProfile,
+            allUsers = allUsers,
+            branches = branches,
+            allProducts = allProducts,
+            customers = customers,
+            allSales = allSales,
+            allCustomerPayments = allCustomerPayments,
+            allStockTransfers = allStockTransfers,
+            emitSnackbar = { msg -> _snackbarMessage.emit(msg) },
+            syncAdminCloud = { silent -> adminCoordinator.syncAdminDataToSupabaseSuspended(silent) }
+        )
+
+        adminCoordinator = AdminConsoleCoordinator(
+            repository = repository,
+            scope = viewModelScope,
+            currentUser = authCoordinator.currentUser,
+            allUsers = allUsers,
+            branches = branches,
+            shopProfile = shopProfile,
+            emitSnackbar = { msg -> _snackbarMessage.emit(msg) },
+            triggerCloudSync = { syncCoordinator.syncToCloudNow() }
+        )
+
+        posCoordinator = PosCartCoordinator(
+            application = application,
+            repository = repository,
+            scope = viewModelScope,
+            language = currentLanguage,
+            currentUser = authCoordinator.currentUser,
+            selectedBranchId = selectedBranchId,
+            branches = branches,
+            shopProfile = shopProfile,
+            allSales = allSales,
+            todaySummary = todaySummary,
+            lowStockProducts = lowStockProducts,
+            emitSnackbar = { msg -> _snackbarMessage.emit(msg) },
+            onMutationSuccess = { syncCoordinator.scheduleAutoBranchSync() }
+        )
+
+        dbCoordinator = DatabaseMaintenanceCoordinator(
+            application = application,
+            repository = repository,
+            scope = viewModelScope,
+            language = currentLanguage,
+            onClearUiSessionState = {
+                posCoordinator.clearCart()
+                posCoordinator.closeReceipt()
+            },
+            emitSnackbar = { msg -> _snackbarMessage.emit(msg) }
+        )
+
+        authCoordinator.checkAuthenticationAndInit()
+        syncCoordinator.setupAutoCloudSyncOnInternet()
+        dbCoordinator.verifyStartupIntegritySilently()
+
+        val integrity = _deviceIntegrityStatus.value
+        if (integrity.isCompromisedRisk) {
+            viewModelScope.launch {
+                repository.recordLocalAudit(
+                    actorName = "System",
+                    actorRole = "SECURITY",
+                    action = "DEVICE_INTEGRITY_WARNING",
+                    targetId = deviceId,
+                    details = integrity.signals.joinToString("; ")
+                )
+            }
+        }
+        onUserInteraction()
+    }
+
+    fun onUserInteraction() {
+        idleLockJob?.cancel()
+        if (!isLocked.value && !isRegistrationNeeded.value) {
+            idleLockJob = viewModelScope.launch {
+                delay(idleLockTimeoutMs)
+                if (!isLocked.value && !isRegistrationNeeded.value) {
+                    lockApp()
+                }
+            }
+        }
+    }
+
+    // Delegated Auth Flows
+    val currentUser: StateFlow<User?> = authCoordinator.currentUser
+    val isLocked: StateFlow<Boolean> = authCoordinator.isLocked
+    val isRegistrationNeeded: StateFlow<Boolean> = authCoordinator.isRegistrationNeeded
+    val authError: StateFlow<String?> = authCoordinator.authError
+
+    // Delegated POS Flows
+    val cartState: StateFlow<CartState> = posCoordinator.cartState
+    val activeReceiptSale: StateFlow<SaleWithItems?> = posCoordinator.activeReceiptSale
+
+    // Delegated Sync & LAN P2P Flows
+    val connectivityStatus: StateFlow<ConnectivityStatus> = syncCoordinator.connectivityStatus
+    val cloudSyncReport: StateFlow<CloudSyncReport?> = syncCoordinator.cloudSyncReport
+    val isSyncing: StateFlow<Boolean> = syncCoordinator.isSyncing
+    val isP2pSyncing: StateFlow<Boolean> = syncCoordinator.isP2pSyncing
+    val localNetworkSyncServer = syncCoordinator.localNetworkSyncServer
+    val localServerStatus = syncCoordinator.localServerStatus
+    val localServerIp = syncCoordinator.localServerIp
+    val localConnectedClients = syncCoordinator.localConnectedClients
+    val localLastReceivedPacket = syncCoordinator.localLastReceivedPacket
+    val discoveredHubs = syncCoordinator.discoveredHubs
+    val isDiscoveringHubs = syncCoordinator.isDiscoveringHubs
+    val peerSyncEvents = syncCoordinator.peerSyncEvents
+
+    // Delegated Admin Console Flows
+    val adminSession: StateFlow<SupabaseAdminSession?> = adminCoordinator.adminSession
+    val adminAuthError: StateFlow<String?> = adminCoordinator.adminAuthError
+    val isAdminAuthenticating: StateFlow<Boolean> = adminCoordinator.isAdminAuthenticating
+    val adminPaymentRequests: StateFlow<List<SupabasePaymentRequestDto>> = adminCoordinator.adminPaymentRequests
+    val adminShopAccounts: StateFlow<List<SupabaseShopAccountDto>> = adminCoordinator.adminShopAccounts
+    val adminShopUsers: StateFlow<List<SupabaseShopUserDto>> = adminCoordinator.adminShopUsers
+    val adminBranchSnapshots: StateFlow<List<SupabaseBranchSnapshotDto>> = adminCoordinator.adminBranchSnapshots
+    val adminUnlockCodes: StateFlow<List<SupabaseUnlockCodeDto>> = adminCoordinator.adminUnlockCodes
+    val adminAuditLogs: StateFlow<List<SupabaseAuditLogDto>> = adminCoordinator.adminAuditLogs
+    val isAdminLoading: StateFlow<Boolean> = adminCoordinator.isAdminLoading
+
+    // Delegated Database Engine Flows
+    val databaseStats: StateFlow<DatabaseEngineStats?> = dbCoordinator.databaseStats
+    val databaseMaintenanceResult: StateFlow<DatabaseMaintenanceResult?> = dbCoordinator.databaseMaintenanceResult
+    val isOptimizingDb: StateFlow<Boolean> = dbCoordinator.isOptimizingDb
+    val startupIntegrityOk: StateFlow<Boolean?> = dbCoordinator.startupIntegrityOk
+
+    // ------------------------------------------------------------------------
+    // LANGUAGE, THEME & NAVIGATION
     // ------------------------------------------------------------------------
     fun toggleLanguage() {
         val next = if (_currentLanguage.value == AppLanguage.ENGLISH) AppLanguage.KINYARWANDA else AppLanguage.ENGLISH
@@ -627,8 +463,16 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         prefs.edit().putBoolean("dark_theme", enabled).apply()
     }
 
+    fun navigateTo(screen: AppScreen) {
+        _currentScreen.value = screen
+    }
+
+    fun selectBranch(branchId: String) {
+        _selectedBranchId.value = branchId
+    }
+
     // ------------------------------------------------------------------------
-    // ACCOUNT SETUP & AUTHENTICATION
+    // AUTHENTICATION DELEGATION
     // ------------------------------------------------------------------------
     fun registerNewShopAndOwner(
         shopName: String,
@@ -640,367 +484,71 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         username: String,
         pin: String,
         password: String
-    ) {
-        viewModelScope.launch {
-            try {
-                // Create Shop Profile with 30-day active trial
-                val profile = ShopProfile(
-                    id = 1L,
-                    name = ownerFullName.trim(),
-                    phone = phone.trim(),
-                    email = "$username@beboss.rw",
-                    shopName = shopName.trim(),
-                    address = address.trim().ifBlank { "Kigali, Rwanda" },
-                    currencyCode = currencyCode.trim(),
-                    currencySymbol = currencySymbol.trim(),
-                    subscriptionStatus = "ACTIVE",
-                    monthlyFeeRwf = 5000,
-                    subscriptionExpiresAt = System.currentTimeMillis() + (30L * 24 * 60 * 60 * 1000),
-                    trialStartedAt = System.currentTimeMillis(),
-                    receiptFooter = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                        "Murakoze cyane! Mwongere kugaruka!" 
-                        else "Thank you for your business! Please visit again!"
-                )
-                repository.updateShopProfile(profile)
-
-                // Create Master Owner User Account
-                val ownerUser = User(
-                    id = UUID.randomUUID().toString(),
-                    name = ownerFullName.trim(),
-                    username = username.trim().lowercase(),
-                    phone = phone.trim(),
-                    pinHash = pin.trim(),
-                    password = password.trim(),
-                    role = UserRole.OWNER,
-                    profileColorHex = "#FF6B1A",
-                    canSellPOS = true,
-                    canApplyDiscounts = true,
-                    canManageInventory = true,
-                    canViewCostAndProfit = true,
-                    canViewAnalytics = true,
-                    canManageCustomers = true,
-                    canCollectDebt = true,
-                    canDeleteRecords = true,
-                    canExportReports = true,
-                    canManageCollaborators = true,
-                    canManageShopSettings = true,
-                    canExportImportData = true
-                )
-                repository.saveUser(ownerUser)
-
-                // Create and initialize the Real Primary Branch using actual owner and shop details
-                val mainBranch = com.example.data.model.Branch(
-                    id = "main_branch",
-                    name = "${shopName.trim()} (HQ)",
-                    code = "HQ-01",
-                    address = address.trim().ifBlank { "Kigali, Rwanda" },
-                    phone = phone.trim(),
-                    managerName = ownerFullName.trim(),
-                    isMainBranch = true,
-                    colorHex = "#FF6B1A"
-                )
-                repository.saveBranch(mainBranch)
-
-                // Ensure no mock placeholder branches exist
-                repository.deleteBranch("branch_kimironko")
-                repository.deleteBranch("branch_nyabugogo")
-
-                prefs.edit().putString("active_user_id", ownerUser.id).apply()
-                _currentUser.value = ownerUser
-                _isRegistrationNeeded.value = false
-                _isLocked.value = false
-                _authError.value = null
-                _snackbarMessage.emit("Store '$shopName' & Owner account created successfully!")
-            } catch (e: Exception) {
-                _authError.value = "Registration failed: ${e.message}"
-            }
-        }
-    }
-
-    fun loginWithPin(pin: String): Boolean {
-        viewModelScope.launch {
-            val user = repository.getUserByPin(pin.trim())
-            if (user != null) {
-                _currentUser.value = user
-                _isLocked.value = false
-                _authError.value = null
-                prefs.edit().putString("active_user_id", user.id).apply()
-                repository.updateLastLogin(user.id)
-                val welcome = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                    "Murakaza neza, ${user.name}!" 
-                    else "Welcome back, ${user.name}!"
-                _snackbarMessage.emit(welcome)
-            } else {
-                _authError.value = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                    "Umubare wa PIN si wo. Ongera ugerageze." 
-                    else "Incorrect PIN code. Please try again."
-            }
-        }
-        return true
-    }
-
-    fun loginWithCredentials(username: String, pinOrPass: String): Boolean {
-        viewModelScope.launch {
-            val user = repository.getUserByUsername(username.trim())
-            if (user != null && !user.isActive) {
-                _authError.value = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                    "Konti yawe yahagaritswe n'Umuyobozi Mukuru (Admin)."
-                else "Account suspended by Master Administrator."
-                return@launch
-            }
-            val isValid = user != null && user.isActive && (
-                com.example.util.SecurityUtils.verifyPin(pinOrPass.trim(), user.pinHash) ||
-                com.example.util.SecurityUtils.verifyPassword(pinOrPass.trim(), user.password)
-            )
-            if (user != null && isValid) {
-                _currentUser.value = user
-                _isLocked.value = false
-                _authError.value = null
-                prefs.edit().putString("active_user_id", user.id).apply()
-                repository.updateLastLogin(user.id)
-                val welcome = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                    "Winjiye nka ${user.name} (${user.role.displayName})"
-                else "Logged in as ${user.name} (${user.role.displayName})"
-                _snackbarMessage.emit(welcome)
-            } else {
-                _authError.value = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                    "Izina cyangwa ijambobanga si byo"
-                else "Invalid username or password"
-            }
-        }
-        return true
-    }
-
-    fun unlockAppWithPin(pin: String): Boolean {
-        val active = _currentUser.value
-        if (active != null && com.example.util.SecurityUtils.verifyPin(pin.trim(), active.pinHash)) {
-            _isLocked.value = false
-            _authError.value = null
-            prefs.edit().putString("active_user_id", active.id).apply()
-            return true
-        }
-        return loginWithPin(pin)
-    }
-
-    fun unlockWithBiometric() {
-        val active = _currentUser.value
-        if (active != null) {
-            _isLocked.value = false
-            _authError.value = null
-            prefs.edit().putString("active_user_id", active.id).apply()
-            viewModelScope.launch {
-                val welcome = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                    "Urubuga rufunguwe n'igikumwe: ${active.name}"
-                    else "Unlocked with biometric: ${active.name}"
-                _snackbarMessage.emit(welcome)
-            }
-        } else {
-            // Pick primary active user or admin
-            viewModelScope.launch {
-                val defaultUser = repository.ensureDefaultAdminUser()
-                _currentUser.value = defaultUser
-                _isLocked.value = false
-                _authError.value = null
-                prefs.edit().putString("active_user_id", defaultUser.id).apply()
-                _snackbarMessage.emit("Unlocked: ${defaultUser.name}")
-            }
-        }
-    }
-
-    fun lockApp() {
-        _isLocked.value = true
-        _authError.value = null
-    }
-
-    fun logoutUser() {
-        prefs.edit().remove("active_user_id").apply()
-        _currentUser.value = null
-        _isLocked.value = true
-        _authError.value = null
-        viewModelScope.launch {
-            _snackbarMessage.emit("Logged out successfully.")
-        }
-    }
-
-    fun switchUser(user: User) {
-        _currentUser.value = user
-        _isLocked.value = false
-        _authError.value = null
-        prefs.edit().putString("active_user_id", user.id).apply()
-        viewModelScope.launch {
-            repository.updateLastLogin(user.id)
-            _snackbarMessage.emit("Active operator: ${user.name}")
-        }
-    }
-
-    fun showRegistrationScreen() {
-        _isRegistrationNeeded.value = true
-    }
-
-    fun cancelRegistration() {
-        _isRegistrationNeeded.value = false
-    }
-
-    fun clearAuthError() {
-        _authError.value = null
-    }
-
-    fun saveUser(user: User) {
-        viewModelScope.launch {
-            repository.saveUser(user)
-            val allBranches = db.branchDao().getAllActiveBranchesList()
-            val allStaff = db.userDao().getAllActiveUsersList()
-            val newPricing = com.example.util.OfflineSubscriptionManager.calculateSubscriptionPrice(
-                branchCount = allBranches.size.coerceAtLeast(1),
-                workerCount = allStaff.size.coerceAtLeast(1)
-            )
-            repository.updateShopProfile(
-                shopProfile.value.copy(
-                    monthlyFeeRwf = newPricing.monthlySubtotal,
-                    updatedAt = System.currentTimeMillis()
-                )
-            )
-            scheduleAutoBranchSync()
-            _snackbarMessage.emit("Staff member '${user.name}' saved (${newPricing.monthlySubtotal} FRw/mo total plan).")
-        }
-    }
-
-    fun deleteUser(userId: String) {
-        viewModelScope.launch {
-            if (_currentUser.value?.id == userId) {
-                _snackbarMessage.emit("Cannot delete the currently active account.")
-                return@launch
-            }
-            repository.deleteUser(userId)
-            val allBranches = db.branchDao().getAllActiveBranchesList()
-            val allStaff = db.userDao().getAllActiveUsersList()
-            val newPricing = com.example.util.OfflineSubscriptionManager.calculateSubscriptionPrice(
-                branchCount = allBranches.size.coerceAtLeast(1),
-                workerCount = allStaff.size.coerceAtLeast(1)
-            )
-            repository.updateShopProfile(
-                shopProfile.value.copy(
-                    monthlyFeeRwf = newPricing.monthlySubtotal,
-                    updatedAt = System.currentTimeMillis()
-                )
-            )
-            scheduleAutoBranchSync()
-            _snackbarMessage.emit("Staff account removed.")
-        }
-    }
-
-    // ------------------------------------------------------------------------
-    // SUBSCRIPTION, USSD VERIFICATION & SUPABASE ADMIN LICENSING
-    // ------------------------------------------------------------------------
-    val paymentVerificationRequests: StateFlow<List<com.example.data.model.PaymentVerificationRequest>> =
-        repository.allPaymentRequests.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    private val _adminSession = MutableStateFlow<com.example.util.SupabaseAdminSession?>(
-        com.example.util.SupabaseAdminClient.getCurrentAdminSession()
+    ) = authCoordinator.registerNewShopAndOwner(
+        shopName, currencyCode, currencySymbol, address, phone,
+        ownerFullName, username, pin, password
     )
-    val adminSession: StateFlow<com.example.util.SupabaseAdminSession?> = _adminSession.asStateFlow()
 
-    private val _adminAuthError = MutableStateFlow<String?>(null)
-    val adminAuthError: StateFlow<String?> = _adminAuthError.asStateFlow()
+    fun loginWithPin(pin: String): Boolean = authCoordinator.loginWithPin(pin)
+    fun loginWithCredentials(username: String, pinOrPass: String): Boolean = authCoordinator.loginWithCredentials(username, pinOrPass)
+    fun unlockAppWithPin(pin: String): Boolean = authCoordinator.unlockAppWithPin(pin)
+    fun unlockWithBiometric(verifiedByHardware: Boolean) = authCoordinator.unlockWithBiometric(verifiedByHardware)
+    fun reportBiometricError(message: String) = authCoordinator.reportBiometricError(message)
+    fun reportBiometricCancelled() = authCoordinator.reportBiometricCancelled()
+    fun selectLockedOperator(user: User) = authCoordinator.selectLockedOperator(user)
+    fun lockApp() = authCoordinator.lockApp()
+    fun logoutUser() = authCoordinator.logoutUser()
+    fun switchUser(user: User) = authCoordinator.switchUser(user)
+    fun showRegistrationScreen() = authCoordinator.showRegistrationScreen()
+    fun cancelRegistration() = authCoordinator.cancelRegistration()
+    fun clearAuthError() = authCoordinator.clearAuthError()
 
-    private val _isAdminAuthenticating = MutableStateFlow(false)
-    val isAdminAuthenticating: StateFlow<Boolean> = _isAdminAuthenticating.asStateFlow()
+    // ------------------------------------------------------------------------
+    // POS & CART DELEGATION
+    // ------------------------------------------------------------------------
+    fun addToCart(product: Product, quantity: Double = 1.0) = posCoordinator.addToCart(product, quantity)
+    fun updateCartItemQuantity(productId: String, newQuantity: Double) = posCoordinator.updateCartItemQuantity(productId, newQuantity)
+    fun removeCartItem(productId: String) = posCoordinator.removeCartItem(productId)
+    fun clearCart() = posCoordinator.clearCart()
+    fun setCartCustomer(customer: Customer?) = posCoordinator.setCartCustomer(customer)
+    fun setCartPaymentMethod(method: String) = posCoordinator.setCartPaymentMethod(method)
+    fun setCartDiscount(discount: Double) = posCoordinator.setCartDiscount(discount)
+    fun setCartAmountPaidInput(input: String) = posCoordinator.setCartAmountPaidInput(input)
+    fun setCartNotes(notes: String) = posCoordinator.setCartNotes(notes)
+    fun checkoutSale() = posCoordinator.checkoutSale()
+    fun performQuickCustomSale(description: String, amount: Double, paymentMethod: String, isDirectCheckout: Boolean = true) =
+        posCoordinator.performQuickCustomSale(description, amount, paymentMethod, isDirectCheckout)
+    fun openReceipt(saleId: String) = posCoordinator.openReceipt(saleId)
+    fun openLastReceipt() = posCoordinator.openLastReceipt()
+    fun closeReceipt() = posCoordinator.closeReceipt()
+    fun shareDailyWhatsAppSummary(context: Context) = posCoordinator.shareDailyWhatsAppSummary(context)
 
-    private val _adminPaymentRequests = MutableStateFlow<List<com.example.util.SupabasePaymentRequestDto>>(emptyList())
-    val adminPaymentRequests: StateFlow<List<com.example.util.SupabasePaymentRequestDto>> = _adminPaymentRequests.asStateFlow()
+    // ------------------------------------------------------------------------
+    // SYNC & P2P DELEGATION
+    // ------------------------------------------------------------------------
+    fun scheduleAutoBranchSync(delayMs: Long = 1600L) = syncCoordinator.scheduleAutoBranchSync(delayMs)
+    fun performSync() = syncCoordinator.syncToCloudNow()
+    fun syncToCloudNow() = syncCoordinator.syncToCloudNow()
+    fun syncToCloudWithEndpoint(endpoint: String? = null) = syncCoordinator.syncToCloudWithEndpoint(endpoint)
+    fun testEndpointPing(endpoint: String, onResult: (EndpointPingResult) -> Unit) = syncCoordinator.testEndpointPing(endpoint, onResult)
+    fun toggleLocalSyncServer(enable: Boolean) = syncCoordinator.toggleLocalSyncServer(enable)
+    fun startLanDiscovery() = syncCoordinator.startLanDiscovery()
+    fun stopLanDiscovery() = syncCoordinator.stopLanDiscovery()
+    fun syncWithLocalMasterHub(hubIp: String) = syncCoordinator.syncWithLocalMasterHub(hubIp)
+    fun createBranchShareToken(branchIdFilter: String? = null, onReady: (String) -> Unit) = syncCoordinator.createBranchShareToken(branchIdFilter, onReady)
+    fun exportFullBranchPackage(context: Context, branchIdFilter: String? = null, onReady: (File) -> Unit) =
+        syncCoordinator.exportFullBranchPackage(context, branchIdFilter, onReady)
+    fun importBranchShareToken(tokenOrJson: String, onDone: (Boolean, String) -> Unit = { _, _ -> }) =
+        syncCoordinator.importBranchShareToken(tokenOrJson, onDone)
+    fun importShopPackage(summary: ShopImportSummary) = syncCoordinator.importShopPackage(summary)
 
-    private val _adminShopAccounts = MutableStateFlow<List<com.example.util.SupabaseShopAccountDto>>(emptyList())
-    val adminShopAccounts: StateFlow<List<com.example.util.SupabaseShopAccountDto>> = _adminShopAccounts.asStateFlow()
-
-    private val _adminShopUsers = MutableStateFlow<List<com.example.util.SupabaseShopUserDto>>(emptyList())
-    val adminShopUsers: StateFlow<List<com.example.util.SupabaseShopUserDto>> = _adminShopUsers.asStateFlow()
-
-    private val _adminBranchSnapshots = MutableStateFlow<List<com.example.util.SupabaseBranchSnapshotDto>>(emptyList())
-    val adminBranchSnapshots: StateFlow<List<com.example.util.SupabaseBranchSnapshotDto>> = _adminBranchSnapshots.asStateFlow()
-
-    private val _adminUnlockCodes = MutableStateFlow<List<com.example.util.SupabaseUnlockCodeDto>>(emptyList())
-    val adminUnlockCodes: StateFlow<List<com.example.util.SupabaseUnlockCodeDto>> = _adminUnlockCodes.asStateFlow()
-
-    private val _adminAuditLogs = MutableStateFlow<List<com.example.util.SupabaseAuditLogDto>>(emptyList())
-    val adminAuditLogs: StateFlow<List<com.example.util.SupabaseAuditLogDto>> = _adminAuditLogs.asStateFlow()
-
-    private val _isAdminLoading = MutableStateFlow(false)
-    val isAdminLoading: StateFlow<Boolean> = _isAdminLoading.asStateFlow()
-
-    private fun resolveOwnerUser(): User? {
-        return _currentUser.value
-            ?: allUsers.value.firstOrNull { it.role == UserRole.OWNER }
-            ?: allUsers.value.firstOrNull()
-    }
-
-    fun signInSupabaseAdmin(email: String, password: String) {
-        viewModelScope.launch {
-            _isAdminAuthenticating.value = true
-            _adminAuthError.value = null
-            val res = com.example.util.SupabaseAdminClient.signInAdmin(email, password)
-            _isAdminAuthenticating.value = false
-            res.onSuccess { sess ->
-                _adminSession.value = sess
-                refreshAdminDashboardData()
-                _snackbarMessage.emit("Authenticated as Master Admin (${sess.email})")
-            }.onFailure { err ->
-                _adminAuthError.value = err.message ?: "Admin sign-in failed"
-            }
-        }
-    }
-
-    fun signUpSupabaseAdmin(email: String, password: String, fullName: String) {
-        viewModelScope.launch {
-            _isAdminAuthenticating.value = true
-            _adminAuthError.value = null
-            val res = com.example.util.SupabaseAdminClient.signUpAdmin(email, password, fullName)
-            _isAdminAuthenticating.value = false
-            res.onSuccess { sess ->
-                _adminSession.value = sess
-                refreshAdminDashboardData()
-                _snackbarMessage.emit("Master Admin profile initialized (${sess.email})")
-            }.onFailure { err ->
-                _adminAuthError.value = err.message ?: "Admin initialization failed"
-            }
-        }
-    }
-
-    fun signOutSupabaseAdmin() {
-        viewModelScope.launch {
-            com.example.util.SupabaseAdminClient.signOutAdmin()
-            _adminSession.value = null
-            _adminPaymentRequests.value = emptyList()
-            _adminShopAccounts.value = emptyList()
-            _adminShopUsers.value = emptyList()
-            _adminBranchSnapshots.value = emptyList()
-            _adminUnlockCodes.value = emptyList()
-            _adminAuditLogs.value = emptyList()
-            _adminAuthError.value = null
-        }
-    }
-
-    fun activateSubscriptionVoucher(code: String) {
-        viewModelScope.launch {
-            val currentProf = shopProfile.value
-            val owner = resolveOwnerUser()
-            val branchCount = branches.value.size.coerceAtLeast(1)
-            val workerCount = allUsers.value.size.coerceAtLeast(1)
-            val result = repository.redeemVoucher(
-                voucherCode = code,
-                shopProfile = currentProf,
-                branchCount = branchCount,
-                workerCount = workerCount,
-                ownerUsername = owner?.username.orEmpty(),
-                ownerPhoneOverride = owner?.phone.orEmpty(),
-                ownerUser = owner
-            )
-            _snackbarMessage.emit(result.message)
-            if (result.isValid) {
-                syncAdminDataToSupabase(silent = true)
-            }
-        }
-    }
-
+    // ------------------------------------------------------------------------
+    // ADMIN CONSOLE & SUBSCRIPTION DELEGATION
+    // ------------------------------------------------------------------------
+    fun signInSupabaseAdmin(email: String, password: String) = adminCoordinator.signInSupabaseAdmin(email, password)
+    fun signUpSupabaseAdmin(email: String, password: String, fullName: String) = adminCoordinator.signUpSupabaseAdmin(email, password, fullName)
+    fun signOutSupabaseAdmin() = adminCoordinator.signOutSupabaseAdmin()
+    fun activateSubscriptionVoucher(code: String) = adminCoordinator.activateSubscriptionVoucher(code)
     fun submitUssdPaymentProof(
         provider: String,
         payerPhone: String,
@@ -1010,137 +558,22 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         branchCount: Int,
         workerCount: Int,
         telcoReference: String = "",
-        onSubmitted: (com.example.data.model.PaymentVerificationRequest, Boolean) -> Unit = { _, _ -> }
-    ) {
-        viewModelScope.launch {
-            val profile = shopProfile.value
-            val owner = resolveOwnerUser()
-            val breakdown = com.example.util.OfflineSubscriptionManager.calculateSubscriptionPrice(
-                branchCount = branchCount,
-                workerCount = workerCount,
-                durationMonths = durationMonths
-            )
-            val ussd = if (provider.contains("AIRTEL", ignoreCase = true)) breakdown.ussdAirtelCode else breakdown.ussdMtnCode
-            val cleanUsername = username.trim().lowercase().ifBlank { owner?.username ?: "owner" }
-            val cleanRegPhone = registeredPhone.trim().ifBlank { profile.phone }
-            val req = com.example.data.model.PaymentVerificationRequest(
-                shopName = profile.shopName,
-                ownerUsername = cleanUsername,
-                ownerPhone = cleanRegPhone,
-                deviceChallenge = com.example.util.SubscriptionSecurityManager.computeDeviceChallenge(profile),
-                provider = provider,
-                ussdCode = ussd,
-                payerPhone = payerPhone.trim().ifBlank { cleanRegPhone },
-                amountRwf = breakdown.totalPayable,
-                durationMonths = durationMonths,
-                branchCount = branchCount.coerceAtLeast(1),
-                workerCount = workerCount.coerceAtLeast(1),
-                telcoReference = telcoReference.trim().uppercase(),
-                status = "PENDING_VERIFICATION",
-                syncedToSupabase = false
-            )
-            val synced = repository.submitPaymentVerificationRequest(req, profile, owner)
-            repository.logSyncEvent(
-                type = "SUPABASE_ADMIN",
-                status = if (synced) "SUCCESS" else "QUEUED",
-                summary = if (synced) "Payment proof synced to Supabase Admin Queue" else "Saved offline — auto-syncs to Supabase when internet returns"
-            )
-            _snackbarMessage.emit(
-                if (synced) "Payment verification submitted to Admin Cloud! Send WhatsApp proof now."
-                else "Saved offline! Will sync to Supabase automatically when internet returns. Send WhatsApp proof now."
-            )
-            onSubmitted(req, synced)
-        }
-    }
+        onSubmitted: (PaymentVerificationRequest, Boolean) -> Unit = { _, _ -> }
+    ) = adminCoordinator.submitUssdPaymentProof(
+        provider, payerPhone, username, registeredPhone, durationMonths,
+        branchCount, workerCount, telcoReference, onSubmitted
+    )
 
-    fun syncAdminDataToSupabase(silent: Boolean = false) {
-        viewModelScope.launch {
-            val profile = shopProfile.value
-            val owner = resolveOwnerUser()
-            val branchCount = branches.value.size.coerceAtLeast(1)
-            val workerCount = allUsers.value.size.coerceAtLeast(1)
-            val res = repository.syncPendingAdminDataWithSupabase(
-                shopProfile = profile,
-                ownerUser = owner,
-                branchCount = branchCount,
-                workerCount = workerCount
-            )
-            if (!silent || res.approvedCodesFound.isNotEmpty()) {
-                _snackbarMessage.emit(res.message)
-            }
-        }
-    }
-
-    fun checkCloudUnlockApprovals() {
-        syncAdminDataToSupabase(silent = false)
-    }
-
-    fun refreshAdminDashboardData() {
-        if (_adminSession.value == null) return
-        viewModelScope.launch {
-            _isAdminLoading.value = true
-            _adminPaymentRequests.value = com.example.util.SupabaseAdminClient.fetchAllPaymentRequests()
-            _adminShopAccounts.value = com.example.util.SupabaseAdminClient.fetchAllShopAccounts()
-            _adminShopUsers.value = com.example.util.SupabaseAdminClient.fetchAllShopUsers()
-            _adminBranchSnapshots.value = com.example.util.SupabaseAdminClient.fetchAllBranchSnapshots()
-            _adminUnlockCodes.value = com.example.util.SupabaseAdminClient.fetchAllUnlockCodes()
-            _adminAuditLogs.value = com.example.util.SupabaseAdminClient.fetchAdminAuditLogs()
-            _isAdminLoading.value = false
-        }
-    }
-
-    fun adminApproveAndGenerateCode(
-        request: com.example.util.SupabasePaymentRequestDto,
-        onGenerated: (Boolean, String) -> Unit
-    ) {
-        viewModelScope.launch {
-            _isAdminLoading.value = true
-            val adminName = _adminSession.value?.fullName ?: _currentUser.value?.name ?: "BeBoss Official Admin"
-            val (ok, code) = com.example.util.SupabaseAdminClient.approvePaymentAndIssueCode(request, adminName)
-            if (ok) {
-                refreshAdminDashboardData()
-                _snackbarMessage.emit("Approved & generated unlock code: $code")
-            } else {
-                _snackbarMessage.emit("Admin Supabase approval failed — sign in as Admin first.")
-            }
-            _isAdminLoading.value = false
-            onGenerated(ok, code)
-        }
-    }
-
-    fun adminRejectPayment(
-        request: com.example.util.SupabasePaymentRequestDto,
-        reason: String,
-        onDone: (Boolean) -> Unit = {}
-    ) {
-        viewModelScope.launch {
-            _isAdminLoading.value = true
-            val ok = com.example.util.SupabaseAdminClient.rejectPaymentRequest(request, reason)
-            if (ok) {
-                refreshAdminDashboardData()
-                _snackbarMessage.emit("Payment request marked REJECTED.")
-            } else {
-                _snackbarMessage.emit("Could not reject request in Supabase.")
-            }
-            _isAdminLoading.value = false
-            onDone(ok)
-        }
-    }
-
-    fun adminRevokeCode(codeDto: com.example.util.SupabaseUnlockCodeDto) {
-        viewModelScope.launch {
-            _isAdminLoading.value = true
-            val ok = com.example.util.SupabaseAdminClient.revokeUnlockCode(codeDto)
-            if (ok) {
-                refreshAdminDashboardData()
-                _snackbarMessage.emit("Revoked unlock code ${codeDto.unlockCode}.")
-            } else {
-                _snackbarMessage.emit("Could not revoke code in Supabase.")
-            }
-            _isAdminLoading.value = false
-        }
-    }
-
+    fun syncAdminDataToSupabase(silent: Boolean = false) = adminCoordinator.syncAdminDataToSupabase(silent)
+    fun checkCloudUnlockApprovals() = adminCoordinator.checkCloudUnlockApprovals()
+    fun refreshAdminDashboardData() = adminCoordinator.refreshAdminDashboardData()
+    fun adminApproveAndGenerateCode(request: SupabasePaymentRequestDto, onGenerated: (Boolean, String) -> Unit) =
+        adminCoordinator.adminApproveAndGenerateCode(request, onGenerated)
+    fun adminApproveBatchPendingPayments(onDone: (Int, Int) -> Unit = { _, _ -> }) =
+        adminCoordinator.adminApproveBatchPendingPayments(onDone)
+    fun adminRejectPayment(request: SupabasePaymentRequestDto, reason: String, onDone: (Boolean) -> Unit = {}) =
+        adminCoordinator.adminRejectPayment(request, reason, onDone)
+    fun adminRevokeCode(codeDto: SupabaseUnlockCodeDto) = adminCoordinator.adminRevokeCode(codeDto)
     fun adminIssueManualCode(
         username: String,
         registeredPhone: String,
@@ -1148,429 +581,200 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         days: Int,
         amountRwf: Int,
         onGenerated: (Boolean, String) -> Unit
-    ) {
-        viewModelScope.launch {
-            _isAdminLoading.value = true
-            val adminName = _adminSession.value?.fullName ?: _currentUser.value?.name ?: "BeBoss Official Admin"
-            val deviceCode = com.example.util.SubscriptionSecurityManager.computeDeviceChallenge(shopProfile.value)
-            val (ok, code) = com.example.util.SupabaseAdminClient.issueManualUnlockCode(
-                username = username,
-                registeredPhone = registeredPhone,
-                deviceChallenge = deviceCode,
-                tierCode = tierCode,
-                days = days,
-                amountRwf = amountRwf,
-                adminName = adminName
-            )
-            if (ok) refreshAdminDashboardData()
-            _isAdminLoading.value = false
-            onGenerated(ok, code)
-        }
-    }
+    ) = adminCoordinator.adminIssueManualCode(username, registeredPhone, tierCode, days, amountRwf, onGenerated)
 
-    fun adminExtendShopSubscription(shop: com.example.util.SupabaseShopAccountDto, addDays: Int) {
-        viewModelScope.launch {
-            _isAdminLoading.value = true
-            val ok = com.example.util.SupabaseAdminClient.adminExtendShopSubscription(shop, addDays)
-            if (ok) {
-                refreshAdminDashboardData()
-                _snackbarMessage.emit("Extended ${shop.shopName} license by +$addDays days.")
-            } else {
-                _snackbarMessage.emit("Failed extending shop license in Supabase.")
-            }
-            _isAdminLoading.value = false
-        }
-    }
-
-    fun adminSetShopStatus(shop: com.example.util.SupabaseShopAccountDto, status: String) {
-        viewModelScope.launch {
-            _isAdminLoading.value = true
-            val ok = com.example.util.SupabaseAdminClient.adminSetShopStatus(shop, status)
-            if (ok) {
-                refreshAdminDashboardData()
-                _snackbarMessage.emit("${shop.shopName} set to $status.")
-            } else {
-                _snackbarMessage.emit("Failed updating shop status.")
-            }
-            _isAdminLoading.value = false
-        }
-    }
-
-    fun adminDeleteShopAccount(shop: com.example.util.SupabaseShopAccountDto) {
-        viewModelScope.launch {
-            _isAdminLoading.value = true
-            val ok = com.example.util.SupabaseAdminClient.adminDeleteShopAccount(shop)
-            if (ok) {
-                refreshAdminDashboardData()
-                _snackbarMessage.emit("Deleted shop record ${shop.shopName}.")
-            } else {
-                _snackbarMessage.emit("Failed deleting shop record.")
-            }
-            _isAdminLoading.value = false
-        }
-    }
-
-    fun adminUpdateShopUserRole(user: com.example.util.SupabaseShopUserDto, newRole: String) {
-        viewModelScope.launch {
-            _isAdminLoading.value = true
-            val ok = com.example.util.SupabaseAdminClient.adminUpdateShopUser(user, newRole = newRole)
-            if (ok) {
-                refreshAdminDashboardData()
-                _snackbarMessage.emit("@${user.username} role updated to $newRole.")
-            } else {
-                _snackbarMessage.emit("Failed updating user role in Supabase.")
-            }
-            _isAdminLoading.value = false
-        }
-    }
-
-    fun adminToggleShopUserActive(user: com.example.util.SupabaseShopUserDto, newActive: Boolean) {
-        viewModelScope.launch {
-            _isAdminLoading.value = true
-            val ok = com.example.util.SupabaseAdminClient.adminUpdateShopUser(user, isActive = newActive)
-            if (ok) {
-                refreshAdminDashboardData()
-                _snackbarMessage.emit("@${user.username} ${if (newActive) "reactivated" else "suspended"}.")
-            } else {
-                _snackbarMessage.emit("Failed updating user status in Supabase.")
-            }
-            _isAdminLoading.value = false
-        }
-    }
-
-    fun adminDeleteShopUser(user: com.example.util.SupabaseShopUserDto) {
-        viewModelScope.launch {
-            _isAdminLoading.value = true
-            val ok = com.example.util.SupabaseAdminClient.adminDeleteShopUser(user)
-            if (ok) {
-                refreshAdminDashboardData()
-                _snackbarMessage.emit("Removed user @${user.username} from directory.")
-            } else {
-                _snackbarMessage.emit("Failed deleting user in Supabase.")
-            }
-            _isAdminLoading.value = false
-        }
-    }
-
-    fun adminDeleteBranchSnapshot(snapshot: com.example.util.SupabaseBranchSnapshotDto) {
-        viewModelScope.launch {
-            _isAdminLoading.value = true
-            val ok = com.example.util.SupabaseAdminClient.adminDeleteBranchSnapshot(snapshot)
-            if (ok) {
-                refreshAdminDashboardData()
-                _snackbarMessage.emit("Removed branch snapshot (${snapshot.branchName}).")
-            } else {
-                _snackbarMessage.emit("Failed removing branch snapshot.")
-            }
-            _isAdminLoading.value = false
-        }
-    }
-
-    fun shareAdminWebPortal(context: Context) {
-        try {
-            com.example.util.ShopDataTransferManager.exportAndShareAdminWebPortal(context)
-        } catch (e: Exception) {
-            viewModelScope.launch { _snackbarMessage.emit("Cannot export Web Portal: ${e.message}") }
-        }
-    }
-
+    fun adminExtendShopSubscription(shop: SupabaseShopAccountDto, addDays: Int) = adminCoordinator.adminExtendShopSubscription(shop, addDays)
+    fun adminSetShopStatus(shop: SupabaseShopAccountDto, status: String) = adminCoordinator.adminSetShopStatus(shop, status)
+    fun adminUpdateShopLimits(shop: SupabaseShopAccountDto, branchCount: Int, workerCount: Int) =
+        adminCoordinator.adminUpdateShopLimits(shop, branchCount, workerCount)
+    fun adminDeleteShopAccount(shop: SupabaseShopAccountDto) = adminCoordinator.adminDeleteShopAccount(shop)
+    fun adminUpdateShopUserRole(user: SupabaseShopUserDto, newRole: String) = adminCoordinator.adminUpdateShopUserRole(user, newRole)
+    fun adminToggleShopUserActive(user: SupabaseShopUserDto, newActive: Boolean) = adminCoordinator.adminToggleShopUserActive(user, newActive)
+    fun adminDeleteShopUser(user: SupabaseShopUserDto) = adminCoordinator.adminDeleteShopUser(user)
+    fun adminDeleteBranchSnapshot(snapshot: SupabaseBranchSnapshotDto) = adminCoordinator.adminDeleteBranchSnapshot(snapshot)
+    fun shareAdminWebPortal(context: Context) = adminCoordinator.shareAdminWebPortal(context)
     fun processDirectSubscriptionPayment(
         provider: String,
         phone: String,
         durationMonths: Int,
         userReference: String? = null,
-        onResult: (com.example.util.PaymentProcessingResult, com.example.util.SubscriptionPriceBreakdown) -> Unit
+        onResult: (PaymentProcessingResult, SubscriptionPriceBreakdown) -> Unit
+    ) = adminCoordinator.processDirectSubscriptionPayment(provider, phone, durationMonths, userReference, onResult)
+
+    // ------------------------------------------------------------------------
+    // BRANCH, STAFF, PRODUCT, PURCHASE, CUSTOMER MUTATIONS
+    // ------------------------------------------------------------------------
+    fun saveBranch(branch: Branch) {
+        viewModelScope.launch {
+            try {
+                repository.saveBranch(branch, actor = currentUser.value)
+                val allBranches = db.branchDao().getAllActiveBranchesList()
+                val allStaff = db.userDao().getAllActiveUsersList()
+                val newPricing = OfflineSubscriptionManager.calculateSubscriptionPrice(
+                    branchCount = allBranches.size.coerceAtLeast(1),
+                    workerCount = allStaff.size.coerceAtLeast(1)
+                )
+                repository.updateShopProfile(
+                    shopProfile.value.copy(
+                        monthlyFeeRwf = newPricing.monthlySubtotal,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+                scheduleAutoBranchSync()
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Ishami '${branch.name}' ryabitswe neza (${newPricing.monthlySubtotal} FRw/mo)."
+                else "Branch '${branch.name}' saved (${newPricing.monthlySubtotal} FRw/mo)."
+                _snackbarMessage.emit(msg)
+            } catch (e: SecurityException) {
+                _snackbarMessage.emit(e.message ?: "Permission denied")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Branch error: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteBranch(branchId: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteBranch(branchId, actor = currentUser.value)
+                val allBranches = db.branchDao().getAllActiveBranchesList()
+                val allStaff = db.userDao().getAllActiveUsersList()
+                val newPricing = OfflineSubscriptionManager.calculateSubscriptionPrice(
+                    branchCount = allBranches.size.coerceAtLeast(1),
+                    workerCount = allStaff.size.coerceAtLeast(1)
+                )
+                repository.updateShopProfile(
+                    shopProfile.value.copy(
+                        monthlyFeeRwf = newPricing.monthlySubtotal,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+                scheduleAutoBranchSync()
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Ishami ryasibwe."
+                else "Branch removed."
+                _snackbarMessage.emit(msg)
+            } catch (e: SecurityException) {
+                _snackbarMessage.emit(e.message ?: "Permission denied")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Delete branch error: ${e.message}")
+            }
+        }
+    }
+
+    fun createStockTransfer(
+        productId: String,
+        fromBranchId: String,
+        fromBranchName: String,
+        toBranchId: String,
+        toBranchName: String,
+        quantity: Double,
+        notes: String = ""
     ) {
         viewModelScope.launch {
-            val currentProf = shopProfile.value
-            val branchCount = branches.value.size.coerceAtLeast(1)
-            val workerCount = allUsers.value.size.coerceAtLeast(1)
-            val breakdown = com.example.util.OfflineSubscriptionManager.calculateSubscriptionPrice(
-                branchCount = branchCount,
-                workerCount = workerCount,
-                durationMonths = durationMonths
-            )
-            val pastRefs = setOfNotNull(currentProf.lastPaymentRef)
-            val result = com.example.util.OfflineSubscriptionManager.processDirectMoMoPayment(
-                shopProfile = currentProf,
-                payerPhone = phone,
-                provider = provider,
-                branchCount = branchCount,
-                workerCount = workerCount,
-                durationMonths = durationMonths,
-                smsTransactionReference = userReference,
-                alreadyUsedRefs = pastRefs
-            )
-
-            if (result.isSuccess) {
-                val currentExpiry = if (currentProf.subscriptionExpiresAt > System.currentTimeMillis())
-                    currentProf.subscriptionExpiresAt
-                    else System.currentTimeMillis()
-                val newExpiry = currentExpiry + (result.planDays.toLong() * 24 * 60 * 60 * 1000)
-
-                val updatedProf = currentProf.copy(
-                    subscriptionStatus = "ACTIVE",
-                    subscriptionExpiresAt = newExpiry,
-                    lastPaymentRef = result.transactionRef,
-                    lastPaymentAmount = result.amountPaid,
-                    lastPaymentDate = result.timestamp,
-                    monthlyFeeRwf = breakdown.monthlySubtotal,
-                    updatedAt = result.timestamp
+            try {
+                val user = currentUser.value
+                val transfer = repository.createStockTransfer(
+                    productId = productId,
+                    fromBranchId = fromBranchId,
+                    fromBranchName = fromBranchName,
+                    toBranchId = toBranchId,
+                    toBranchName = toBranchName,
+                    quantity = quantity,
+                    notes = notes,
+                    transferredBy = user?.name ?: "Store Manager"
                 )
-                repository.updateShopProfile(updatedProf)
-                _snackbarMessage.emit(result.message)
-                syncToCloudNow()
-            } else {
-                _snackbarMessage.emit(result.message)
+                BeBossNotificationManager.sendStockTransferNotification(getApplication(), transfer)
+                scheduleAutoBranchSync()
+
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Kwohereza ibicuruzwa (${quantity.toInt()} ${transfer.productName}) muri $toBranchName byakozwe neza!"
+                else "Stock transfer of ${quantity.toInt()} ${transfer.productName} to $toBranchName recorded!"
+                _snackbarMessage.emit(msg)
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Transfer error: ${e.message}")
             }
-            onResult(result, breakdown)
         }
     }
 
-    fun grantEmergencyGracePeriod() {
+    fun deleteStockTransfer(id: String) {
         viewModelScope.launch {
-            val currentProf = shopProfile.value
-            val newExpiry = System.currentTimeMillis() + (3L * 24 * 60 * 60 * 1000)
-            val updatedProf = currentProf.copy(
-                subscriptionStatus = "ACTIVE",
-                subscriptionExpiresAt = newExpiry,
-                lastPaymentRef = "EMERGENCY-GRACE-3D",
-                updatedAt = System.currentTimeMillis()
-            )
-            repository.updateShopProfile(updatedProf)
-            _snackbarMessage.emit("3-Day Emergency Grace Period activated!")
-            syncToCloudNow()
+            repository.deleteStockTransfer(id)
+            scheduleAutoBranchSync()
+            _snackbarMessage.emit("Stock transfer log removed.")
         }
     }
 
-    // ------------------------------------------------------------------------
-    // NAVIGATION
-    // ------------------------------------------------------------------------
-    fun navigateTo(screen: AppScreen) {
-        _currentScreen.value = screen
-    }
-
-    // ------------------------------------------------------------------------
-    // POS & CART
-    // ------------------------------------------------------------------------
-    fun addToCart(product: Product, quantity: Double = 1.0) {
-        val current = _cartState.value.items.toMutableList()
-        val index = current.indexOfFirst { it.product.id == product.id }
-        if (index >= 0) {
-            val existing = current[index]
-            val newQty = existing.quantity + quantity
-            current[index] = existing.copy(quantity = newQty)
-        } else {
-            current.add(CartItem(product = product, quantity = quantity))
-        }
-        _cartState.value = _cartState.value.copy(items = current)
-    }
-
-    fun updateCartItemQuantity(productId: String, newQuantity: Double) {
-        val current = _cartState.value.items.toMutableList()
-        val index = current.indexOfFirst { it.product.id == productId }
-        if (index >= 0) {
-            if (newQuantity <= 0) {
-                current.removeAt(index)
-            } else {
-                current[index] = current[index].copy(quantity = newQuantity)
-            }
-            _cartState.value = _cartState.value.copy(items = current)
-        }
-    }
-
-    fun removeCartItem(productId: String) {
-        val current = _cartState.value.items.filterNot { it.product.id == productId }
-        _cartState.value = _cartState.value.copy(items = current)
-    }
-
-    fun clearCart() {
-        _cartState.value = CartState()
-    }
-
-    fun setCartCustomer(customer: Customer?) {
-        _cartState.value = _cartState.value.copy(
-            selectedCustomerId = customer?.id,
-            selectedCustomerName = customer?.name ?: "Walk-in Customer"
-        )
-    }
-
-    fun setCartPaymentMethod(method: String) {
-        _cartState.value = _cartState.value.copy(paymentMethod = method)
-    }
-
-    fun setCartDiscount(discount: Double) {
-        _cartState.value = _cartState.value.copy(discountAmount = discount.coerceAtLeast(0.0))
-    }
-
-    fun setCartAmountPaidInput(input: String) {
-        _cartState.value = _cartState.value.copy(amountPaidInput = input)
-    }
-
-    fun setCartNotes(notes: String) {
-        _cartState.value = _cartState.value.copy(notes = notes)
-    }
-
-    fun checkoutSale() {
-        val state = _cartState.value
-        if (state.items.isEmpty()) return
-
+    fun saveUser(user: User) {
         viewModelScope.launch {
             try {
-                val user = _currentUser.value
-                val branch = branches.value.firstOrNull { it.id == _selectedBranchId.value }
-                    ?: branches.value.firstOrNull { it.isMainBranch }
-                    ?: com.example.data.model.Branch()
-
-                val sale = repository.processSale(
-                    items = state.items,
-                    customerId = state.selectedCustomerId,
-                    customerName = state.selectedCustomerName,
-                    discountAmount = state.discountAmount,
-                    paymentMethod = state.paymentMethod,
-                    amountPaid = state.effectiveAmountPaid,
-                    notes = state.notes,
-                    branchId = branch.id,
-                    branchName = branch.name,
-                    cashierId = user?.id ?: "",
-                    cashierName = user?.name ?: "Shop Operator"
+                repository.saveUser(user, actor = currentUser.value)
+                val allBranches = db.branchDao().getAllActiveBranchesList()
+                val allStaff = db.userDao().getAllActiveUsersList()
+                val newPricing = OfflineSubscriptionManager.calculateSubscriptionPrice(
+                    branchCount = allBranches.size.coerceAtLeast(1),
+                    workerCount = allStaff.size.coerceAtLeast(1)
                 )
-                val saleWithItems = repository.getSaleWithItems(sale.id)
-                _activeReceiptSale.value = saleWithItems
-                clearCart()
-
-                // Real system notification triggers
-                BeBossNotificationManager.sendSaleCompletedNotification(getApplication(), sale, shopProfile.value)
-
-                // Check for low stock items and notify
-                val currentLowStock = repository.getProductById(state.items.firstOrNull()?.product?.id ?: "")
-                if (currentLowStock != null && currentLowStock.isLowStock) {
-                    BeBossNotificationManager.sendLowStockNotification(
-                        getApplication(),
-                        currentLowStock.name,
-                        currentLowStock.quantityInStock,
-                        currentLowStock.lowStockThreshold,
-                        currentLowStock.unit
+                repository.updateShopProfile(
+                    shopProfile.value.copy(
+                        monthlyFeeRwf = newPricing.monthlySubtotal,
+                        updatedAt = System.currentTimeMillis()
                     )
-                }
-
-                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                    "Igurisha ryakozwe neza! Inyemezabuguzi irasohotse."
-                    else "Sale recorded successfully! Receipt ready."
-                _snackbarMessage.emit(msg)
+                )
+                repository.recordLocalAudit(
+                    actorName = currentUser.value?.name ?: "Owner",
+                    actorRole = currentUser.value?.role?.name ?: "OWNER",
+                    action = "STAFF_SAVED",
+                    targetId = user.username,
+                    details = "Saved staff member '${user.name}' (${user.role.name})"
+                )
                 scheduleAutoBranchSync()
+                _snackbarMessage.emit("Staff member '${user.name}' saved (${newPricing.monthlySubtotal} FRw/mo total plan).")
+            } catch (e: SecurityException) {
+                _snackbarMessage.emit(e.message ?: "Permission denied")
             } catch (e: Exception) {
-                _snackbarMessage.emit("Error processing sale: ${e.message}")
+                _snackbarMessage.emit("Staff save error: ${e.message}")
             }
         }
     }
 
-    fun performQuickCustomSale(description: String, amount: Double, paymentMethod: String, isDirectCheckout: Boolean = true) {
-        if (amount <= 0) return
-        val itemName = description.trim().ifBlank { "Custom Quick Item" }
-        val branch = branches.value.firstOrNull { it.id == _selectedBranchId.value }
-            ?: branches.value.firstOrNull { it.isMainBranch }
-            ?: com.example.data.model.Branch()
-        val user = _currentUser.value
-
-        val customProduct = Product(
-            id = "custom_${System.currentTimeMillis()}",
-            name = itemName,
-            category = "Quick Sale",
-            costPrice = amount * 0.7, // estimated margin for uncataloged item
-            sellingPrice = amount,
-            quantityInStock = 999.0,
-            unit = "item",
-            branchId = branch.id
-        )
-
-        if (!isDirectCheckout) {
-            addToCart(customProduct, 1.0)
-            viewModelScope.launch {
-                _snackbarMessage.emit("Added '$itemName' (${amount.toInt()} RWF) to POS Cart.")
-            }
-            return
-        }
-
+    fun deleteUser(userId: String) {
         viewModelScope.launch {
             try {
-                val sale = repository.processSale(
-                    items = listOf(CartItem(product = customProduct, quantity = 1.0, customPrice = amount)),
-                    customerId = null,
-                    customerName = "Quick Cash Customer",
-                    discountAmount = 0.0,
-                    paymentMethod = paymentMethod,
-                    amountPaid = amount,
-                    notes = "Quick POS Sale: $itemName",
-                    branchId = branch.id,
-                    branchName = branch.name,
-                    cashierId = user?.id ?: "",
-                    cashierName = user?.name ?: "Shop Operator"
-                )
-                val saleWithItems = repository.getSaleWithItems(sale.id)
-                _activeReceiptSale.value = saleWithItems
-                scheduleAutoBranchSync()
-                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                    "Igurisha ry'ako kanya (${amount.toInt()} FRw) ryakozwe neza!"
-                    else "Quick sale (${amount.toInt()} RWF) completed! Receipt ready."
-                _snackbarMessage.emit(msg)
-            } catch (e: Exception) {
-                _snackbarMessage.emit("Quick sale error: ${e.message}")
-            }
-        }
-    }
-
-    fun openLastReceipt() {
-        val last = allSales.value.firstOrNull()
-        if (last != null) {
-            openReceipt(last.id)
-        } else {
-            viewModelScope.launch {
-                _snackbarMessage.emit("No recent sales to display yet.")
-            }
-        }
-    }
-
-    fun shareDailyWhatsAppSummary(context: Context) {
-        val shop = shopProfile.value
-        val summary = todaySummary.value
-        val lowStock = lowStockProducts.value
-        val timeStr = java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
-
-        val text = buildString {
-            append("*${shop.shopName.ifBlank { "BeBoss Store" }} - Daily Business Report*\n")
-            append("$timeStr\n")
-            append("━━━━━━━━━━━━━━━━━━━━\n")
-            append("*Today's Revenue:* ${summary.totalRevenue.toInt()} ${shop.currencySymbol}\n")
-            append("*Net Estimated Profit:* ${summary.netProfit.toInt()} ${shop.currencySymbol}\n")
-            append("*Transactions Completed:* ${summary.totalSalesCount}\n")
-            append("*Items Sold:* ${summary.totalItemsSold.toInt()}\n")
-            append("*Average Basket Value:* ${summary.averageOrderValue.toInt()} ${shop.currencySymbol}\n")
-            append("━━━━━━━━━━━━━━━━━━━━\n")
-            if (lowStock.isNotEmpty()) {
-                append("*Low Stock Alert (${lowStock.size} items):*\n")
-                lowStock.take(5).forEach { p ->
-                    append("• ${p.name}: ${p.quantityInStock.toInt()} ${p.unit} left\n")
+                if (currentUser.value?.id == userId) {
+                    _snackbarMessage.emit("Cannot delete the currently active account.")
+                    return@launch
                 }
-            } else {
-                append("All product stocks are healthy.\n")
+                repository.deleteUser(userId, actor = currentUser.value)
+                val allBranches = db.branchDao().getAllActiveBranchesList()
+                val allStaff = db.userDao().getAllActiveUsersList()
+                val newPricing = OfflineSubscriptionManager.calculateSubscriptionPrice(
+                    branchCount = allBranches.size.coerceAtLeast(1),
+                    workerCount = allStaff.size.coerceAtLeast(1)
+                )
+                repository.updateShopProfile(
+                    shopProfile.value.copy(
+                        monthlyFeeRwf = newPricing.monthlySubtotal,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+                repository.recordLocalAudit(
+                    actorName = currentUser.value?.name ?: "Owner",
+                    actorRole = currentUser.value?.role?.name ?: "OWNER",
+                    action = "STAFF_REMOVED",
+                    targetId = userId,
+                    details = "Removed staff account"
+                )
+                scheduleAutoBranchSync()
+                _snackbarMessage.emit("Staff account removed.")
+            } catch (e: SecurityException) {
+                _snackbarMessage.emit(e.message ?: "Permission denied")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Staff delete error: ${e.message}")
             }
-            append("━━━━━━━━━━━━━━━━━━━━\n")
-            append("_Generated with BeBoss POS_")
         }
-
-        val sendIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, text)
-        }
-        val chooser = Intent.createChooser(sendIntent, "Share Daily Report")
-        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(chooser)
     }
 
-    // ------------------------------------------------------------------------
-    // INVENTORY / PRODUCTS
-    // ------------------------------------------------------------------------
     fun setProductSearchQuery(query: String) {
         _productSearchQuery.value = query
     }
@@ -1585,40 +789,69 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
 
     fun saveProduct(product: Product) {
         viewModelScope.launch {
-            repository.saveProduct(product)
-            scheduleAutoBranchSync()
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                "Igicuruzwa '${product.name}' cyabitswe neza."
+            try {
+                repository.saveProduct(product, actor = currentUser.value)
+                scheduleAutoBranchSync()
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Igicuruzwa '${product.name}' cyabitswe neza."
                 else "Product '${product.name}' saved."
-            _snackbarMessage.emit(msg)
+                _snackbarMessage.emit(msg)
+            } catch (e: SecurityException) {
+                _snackbarMessage.emit(e.message ?: "Permission denied")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Product save error: ${e.message}")
+            }
         }
     }
 
     fun adjustStock(productId: String, delta: Double, reason: String) {
         viewModelScope.launch {
-            repository.adjustStock(productId, delta, reason)
-            scheduleAutoBranchSync()
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                "Ingano y'ububiko yahinduwe (${if (delta > 0) "+$delta" else "$delta"})."
+            try {
+                repository.adjustStock(productId, delta, reason, actor = currentUser.value)
+                scheduleAutoBranchSync()
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Ingano y'ububiko yahinduwe (${if (delta > 0) "+$delta" else "$delta"})."
                 else "Stock adjusted (${if (delta > 0) "+$delta" else "$delta"})."
-            _snackbarMessage.emit(msg)
+                _snackbarMessage.emit(msg)
+            } catch (e: SecurityException) {
+                _snackbarMessage.emit(e.message ?: "Permission denied")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Stock adjust error: ${e.message}")
+            }
         }
     }
 
     fun deleteProduct(productId: String) {
         viewModelScope.launch {
-            repository.deleteProduct(productId)
-            scheduleAutoBranchSync()
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                "Igicuruzwa cyasibwe."
+            try {
+                repository.deleteProduct(productId, actor = currentUser.value)
+                scheduleAutoBranchSync()
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Igicuruzwa cyasibwe."
                 else "Product deleted."
-            _snackbarMessage.emit(msg)
+                _snackbarMessage.emit(msg)
+            } catch (e: SecurityException) {
+                _snackbarMessage.emit(e.message ?: "Permission denied")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Delete product error: ${e.message}")
+            }
         }
     }
 
-    // ------------------------------------------------------------------------
-    // PURCHASES & SUPPLIER GOODS INFLOW (EXCEL SPREADSHEET LEDGER)
-    // ------------------------------------------------------------------------
+    fun restoreDeletedProduct(productId: String) {
+        viewModelScope.launch {
+            try {
+                repository.restoreProduct(productId, actor = currentUser.value)
+                scheduleAutoBranchSync()
+                _snackbarMessage.emit("Product restored.")
+            } catch (e: SecurityException) {
+                _snackbarMessage.emit(e.message ?: "Permission denied")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Restore error: ${e.message}")
+            }
+        }
+    }
+
     fun recordPurchaseOrder(
         productId: String,
         quantity: Double,
@@ -1631,10 +864,10 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         notes: String = ""
     ) {
         viewModelScope.launch {
-            val user = _currentUser.value
+            val user = currentUser.value
             val branch = branches.value.firstOrNull { it.id == _selectedBranchId.value }
                 ?: branches.value.firstOrNull { it.isMainBranch }
-                ?: com.example.data.model.Branch()
+                ?: Branch()
 
             val purchase = repository.recordPurchaseOrder(
                 productId = productId,
@@ -1655,7 +888,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
 
             val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
                 "Kugura ibicuruzwa (${purchase.quantityPurchased.toInt()} ${purchase.productName}) byanditswe neza muri Excel Ledger!"
-                else "Stock In / Purchase order for ${purchase.quantityPurchased.toInt()} ${purchase.productName} recorded successfully in Excel Ledger!"
+            else "Stock In / Purchase order for ${purchase.quantityPurchased.toInt()} ${purchase.productName} recorded successfully in Excel Ledger!"
             _snackbarMessage.emit(msg)
         }
     }
@@ -1667,10 +900,10 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         supplierName: String
     ) {
         viewModelScope.launch {
-            val user = _currentUser.value
+            val user = currentUser.value
             val branch = branches.value.firstOrNull { it.id == _selectedBranchId.value }
                 ?: branches.value.firstOrNull { it.isMainBranch }
-                ?: com.example.data.model.Branch()
+                ?: Branch()
 
             repository.recordPurchaseOrder(
                 productId = product.id,
@@ -1691,7 +924,7 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
 
             val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
                 "${product.name} yongerewe mu bubiko (+${quantityToAdd.toInt()}) kandi yongerewe muri POS Cart!"
-                else "Restocked ${product.name} (+${quantityToAdd.toInt()} units) and added to POS cart!"
+            else "Restocked ${product.name} (+${quantityToAdd.toInt()} units) and added to POS cart!"
             _snackbarMessage.emit(msg)
         }
     }
@@ -1702,26 +935,29 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
             scheduleAutoBranchSync()
             val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
                 "Inyandiko yo kugura yasibwe."
-                else "Purchase order removed from ledger."
+            else "Purchase order removed from ledger."
             _snackbarMessage.emit(msg)
         }
     }
 
-    // ------------------------------------------------------------------------
-    // CUSTOMERS & DEBTS
-    // ------------------------------------------------------------------------
     fun setCustomerSearchQuery(query: String) {
         _customerSearchQuery.value = query
     }
 
     fun saveCustomer(customer: Customer) {
         viewModelScope.launch {
-            repository.saveCustomer(customer)
-            scheduleAutoBranchSync()
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                "Umukiriya '${customer.name}' yanditswe neza."
+            try {
+                repository.saveCustomer(customer, actor = currentUser.value)
+                scheduleAutoBranchSync()
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Umukiriya '${customer.name}' yanditswe neza."
                 else "Customer '${customer.name}' saved."
-            _snackbarMessage.emit(msg)
+                _snackbarMessage.emit(msg)
+            } catch (e: SecurityException) {
+                _snackbarMessage.emit(e.message ?: "Permission denied")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Customer save error: ${e.message}")
+            }
         }
     }
 
@@ -1732,55 +968,120 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         notes: String = ""
     ) {
         viewModelScope.launch {
-            val user = _currentUser.value
-            val branch = branches.value.firstOrNull { it.id == _selectedBranchId.value }
-                ?: branches.value.firstOrNull { it.isMainBranch }
-                ?: com.example.data.model.Branch()
+            try {
+                val user = currentUser.value
+                val branch = branches.value.firstOrNull { it.id == _selectedBranchId.value }
+                    ?: branches.value.firstOrNull { it.isMainBranch }
+                    ?: Branch()
 
-            val payment = CustomerPayment(
-                customerId = customerId,
-                customerName = customers.value.firstOrNull { it.id == customerId }?.name ?: "Customer",
-                amount = amount,
-                paymentMethod = paymentMethod,
-                notes = notes,
-                recordedBy = user?.name ?: "Shop Operator",
-                branchId = branch.id,
-                branchName = branch.name
-            )
+                val payment = CustomerPayment(
+                    customerId = customerId,
+                    customerName = customers.value.firstOrNull { it.id == customerId }?.name ?: "Customer",
+                    amount = amount,
+                    paymentMethod = paymentMethod,
+                    notes = notes,
+                    recordedBy = user?.name ?: "Shop Operator",
+                    branchId = branch.id,
+                    branchName = branch.name
+                )
 
-            val updatedPayment = repository.recordCustomerPayment(payment)
-            val symbol = shopProfile.value.currencySymbol
+                val updatedPayment = repository.recordCustomerPayment(payment)
+                val symbol = shopProfile.value.currencySymbol
 
-            // Real notification trigger
-            BeBossNotificationManager.sendDebtPaymentNotification(
-                context = getApplication(),
-                customerName = payment.customerName,
-                amountPaid = amount,
-                remainingDebt = updatedPayment.remainingDebt,
-                currencySymbol = symbol
-            )
-            scheduleAutoBranchSync()
+                BeBossNotificationManager.sendDebtPaymentNotification(
+                    context = getApplication(),
+                    customerName = payment.customerName,
+                    amountPaid = amount,
+                    remainingDebt = updatedPayment.remainingDebt,
+                    currencySymbol = symbol
+                )
+                scheduleAutoBranchSync()
 
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) {
-                if (updatedPayment.remainingDebt <= 0) {
-                    "Kwishyura ${amount.toInt()} $symbol byakiriwe! UMWENDA WARANGIYE NEZA (0 $symbol)!"
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) {
+                    if (updatedPayment.remainingDebt <= 0) {
+                        "Kwishyura ${amount.toInt()} $symbol byakiriwe! UMWENDA WARANGIYE NEZA (0 $symbol)!"
+                    } else {
+                        "Kwishyura ${amount.toInt()} $symbol byakiriwe. Hasigaye ${updatedPayment.remainingDebt.toInt()} $symbol."
+                    }
                 } else {
-                    "Kwishyura ${amount.toInt()} $symbol byakiriwe. Hasigaye ${updatedPayment.remainingDebt.toInt()} $symbol."
+                    if (updatedPayment.remainingDebt <= 0) {
+                        "Payment of ${amount.toInt()} $symbol received! DEBT FULLY CLEARED (0 $symbol)!"
+                    } else {
+                        "Payment of ${amount.toInt()} $symbol received. Remaining debt: ${updatedPayment.remainingDebt.toInt()} $symbol."
+                    }
                 }
-            } else {
-                if (updatedPayment.remainingDebt <= 0) {
-                    "Payment of ${amount.toInt()} $symbol received! DEBT FULLY CLEARED (0 $symbol)!"
-                } else {
-                    "Payment of ${amount.toInt()} $symbol received. Remaining debt: ${updatedPayment.remainingDebt.toInt()} $symbol."
-                }
+                _snackbarMessage.emit(msg)
+            } catch (e: SecurityException) {
+                _snackbarMessage.emit(e.message ?: "Permission denied")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Debt payment error: ${e.message}")
             }
+        }
+    }
+
+    fun deleteCustomer(customerId: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteCustomer(customerId, actor = currentUser.value)
+                scheduleAutoBranchSync()
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Umukiriya yasibwe."
+                else "Customer removed."
+                _snackbarMessage.emit(msg)
+            } catch (e: SecurityException) {
+                _snackbarMessage.emit(e.message ?: "Permission denied")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Customer remove error: ${e.message}")
+            }
+        }
+    }
+
+    fun restoreDeletedCustomer(customerId: String) {
+        viewModelScope.launch {
+            try {
+                repository.restoreCustomer(customerId, actor = currentUser.value)
+                scheduleAutoBranchSync()
+                _snackbarMessage.emit("Customer restored.")
+            } catch (e: SecurityException) {
+                _snackbarMessage.emit(e.message ?: "Permission denied")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Restore error: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteSale(saleId: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteSale(saleId, actor = currentUser.value)
+                refreshDatabaseStats()
+                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                    "Ibyagurishijwe byasibwe, ububiko bwasubijweho."
+                else "Sale transaction deleted and stock restored."
+                _snackbarMessage.emit(msg)
+            } catch (e: SecurityException) {
+                _snackbarMessage.emit(e.message ?: "Permission denied")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Failed to delete sale: ${e.message}")
+            }
+        }
+    }
+
+    fun setAnalyticsPeriod(period: AnalyticsPeriod) {
+        _selectedAnalyticsPeriod.value = period
+    }
+
+    fun updateShopProfile(profile: ShopProfile) {
+        viewModelScope.launch {
+            repository.updateShopProfile(profile)
+            scheduleAutoBranchSync()
+            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
+                "Amakuru y'ububiko yavuguruwe."
+            else "Shop profile updated."
             _snackbarMessage.emit(msg)
         }
     }
 
-    /**
-     * Diagnostic testing helper to demonstrate real push notifications across all enterprise channels.
-     */
     fun testNotification(channelType: String) {
         val app = getApplication<Application>()
         val shop = shopProfile.value
@@ -1833,222 +1134,33 @@ class BeBossViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun deleteCustomer(customerId: String) {
-        viewModelScope.launch {
-            repository.deleteCustomer(customerId)
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA) 
-                "Umukiriya yasibwe." 
-                else "Customer removed."
-            _snackbarMessage.emit(msg)
-        }
-    }
-
-    fun deleteSale(saleId: String) {
-        viewModelScope.launch {
-            try {
-                repository.deleteSale(saleId)
-                refreshDatabaseStats()
-                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                    "Ibyagurishijwe byasibwe, ububiko bwasubijweho."
-                    else "Sale transaction deleted and stock restored."
-                _snackbarMessage.emit(msg)
-            } catch (e: Exception) {
-                _snackbarMessage.emit("Failed to delete sale: ${e.message}")
-            }
-        }
-    }
-
     // ------------------------------------------------------------------------
-    // ANALYTICS & REPORTS
+    // DATABASE ENGINE DELEGATION
     // ------------------------------------------------------------------------
-    fun setAnalyticsPeriod(period: AnalyticsPeriod) {
-        _selectedAnalyticsPeriod.value = period
+    fun refreshDatabaseStats(context: Context? = null) = dbCoordinator.refreshDatabaseStats(context)
+    fun optimizeDatabase(context: Context? = null) = dbCoordinator.optimizeDatabase(context)
+    fun verifyDatabaseIntegrity() = dbCoordinator.verifyDatabaseIntegrity()
+    fun clearTransactionalDataOnly(context: Context? = null) = dbCoordinator.clearTransactionalDataOnly(context)
+    fun clearAllProducts(context: Context? = null) = dbCoordinator.clearAllProducts(context) {
+        posCoordinator.clearCart()
+        _productSearchQuery.value = ""
     }
 
-    fun performSync() {
-        syncToCloudNow()
+    fun clearAllCustomers(context: Context? = null) = dbCoordinator.clearAllCustomers(context) {
+        _customerSearchQuery.value = ""
     }
 
-    fun updateShopProfile(profile: ShopProfile) {
-        viewModelScope.launch {
-            repository.updateShopProfile(profile)
-            scheduleAutoBranchSync()
-            val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                "Amakuru y'ububiko yavuguruwe."
-                else "Shop profile updated."
-            _snackbarMessage.emit(msg)
-        }
+    fun resetWholeApp(context: Context? = null) = dbCoordinator.resetWholeApp(context) {
+        _productSearchQuery.value = ""
+        _customerSearchQuery.value = ""
     }
 
-    fun openReceipt(saleId: String) {
-        viewModelScope.launch {
-            val s = repository.getSaleWithItems(saleId)
-            _activeReceiptSale.value = s
-        }
-    }
-
-    fun closeReceipt() {
-        _activeReceiptSale.value = null
-    }
-
-    fun importShopPackage(summary: ShopImportSummary) {
-        viewModelScope.launch {
-            try {
-                repository.importShopDataPackage(summary)
-                _snackbarMessage.emit("Shop data package successfully restored!")
-            } catch (e: Exception) {
-                _snackbarMessage.emit("Error restoring shop data: ${e.message}")
-            }
-        }
-    }
-
-    fun seedSampleData() {
-        viewModelScope.launch {
-            try {
-                repository.seedSampleShopData()
-                _snackbarMessage.emit("Sample demo data loaded successfully!")
-            } catch (e: Exception) {
-                _snackbarMessage.emit("Failed to load sample data: ${e.message}")
-            }
-        }
-    }
-
-    fun seedSampleCatalog() {
-        seedSampleData()
-    }
-
-    // ------------------------------------------------------------------------
-    // SQLITE DATABASE ENGINE STATE & OPERATIONS
-    // ------------------------------------------------------------------------
-    private val _databaseStats = MutableStateFlow<com.example.data.model.DatabaseEngineStats?>(null)
-    val databaseStats: StateFlow<com.example.data.model.DatabaseEngineStats?> = _databaseStats.asStateFlow()
-
-    private val _databaseMaintenanceResult = MutableStateFlow<com.example.data.model.DatabaseMaintenanceResult?>(null)
-    val databaseMaintenanceResult: StateFlow<com.example.data.model.DatabaseMaintenanceResult?> = _databaseMaintenanceResult.asStateFlow()
-
-    private val _isOptimizingDb = MutableStateFlow(false)
-    val isOptimizingDb: StateFlow<Boolean> = _isOptimizingDb.asStateFlow()
-
-    fun refreshDatabaseStats(context: android.content.Context? = null) {
-        val targetCtx = context ?: getApplication<Application>()
-        viewModelScope.launch {
-            try {
-                val stats = repository.getDatabaseStats(targetCtx)
-                _databaseStats.value = stats
-            } catch (e: Exception) {
-                android.util.Log.e("BeBossViewModel", "Failed to get database stats: ${e.message}")
-            }
-        }
-    }
-
-    fun optimizeDatabase(context: android.content.Context? = null) {
-        val targetCtx = context ?: getApplication<Application>()
-        viewModelScope.launch {
-            _isOptimizingDb.value = true
-            try {
-                val result = repository.optimizeDatabase(targetCtx)
-                _databaseMaintenanceResult.value = result
-                result.stats?.let { _databaseStats.value = it }
-                _snackbarMessage.emit(result.message)
-            } catch (e: Exception) {
-                _snackbarMessage.emit("Optimization failed: ${e.message}")
-            } finally {
-                _isOptimizingDb.value = false
-            }
-        }
-    }
-
-    fun verifyDatabaseIntegrity() {
-        viewModelScope.launch {
-            _isOptimizingDb.value = true
-            try {
-                val result = repository.verifyDatabaseIntegrity()
-                _databaseMaintenanceResult.value = result
-                _snackbarMessage.emit(result.message)
-            } catch (e: Exception) {
-                _snackbarMessage.emit("Integrity check failed: ${e.message}")
-            } finally {
-                _isOptimizingDb.value = false
-            }
-        }
-    }
-
-    fun clearTransactionalDataOnly(context: android.content.Context? = null) {
-        val targetCtx = context ?: getApplication<Application>()
-        viewModelScope.launch {
-            try {
-                repository.clearTransactionalDataOnly()
-                clearCart()
-                closeReceipt()
-                refreshDatabaseStats(targetCtx)
-                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                    "Amateka yose yo kugurisha yasibwe! Ibicuruzwa n'abakiriya byagumyeho."
-                    else "All sales & transaction history reset! Products & customers preserved."
-                _snackbarMessage.emit(msg)
-            } catch (e: Exception) {
-                _snackbarMessage.emit("Failed to reset transactions: ${e.message}")
-            }
-        }
-    }
-
-    fun clearAllProducts(context: android.content.Context? = null) {
-        val targetCtx = context ?: getApplication<Application>()
-        viewModelScope.launch {
-            try {
-                repository.clearAllProducts()
-                clearCart()
-                _productSearchQuery.value = ""
-                refreshDatabaseStats(targetCtx)
-                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                    "Ibicuruzwa byose byasibwe mu bubiko!"
-                    else "All products and inventory stock wiped from database!"
-                _snackbarMessage.emit(msg)
-            } catch (e: Exception) {
-                _snackbarMessage.emit("Failed to clear products: ${e.message}")
-            }
-        }
-    }
-
-    fun clearAllCustomers(context: android.content.Context? = null) {
-        val targetCtx = context ?: getApplication<Application>()
-        viewModelScope.launch {
-            try {
-                repository.clearAllCustomers()
-                _customerSearchQuery.value = ""
-                refreshDatabaseStats(targetCtx)
-                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                    "Abakiriya bose n'imyenda byasibwe!"
-                    else "All customers and credit debt records cleared!"
-                _snackbarMessage.emit(msg)
-            } catch (e: Exception) {
-                _snackbarMessage.emit("Failed to clear customers: ${e.message}")
-            }
-        }
-    }
-
-    fun resetWholeApp(context: android.content.Context? = null) {
-        val targetCtx = context ?: getApplication<Application>()
-        viewModelScope.launch {
-            try {
-                repository.resetWholeApp(targetCtx)
-                clearCart()
-                closeReceipt()
-                _productSearchQuery.value = ""
-                _customerSearchQuery.value = ""
-                refreshDatabaseStats(targetCtx)
-                val msg = if (_currentLanguage.value == AppLanguage.KINYARWANDA)
-                    "Porogaramu yose yasubijwe ku ntangiriro (Factory Reset)! Amakuru yose yasibwe."
-                    else "Whole app factory reset complete! All products, customers & transactions wiped clean."
-                _snackbarMessage.emit(msg)
-            } catch (e: Exception) {
-                _snackbarMessage.emit("Failed to reset app: ${e.message}")
-            }
-        }
-    }
+    fun seedSampleData() = dbCoordinator.seedSampleData()
+    fun seedSampleCatalog() = dbCoordinator.seedSampleData()
 
     override fun onCleared() {
         super.onCleared()
-        localNetworkSyncServer.stopDiscovery()
-        localNetworkSyncServer.stopServer()
+        idleLockJob?.cancel()
+        syncCoordinator.cleanup()
     }
 }

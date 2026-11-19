@@ -16,6 +16,12 @@ interface ProductDao {
     @Query("SELECT * FROM products WHERE isDeleted = 0 ORDER BY name ASC")
     suspend fun getAllProductsList(): List<Product>
 
+    @Query("SELECT * FROM products WHERE isDeleted = 0 ORDER BY name ASC LIMIT :limit OFFSET :offset")
+    suspend fun getProductsPaged(limit: Int, offset: Int): List<Product>
+
+    @Query("UPDATE products SET isDeleted = 0, updatedAt = :updatedAt WHERE id = :productId")
+    suspend fun restoreProduct(productId: String, updatedAt: Long = System.currentTimeMillis())
+
     @Query("SELECT * FROM products WHERE isDeleted = 0 AND (name LIKE '%' || :query || '%' OR category LIKE '%' || :query || '%' OR barcode LIKE '%' || :query || '%') ORDER BY name ASC")
     fun searchProducts(query: String): Flow<List<Product>>
 

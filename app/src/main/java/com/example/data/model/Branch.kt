@@ -17,5 +17,8 @@ data class Branch(
     val isActive: Boolean = true,
     val colorHex: String = "#FF6B1A",
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val syncVersion: Long = 1L,
+    val hlcTimestamp: Long = 0L,
+    val lastModifiedDeviceId: String = ""
 )
